@@ -1980,8 +1980,17 @@ static void applyNativeViewAccessibility(NativeView &view) {
     finishCom(uninitialize);
 }
 
+/* Relayout accounting, reported on the `wmsize` line. A resize step is
+ * dominated by this function, and "dominated" splits two ways that call for
+ * opposite fixes: too many moves (batch them) or too costly a move (stop
+ * forcing the repaint). Always counted — two increments are cheaper than
+ * branching on the profiler — and only ever read while it is on. */
+static unsigned g_frame_apply_calls = 0;
+static unsigned g_frame_apply_moves = 0;
+
 static void applyNativeViewFrame(Host *host, NativeView &view) {
     if (!view.hwnd) return;
+    g_frame_apply_calls++;
     const double scale = nativeViewFrameScale(host, view);
     RECT frame = nativeViewPhysicalFrame(host, view, scale);
     /* An unchanged frame must not repaint. MoveWindow(..., TRUE)
@@ -1997,6 +2006,7 @@ static void applyNativeViewFrame(Host *host, NativeView &view) {
             current.right - current.left == frame.right - frame.left &&
             current.bottom - current.top == frame.bottom - frame.top) return;
     }
+    g_frame_apply_moves++;
     MoveWindow(view.hwnd, frame.left, frame.top, frame.right - frame.left, frame.bottom - frame.top, TRUE);
 }
 
@@ -2182,6 +2192,10 @@ constexpr uint64_t kGpuOccludedHeartbeatNs = 1000000000ull;
  * (kGpuFrameTimerId, the placeholder pump, is declared beside
  * kFrameTimerId near the top — the view-state show path arms it before
  * this section.) */
+/* Defined in gpu_surface_renderer.cpp; see the seam comment there. */
+extern "C" void nativeSdkGpuProfileLine(const char *text);
+extern "C" int nativeSdkGpuProfileActive(void);
+
 static uint64_t gpuTimestampNs() {
     static LARGE_INTEGER frequency = {};
     if (frequency.QuadPart == 0) QueryPerformanceFrequency(&frequency);
@@ -6039,13 +6053,27 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
                 }
             }
             return 0;
-        case WM_SIZE:
+        case WM_SIZE: {
+            /* Resize-step accounting. SetWindowPos does not return until
+             * this case does, so this span IS the step the user feels;
+             * `runtime_us` is the synchronous callback into the runtime
+             * (shell relayout, state persistence, frame planning, and
+             * every nested child WM_SIZE those provoke), which is the
+             * part worth attributing separately from the host's own work. */
+            const bool profile_step = nativeSdkGpuProfileActive() != 0;
+            const uint64_t step_started_ns = profile_step ? gpuTimestampNs() : 0;
+            uint64_t runtime_ns = 0;
+            uint64_t webview_ns = 0;
+            unsigned rearmed = 0;
+            g_frame_apply_calls = 0;
+            g_frame_apply_moves = 0;
             if (host) {
                 for (auto &entry : host->windows) {
                     if (entry.second.hwnd == hwnd) {
 #if NATIVE_SDK_HAS_WEBVIEW2
                         auto main = host->webviews.find(webViewKey(entry.first, "main"));
                         if (main != host->webviews.end() && !main->second.frame_explicit) {
+                            const uint64_t webview_started = profile_step ? gpuTimestampNs() : 0;
                             RECT rect = {};
                             GetClientRect(hwnd, &rect);
                             main->second.x = 0;
@@ -6053,9 +6081,12 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
                             main->second.width = rect.right > rect.left ? (double)(rect.right - rect.left) : entry.second.width;
                             main->second.height = rect.bottom > rect.top ? (double)(rect.bottom - rect.top) : entry.second.height;
                             applyWebViewFrame(main->second);
+                            if (profile_step) webview_ns += gpuTimestampNs() - webview_started;
                         }
 #endif
+                        const uint64_t runtime_started = profile_step ? gpuTimestampNs() : 0;
                         emit(host, entry.second, kResize);
+                        if (profile_step) runtime_ns += gpuTimestampNs() - runtime_started;
                     }
                 }
                 /* Restore from minimize returns full cadence without
@@ -6084,10 +6115,26 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
                         if (surface.gpu_emit_pace_ns <= gpuSurfaceFrameIntervalNs(surface)) continue;
                         cancelGpuSurfaceFrameEmission(surface);
                         gpuSurfaceScheduleFrameEmission(host, surface);
+                        rearmed++;
                     }
                 }
             }
+            if (profile_step) {
+                char text[192];
+                const uint64_t total_ns = gpuTimestampNs() - step_started_ns;
+                snprintf(text, sizeof(text),
+                    "wmsize total_us=%llu runtime_us=%llu webview_us=%llu rearmed=%u"
+                    " frame_calls=%u frame_moves=%u",
+                    (unsigned long long)(total_ns / 1000ull),
+                    (unsigned long long)(runtime_ns / 1000ull),
+                    (unsigned long long)(webview_ns / 1000ull),
+                    rearmed,
+                    g_frame_apply_calls,
+                    g_frame_apply_moves);
+                nativeSdkGpuProfileLine(text);
+            }
             return 0;
+        }
         case WM_SETFOCUS:
         case WM_KILLFOCUS:
             if (host) {
