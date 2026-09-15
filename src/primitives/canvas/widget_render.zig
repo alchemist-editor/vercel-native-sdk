@@ -455,9 +455,15 @@ fn emitWidgetDepth(builder: *Builder, widget: Widget, tokens: DesignTokens, dept
 }
 
 fn emitWidgetDepthContent(builder: *Builder, widget: Widget, tokens: DesignTokens, depth: usize) Error!void {
-    const paint_widget = widgetWithFrame(widget, pixelSnapGeometryRect(tokens, widget.frame));
+    var paint_widget = widgetWithFrame(widget, pixelSnapGeometryRect(tokens, widget.frame));
+    if (paint_widget.kind == .input_group and !paint_widget.state.focused) {
+        paint_widget.state.focused = widgetSubtreeHasFocusedState(paint_widget);
+    }
     if (paint_widget.paint) |paint| {
         try paint(builder, paint_widget, tokens);
+        if (paint_widget.kind == .button_group)
+            try emitButtonGroupWidget(builder, paint_widget, tokens, depth)
+        else
         try emitWidgetClippedChildren(builder, paint_widget, tokens, depth);
         return;
     }
@@ -801,7 +807,13 @@ fn emitWidgetLayoutNodeContent(
     state: WidgetRenderState,
     widget: Widget,
 ) Error!void {
-    const paint_widget = widgetWithFrame(widget, pixelSnapGeometryRect(tokens, widget.frame));
+    var paint_widget = widgetWithFrame(widget, pixelSnapGeometryRect(tokens, widget.frame));
+    if (paint_widget.kind == .input_group and !paint_widget.state.focused) {
+        paint_widget.state.focused = if (state.focused_id != null or state.focus_visible_id != null)
+            layoutSubtreeHasFocusVisible(layout, node_index, state)
+        else
+            layoutSubtreeHasBakedFocus(layout, node_index);
+    }
     if (paint_widget.paint) |paint| {
         try paint(builder, paint_widget, tokens);
         try emitWidgetLayoutClippedChildren(builder, layout, node_index, tokens, state, paint_widget);
