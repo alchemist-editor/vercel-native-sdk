@@ -2879,9 +2879,28 @@ static BOOL NativeSdkPacketDrawEffect(NSDictionary *effect, CGFloat opacity, CGC
         shadow.shadowOffset = shadowOffset;
         shadow.shadowBlurRadius = MAX(0, NativeSdkPacketNumber(effect[@"blur"], 0));
         NSBezierPath *path = NativeSdkPacketRoundedRectPath(rect, effect[@"radius"]);
+        /* CoreGraphics derives a shadow's opacity from the ALPHA OF THE
+         * SOURCE it is cast by, so filling the shape at 1% alpha (the old
+         * way of keeping the source itself invisible) also scaled the
+         * shadow to 1% — every drop shadow in the tree rendered at well
+         * under a percent of its declared strength, which reads as no
+         * shadow at all.
+         *
+         * Cast it from an opaque source instead, and keep the source
+         * invisible by clipping the shape's own interior out of the spill
+         * region: nothing paints inside the shape, and the shadow outside
+         * it lands at full declared strength. */
+        CGFloat blurRadius = shadow.shadowBlurRadius;
+        CGFloat spread = fabs(NativeSdkPacketNumber(effect[@"spread"], 0));
+        CGFloat margin = blurRadius + spread + 1;
+        NSRect spill = NSUnionRect(rect, NSInsetRect(NSOffsetRect(rect, shadowOffset.width, shadowOffset.height), -margin, -margin));
+        NSBezierPath *clip = [NSBezierPath bezierPathWithRect:spill];
+        [clip appendBezierPath:path];
+        clip.windingRule = NSEvenOddWindingRule;
         [NSGraphicsContext saveGraphicsState];
+        [clip addClip];
         [shadow set];
-        [[color colorWithAlphaComponent:0.01] setFill];
+        [[NSColor colorWithCalibratedWhite:0 alpha:1] setFill];
         [path fill];
         [NSGraphicsContext restoreGraphicsState];
         return YES;
