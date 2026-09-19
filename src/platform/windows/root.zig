@@ -2450,6 +2450,28 @@ test "windows packet renderer preserves text baselines and disjoint dirty region
     ) != null);
 }
 
+test "windows flip presentation excludes native caption buttons at the HWND boundary" {
+    const source = @embedFile("webview2_host.cpp");
+    const start = std.mem.indexOf(u8, source, "static void syncGpuSurfaceCaptionRegion(") orelse return error.TestExpectedEqual;
+    const tail = source[start..];
+    const end = std.mem.indexOf(u8, tail, "static void syncHiddenCaptionColor(") orelse return error.TestExpectedEqual;
+    const region = tail[0..end];
+    for ([_][]const u8{
+        "windowUsesHiddenTitlebar(owner->second)",
+        "OffsetRect(&cluster, -origin.x, -origin.y)",
+        "CombineRgn(region, region, buttons, RGN_DIFF)",
+        "EqualRgn(previous, region)",
+        "SetWindowRgn(hwnd, region, FALSE)",
+        "InvalidateRect(owner->second.hwnd, nullptr, FALSE)",
+    }) |required| try std.testing.expect(std.mem.indexOf(u8, region, required) != null);
+    const paint = std.mem.indexOf(u8, source, "syncGpuSurfaceCaptionRegion(host, *view, hwnd);") orelse return error.TestExpectedEqual;
+    const present = std.mem.indexOfPos(u8, source, paint, "view->gpu_surface->paint(paint_rects, paint_rect_count)") orelse return error.TestExpectedEqual;
+    try std.testing.expect(paint < present);
+    // The parent must expose DWM material through zero-alpha GDI pixels;
+    // clipping the child alone would leave its default white background.
+    try std.testing.expect(std.mem.indexOf(u8, source, "FillRect(dc, &cluster, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)))") != null);
+}
+
 test "windows flip-model presentation keeps its two correctness rules" {
     const renderer_source = @embedFile("gpu_surface_renderer.cpp");
 
