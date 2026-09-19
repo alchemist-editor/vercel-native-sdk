@@ -287,7 +287,6 @@ fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.B
         app_mod.linkSystemLibrary("user32", .{});
         app_mod.linkSystemLibrary("gdi32", .{});
         app_mod.linkSystemLibrary("d2d1", .{});
-        app_mod.linkSystemLibrary("winmm", .{});
         app_mod.linkSystemLibrary("dwrite", .{});
         app_mod.linkSystemLibrary("imm32", .{});
         app_mod.linkSystemLibrary("comctl32", .{});
@@ -299,6 +298,7 @@ fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.B
         app_mod.linkSystemLibrary("mf", .{});
         app_mod.linkSystemLibrary("mfplat", .{});
         app_mod.linkSystemLibrary("winhttp", .{});
+        app_mod.linkSystemLibrary("winmm", .{});
         if (web_engine == .chromium) app_mod.linkSystemLibrary("libcef", .{});
     }
 }
