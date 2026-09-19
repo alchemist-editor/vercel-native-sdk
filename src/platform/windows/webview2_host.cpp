@@ -3041,6 +3041,7 @@ static void gpuSurfaceEmitFrame(Host *host, NativeView &view, HWND hwnd) {
      * the frame callback so the app's rebuilt display list is available to
      * this same visible frame. */
     emitQueuedGpuSurfaceInputs(host, view);
+    if (!host->running || gpuSurfaceViewForHwnd(host, hwnd) != &view) return;
     /* The input's responding frame is THIS one; the follow-up schedule
      * (an armed animation re-requesting) returns to the minimized
      * heartbeat unless another input lands. */
@@ -3051,6 +3052,7 @@ static void gpuSurfaceEmitFrame(Host *host, NativeView &view, HWND hwnd) {
     double height = 0;
     if (!gpuSurfaceLogicalSize(view, hwnd, scale, &width, &height)) return;
     (void)syncGpuSurfaceGeometry(host, view, width, height, scale);
+    if (!host->running || gpuSurfaceViewForHwnd(host, hwnd) != &view) return;
     gpuSurfaceAdvancePacingClock(view);
 
     view.gpu_frame_index += 1;
