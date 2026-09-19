@@ -2930,8 +2930,12 @@ static bool forwardZoomButtonNonClientMouse(Host *host, HWND hwnd, UINT message,
 }
 
 static void emitQueuedGpuSurfaceInputs(Host *host, NativeView &view) {
+    const HWND hwnd = view.hwnd;
     emitQueuedGpuSurfacePointerMotionInput(host, view);
-    emitQueuedGpuSurfaceScrollInput(host, view);
+    /* Input callbacks may close the surface. Do not retain its reference
+     * across the first callback when both queues have pending samples. */
+    NativeView *current = gpuSurfaceViewForHwnd(host, hwnd);
+    if (host->running && current) emitQueuedGpuSurfaceScrollInput(host, *current);
 }
 
 static void emitGpuSurfaceTextInput(Host *host, NativeView &view, int input_kind, const std::string &text, bool has_composition_cursor, size_t composition_cursor) {
@@ -3828,6 +3832,10 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
         case WM_LBUTTONDOWN:
         case WM_RBUTTONDOWN:
         case WM_MBUTTONDOWN: {
+            /* Coalescing must not move hover/scroll samples past a press. */
+            emitQueuedGpuSurfaceInputs(host, *view);
+            view = gpuSurfaceViewForHwnd(host, hwnd);
+            if (!host->running || !view) return 0;
             SetFocus(hwnd);
             SetCapture(hwnd);
             const double x = (double)(short)LOWORD(lparam) / scale;
@@ -3842,6 +3850,10 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
         case WM_LBUTTONUP:
         case WM_RBUTTONUP:
         case WM_MBUTTONUP: {
+            /* Deliver the final drag/scroll while the gesture is still open. */
+            emitQueuedGpuSurfaceInputs(host, *view);
+            view = gpuSurfaceViewForHwnd(host, hwnd);
+            if (!host->running || !view) return 0;
             const double x = (double)(short)LOWORD(lparam) / scale;
             const double y = (double)(short)HIWORD(lparam) / scale;
             view->gpu_pointer_down = 0;
