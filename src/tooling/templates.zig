@@ -1927,6 +1927,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\        app_mod.linkSystemLibrary("user32", .{});
         \\        app_mod.linkSystemLibrary("gdi32", .{});
         \\        app_mod.linkSystemLibrary("d2d1", .{});
+        \\        app_mod.linkSystemLibrary("winmm", .{});
         \\        app_mod.linkSystemLibrary("dwrite", .{});
         \\        app_mod.linkSystemLibrary("imm32", .{});
         \\        app_mod.linkSystemLibrary("comctl32", .{});
@@ -4151,6 +4152,15 @@ test "template strings are non-empty" {
     try std.testing.expect(build_zig.len > 0);
     try std.testing.expect(main_zig.len > 0);
     try std.testing.expect(runnerZig().len > 0);
+}
+
+test "web frontend build template links the Windows frame timer" {
+    const names = try TemplateNames.init(std.testing.allocator, "app");
+    defer names.deinit(std.testing.allocator);
+    const build_zig = try buildZig(std.testing.allocator, names, "..", .vite);
+    defer std.testing.allocator.free(build_zig);
+    const host = std.mem.indexOf(u8, build_zig, "src/platform/windows/webview2_host.cpp") orelse return error.TestExpectedEqual;
+    try std.testing.expect(std.mem.indexOfPos(u8, build_zig, host, "app_mod.linkSystemLibrary(\"winmm\", .{});") != null);
 }
 
 test "template names are sanitized for generated metadata" {

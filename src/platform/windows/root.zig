@@ -2101,6 +2101,20 @@ test "windows context menu action event maps token and item id" {
     try std.testing.expectEqual(@as(u32, 3), action.item_id);
 }
 
+test "windows coalesced input is delivered before pointer button transitions" {
+    const source = @embedFile("webview2_host.cpp");
+    for ([_][]const u8{ "case WM_MBUTTONDOWN: {", "case WM_MBUTTONUP: {" }) |marker| {
+        const start = std.mem.indexOf(u8, source, marker) orelse return error.TestExpectedEqual;
+        const tail = source[start..];
+        const end = std.mem.indexOfPos(u8, tail, marker.len, "case WM_") orelse return error.TestExpectedEqual;
+        const handler = tail[0..end];
+        const flush = std.mem.indexOf(u8, handler, "emitQueuedGpuSurfaceInputs(host, *view);") orelse return error.TestExpectedEqual;
+        const transition = std.mem.indexOf(u8, handler, "view->gpu_pointer_down =") orelse return error.TestExpectedEqual;
+        const emit = std.mem.indexOf(u8, handler, "emitGpuSurfaceInput(host, *view,") orelse return error.TestExpectedEqual;
+        try std.testing.expect(flush < transition and transition < emit);
+    }
+}
+
 test "windows gpu surface input maps pointer cancel" {
     var event = std.mem.zeroes(WindowsEvent);
     event.input_kind = 11;
