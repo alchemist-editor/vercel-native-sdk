@@ -46,6 +46,11 @@ pub const CanvasImageEntry = struct {
     width: usize = 0,
     height: usize = 0,
     byte_len: usize = 0,
+    /// Computed once by `canvasImageFingerprint` at registration and
+    /// forwarded to `ReferenceImage.content_fingerprint`, keeping the
+    /// draw-time and plan-time hot paths from walking all pixel bytes
+    /// for every draw/frame.
+    fingerprint: u64 = 0,
 };
 
 /// Dimensions of a successfully registered image (the decode-and-register
@@ -74,13 +79,27 @@ fn imageDecodeScratch(required: usize) error{OutOfMemory}![]u8 {
     return scratch.bytes[0..required];
 }
 
+/// Content fingerprint for registered canvas images, computed once when
+/// bytes enter the registry rather than once per planned draw/frame.
+/// The canvas-specific "canvas" seed keeps this resource domain distinct
+/// from media-surface frames; zero is remapped because it is the sentinel
+/// for byte-walking fallback in `ReferenceImage.content_fingerprint`.
+fn canvasImageFingerprint(width: usize, height: usize, rgba8: []const u8) u64 {
+    var hasher = std.hash.Wyhash.init(0x63616e766173); // "canvas"
+    hasher.update(std.mem.asBytes(&width));
+    hasher.update(std.mem.asBytes(&height));
+    hasher.update(rgba8);
+    const value = hasher.final();
+    return if (value == 0) 1 else value;
+}
+
 pub fn RuntimeCanvasImages(comptime Runtime: type) type {
     return struct {
         /// Register (or replace) decoded pixels under `id`: tightly
         /// packed, row-major, straight-alpha RGBA8, exactly
         /// `width * height * 4` bytes. The runtime copies the pixels, so
-        /// the caller's buffer is free when this returns. Every
-        /// gpu_surface view repaints with the new image on its next
+        /// the caller's buffer is free when this returns. Each
+        /// gpu_surface view drawing this image repaints on its next
         /// frame; replacing an id changes the content fingerprint, so
         /// GPU-side caches re-upload without explicit invalidation.
         /// Errors: `error.InvalidImageId` (id 0 is the "no image"
@@ -135,6 +154,7 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
                 .width = width,
                 .height = height,
                 .byte_len = byte_len,
+                .fingerprint = canvasImageFingerprint(width, height, rgba8),
             };
             if (index == self.canvas_image_count) self.canvas_image_count += 1;
             // No pixel push here: GPU packet hosts receive the bytes
@@ -144,7 +164,7 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
             // present path), which also covers caller-supplied
             // `image_resources` sets that never pass through this
             // registry.
-            noteCanvasImagesChanged(self);
+            noteCanvasImagesChanged(self, id);
         }
 
         /// Decode encoded image bytes (PNG, JPEG, ... — whatever the
@@ -220,7 +240,7 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
                 view.removeCanvasFrameImageCacheId(id);
             }
             self.options.platform.services.removeGpuSurfaceImage(id) catch {};
-            noteCanvasImagesChanged(self);
+            noteCanvasImagesChanged(self, id);
             return true;
         }
 
@@ -239,6 +259,7 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
                     .width = entry.width,
                     .height = entry.height,
                     .pixels = self.canvas_image_pixels[index][0..entry.byte_len],
+                    .content_fingerprint = entry.fingerprint,
                 };
             }
             const media = runtime_media_surface.RuntimeMediaSurfaces(Runtime).adoptedMediaSurfaceTextures(
@@ -296,19 +317,35 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
         }
 
         /// Registered pixels (or adopted media-surface textures, which
-        /// ride the same resource set) changed: force every gpu_surface
-        /// view to re-render its next frame (an image swap with an
-        /// unchanged display list would otherwise take the skip path)
-        /// and request frames so the repaint is not gated on other
-        /// input. Pub for media_surface.zig's adoption path.
-        pub fn noteCanvasImagesChanged(self: *Runtime) void {
+        /// ride the same resource set) changed: force the AFFECTED
+        /// gpu_surface views to re-render their next frame (an image swap
+        /// with an unchanged display list would otherwise take the skip
+        /// path) and request frames so the repaint is not gated on other
+        /// input. `changed_id` scopes the damage to views whose retained
+        /// display list draws that image; null (media-surface adoption)
+        /// keeps the wake-everything behavior. Pub for media_surface.zig's
+        /// adoption path.
+        pub fn noteCanvasImagesChanged(self: *Runtime, changed_id: ?canvas.ImageId) void {
             const frame_methods = canvas_frame_module.RuntimeCanvasFrames(Runtime);
             for (self.views[0..self.view_count], 0..) |*view, index| {
                 if (!view.open or view.kind != .gpu_surface) continue;
+                if (changed_id) |id| {
+                    if (!canvasDisplayListReferencesImage(view.canvasDisplayList(), id)) continue;
+                }
                 view.presented_canvas_valid = false;
                 self.invalidateFor(.state, view.frame);
                 frame_methods.requestCanvasFrameForView(self, index) catch {};
             }
+        }
+
+        fn canvasDisplayListReferencesImage(display_list: canvas.DisplayList, id: canvas.ImageId) bool {
+            for (display_list.commands) |command| {
+                switch (command) {
+                    .draw_image => |draw| if (draw.image_id == id) return true,
+                    else => {},
+                }
+            }
+            return false;
         }
     };
 }

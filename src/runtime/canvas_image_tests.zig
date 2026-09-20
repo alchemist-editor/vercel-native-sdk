@@ -58,6 +58,91 @@ test "canvas image registry registers, replaces, and unregisters" {
     try std.testing.expect(harness.runtime.registeredCanvasImage(7) == null);
 }
 
+test "registered image fingerprints follow content through replacement and slot compaction" {
+    const harness = try startedGpuHarness(std.testing.allocator);
+    defer harness.destroy(std.testing.allocator);
+    var app_state: RegistryApp = .{};
+    try harness.start(app_state.app());
+    var pixels = [_]u8{ 255, 0, 0, 255, 0, 0, 255, 255 };
+    try harness.runtime.registerCanvasImage(7, 2, 1, &pixels);
+    const original = harness.runtime.registeredCanvasImages()[0].content_fingerprint;
+    try std.testing.expect(original != 0);
+    try harness.runtime.registerCanvasImage(8, 2, 1, &pixels);
+    try std.testing.expectEqual(original, harness.runtime.registeredCanvasImages()[1].content_fingerprint);
+
+    // The registry owns a copy; subsequent caller mutations cannot alter
+    // either the stored pixels or the precomputed fingerprint.
+    pixels[0] = 0;
+    try std.testing.expectEqual(original, harness.runtime.registeredCanvasImages()[0].content_fingerprint);
+    try std.testing.expectEqual(@as(u8, 255), harness.runtime.registeredCanvasImages()[0].pixels[0]);
+    try harness.runtime.registerCanvasImage(7, 2, 1, &pixels);
+    const replaced = harness.runtime.registeredCanvasImages()[0].content_fingerprint;
+    try std.testing.expect(replaced != original);
+    try harness.runtime.registerCanvasImage(7, 1, 2, &pixels);
+    try std.testing.expect(replaced != harness.runtime.registeredCanvasImages()[0].content_fingerprint);
+
+    try std.testing.expect(harness.runtime.unregisterCanvasImage(7));
+    const compacted = harness.runtime.registeredCanvasImages()[0];
+    try std.testing.expectEqual(@as(canvas.ImageId, 8), compacted.id);
+    try std.testing.expectEqual(original, compacted.content_fingerprint);
+    pixels[0] = 255;
+    try harness.runtime.registerCanvasImage(9, 2, 1, &pixels);
+    try std.testing.expectEqual(original, harness.runtime.registeredCanvasImages()[1].content_fingerprint);
+}
+
+test "image registration and removal request frames only for retained image consumers" {
+    const harness = try startedGpuHarness(std.testing.allocator);
+    defer harness.destroy(std.testing.allocator);
+    var app_state: RegistryApp = .{};
+    try harness.start(app_state.app());
+    const labels = [_][]const u8{ "first", "shared", "unrelated" };
+    for (labels, 0..) |label, i| {
+        _ = try harness.runtime.createView(.{
+            .window_id = 1,
+            .label = label,
+            .kind = .gpu_surface,
+            .frame = geometry.RectF.init(@floatFromInt(i * 60), 0, 60, 60),
+        });
+        var commands: [1]canvas.CanvasCommand = undefined;
+        var builder = canvas.Builder.init(&commands);
+        try builder.drawImage(.{
+            .id = 1,
+            .image_id = if (i < 2) 7 else 8,
+            .dst = geometry.RectF.init(0, 0, 30, 30),
+        });
+        _ = try harness.runtime.setCanvasDisplayList(1, label, builder.displayList());
+    }
+    const pixel = [_]u8{ 255, 0, 0, 255 };
+    // Includes first registration of a previously missing resource,
+    // replacement under the same id, and unregistering it again.
+    for (0..3) |operation| {
+        for (harness.runtime.views[0..harness.runtime.view_count]) |*view| {
+            view.presented_canvas_valid = true;
+            view.gpu_canvas_frame_requested = false;
+        }
+        harness.null_platform.gpu_surface_frame_request_count = 0;
+        if (operation < 2) {
+            try harness.runtime.registerCanvasImage(7, 1, 1, &pixel);
+        } else {
+            try std.testing.expect(harness.runtime.unregisterCanvasImage(7));
+        }
+        try std.testing.expectEqual(@as(usize, 2), harness.null_platform.gpu_surface_frame_request_count);
+        for (harness.runtime.views[0..harness.runtime.view_count]) |view| {
+            const affected = !std.mem.eql(u8, view.label, "unrelated");
+            try std.testing.expectEqual(affected, view.gpu_canvas_frame_requested);
+            try std.testing.expectEqual(!affected, view.presented_canvas_valid);
+        }
+    }
+    // An id absent from all retained lists schedules no work.
+    harness.null_platform.gpu_surface_frame_request_count = 0;
+    try harness.runtime.registerCanvasImage(99, 1, 1, &pixel);
+    try std.testing.expectEqual(@as(usize, 0), harness.null_platform.gpu_surface_frame_request_count);
+    // Media-surface adoption has no single registered id and keeps its
+    // existing conservative invalidation contract.
+    @import("canvas_images.zig").RuntimeCanvasImages(core.Runtime).noteCanvasImagesChanged(&harness.runtime, null);
+    try std.testing.expectEqual(@as(usize, 3), harness.null_platform.gpu_surface_frame_request_count);
+}
+
 test "canvas image registry validates ids, dimensions, and capacity" {
     const harness = try startedGpuHarness(std.testing.allocator);
     defer harness.destroy(std.testing.allocator);

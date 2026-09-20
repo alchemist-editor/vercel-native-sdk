@@ -57,7 +57,7 @@ pub fn renderImageFingerprintForResource(image_id: ImageId, image: ?ReferenceIma
     // media-surface textures stamp one at adoption so the planner never
     // re-hashes a full video frame per plan. Any content change changes
     // the stamp, so upload/retain/evict keying is untouched; resources
-    // without one (every registered canvas image) hash bytes as always.
+    // without one (caller-supplied resources) hash bytes as always.
     if (value.content_fingerprint != 0) {
         return resourceHashU64(hash, value.content_fingerprint);
     }
