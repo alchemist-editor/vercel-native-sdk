@@ -1392,6 +1392,67 @@ test "runtime lays out split panes and parented webview frames" {
     try std.testing.expectEqual(@as(f32, 556), main.frame.height);
 }
 
+test "split fill reserves trailing constrained siblings on either axis" {
+    const shell_layout = @import("shell_layout.zig");
+    for ([_]app_manifest.ShellAxis{ .row, .column }) |axis| {
+        const row = axis == .row;
+        const shell_views = [_]app_manifest.ShellView{
+            .{ .label = "body", .kind = .split, .fill = true, .axis = axis },
+            .{ .label = "leading", .kind = .gpu_surface, .parent = "body", .width = 100, .height = 100 },
+            .{ .label = "content", .kind = .gpu_surface, .parent = "body", .fill = true },
+            .{ .label = "trailing", .kind = .gpu_surface, .parent = "body", .width = 300, .height = 300, .max_width = 200, .max_height = 200 },
+            // Explicit size still takes precedence when fill is also set.
+            .{ .label = "footer", .kind = .gpu_surface, .parent = "body", .fill = true, .width = 40, .height = 40, .min_width = 80, .min_height = 80 },
+        };
+        // Re-resolving at a new window size preserves both fixed panes.
+        for ([_]f32{ 800, 1000 }) |extent| {
+            var layout = shell_layout.ShellLayout.init(geometry.RectF.init(0, 0, extent, extent), &shell_views);
+            var frames: [shell_views.len]geometry.RectF = undefined;
+            for (shell_views, 0..) |view, i| frames[i] = (try shell_layout.shellViewOptions(1, view, &layout)).frame;
+            try std.testing.expectEqual(extent - 380, if (row) frames[2].width else frames[2].height);
+            try std.testing.expectEqual(extent - 280, if (row) frames[3].x else frames[3].y);
+            try std.testing.expectEqual(extent - 80, if (row) frames[4].x else frames[4].y);
+            try std.testing.expectEqual(@as(f32, 80), if (row) frames[4].width else frames[4].height);
+        }
+    }
+}
+
+test "split fill follows existing hidden and explicitly positioned sibling flow" {
+    const shell_layout = @import("shell_layout.zig");
+    const shell_views = [_]app_manifest.ShellView{
+        .{ .label = "body", .kind = .split, .fill = true, .axis = .row },
+        .{ .label = "content", .kind = .gpu_surface, .parent = "body", .fill = true },
+        .{ .label = "hidden", .kind = .gpu_surface, .parent = "body", .width = 100, .visible = false },
+        .{ .label = "trailing", .kind = .gpu_surface, .parent = "body", .width = 200 },
+        .{ .label = "positioned", .kind = .gpu_surface, .parent = "body", .x = 0, .width = 75 },
+        .{ .label = "other", .kind = .split, .width = 500 },
+        .{ .label = "other-child", .kind = .gpu_surface, .parent = "other", .width = 400 },
+    };
+    var layout = shell_layout.ShellLayout.init(geometry.RectF.init(0, 0, 800, 600), &shell_views);
+    var frames: [shell_views.len]geometry.RectF = undefined;
+    for (shell_views, 0..) |view, i| frames[i] = (try shell_layout.shellViewOptions(1, view, &layout)).frame;
+    try std.testing.expectEqual(@as(f32, 500), frames[1].width);
+    try std.testing.expectEqual(@as(f32, 500), frames[2].x);
+    try std.testing.expectEqual(@as(f32, 600), frames[3].x);
+    try std.testing.expectEqual(@as(f32, 0), frames[4].x);
+}
+
+test "split fill clamps its remaining allocation when fixed siblings exceed the parent" {
+    const shell_layout = @import("shell_layout.zig");
+    const shell_views = [_]app_manifest.ShellView{
+        .{ .label = "body", .kind = .split, .fill = true, .axis = .row },
+        .{ .label = "content", .kind = .gpu_surface, .parent = "body", .fill = true },
+        .{ .label = "trailing", .kind = .gpu_surface, .parent = "body", .width = 200 },
+    };
+    var layout = shell_layout.ShellLayout.init(geometry.RectF.init(0, 0, 100, 100), &shell_views);
+    _ = try shell_layout.shellViewOptions(1, shell_views[0], &layout);
+    const content = try shell_layout.shellViewOptions(1, shell_views[1], &layout);
+    const trailing = try shell_layout.shellViewOptions(1, shell_views[2], &layout);
+    try std.testing.expectEqual(@as(f32, 0), content.frame.width);
+    try std.testing.expectEqual(@as(f32, 0), trailing.frame.x);
+    try std.testing.expectEqual(@as(f32, 200), trailing.frame.width);
+}
+
 test "runtime platform window close clears shell views and child WebViews" {
     const TestApp = struct {
         fn app(self: *@This()) App {

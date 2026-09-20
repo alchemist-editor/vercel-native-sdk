@@ -55,6 +55,7 @@ const ShellParentCursor = struct {
 pub const ShellLayout = struct {
     remaining: geometry.RectF,
     fill_rect: geometry.RectF,
+    manifest: []const app_manifest.ShellView = &.{},
     views: [app_manifest.max_shell_views_per_window]ShellResolvedView = undefined,
     view_count: usize = 0,
     parent_cursors: [app_manifest.max_shell_views_per_window]ShellParentCursor = undefined,
@@ -72,6 +73,7 @@ pub const ShellLayout = struct {
         return .{
             .remaining = base,
             .fill_rect = fill_rect,
+            .manifest = views,
         };
     }
 
@@ -131,12 +133,12 @@ pub const ShellLayout = struct {
         const remaining_width = @max(parent.frame.width - x, 0);
         const remaining_height = @max(parent.frame.height - y, 0);
         const width = constrainedShellWidth(view, view.width orelse switch (parent.axis) {
-            .row => if (view.fill) remaining_width else defaultShellViewWidth(view.kind),
+            .row => if (view.fill) @max(remaining_width - self.trailingSplitReservation(view, parent), 0) else defaultShellViewWidth(view.kind),
             .column => remaining_width,
         });
         const height = constrainedShellHeight(view, view.height orelse switch (parent.axis) {
             .row => remaining_height,
-            .column => if (view.fill) remaining_height else defaultShellViewHeight(view.kind, parent.frame.height),
+            .column => if (view.fill) @max(remaining_height - self.trailingSplitReservation(view, parent), 0) else defaultShellViewHeight(view.kind, parent.frame.height),
         });
 
         switch (parent.axis) {
@@ -144,6 +146,39 @@ pub const ShellLayout = struct {
             .column => cursor.y = @max(cursor.y, y + height),
         }
         return geometry.RectF.init(x, y, width, height);
+    }
+
+    /// Main-axis space a fill child must leave for LATER auto-flow
+    /// siblings of the same split parent. Without this reservation the
+    /// fill child consumes the parent's entire remainder and every
+    /// following fixed-size sibling packs past the parent's far edge —
+    /// offscreen. Visibility does not remove a view from split flow,
+    /// so hidden siblings reserve the same space they consume below.
+    fn trailingSplitReservation(self: *const ShellLayout, view: app_manifest.ShellView, parent: ShellResolvedView) f32 {
+        const parent_label = view.parent orelse return 0;
+        var total: f32 = 0;
+        var seen_self = false;
+        for (self.manifest) |candidate| {
+            if (!seen_self) {
+                if (std.mem.eql(u8, candidate.label, view.label)) seen_self = true;
+                continue;
+            }
+            const candidate_parent = candidate.parent orelse continue;
+            if (!std.mem.eql(u8, candidate_parent, parent_label)) continue;
+            switch (parent.axis) {
+                .row => {
+                    if (candidate.x != null) continue;
+                    if (candidate.fill and candidate.width == null) continue;
+                    total += constrainedShellWidth(candidate, candidate.width orelse defaultShellViewWidth(candidate.kind));
+                },
+                .column => {
+                    if (candidate.y != null) continue;
+                    if (candidate.fill and candidate.height == null) continue;
+                    total += constrainedShellHeight(candidate, candidate.height orelse defaultShellViewHeight(candidate.kind, parent.frame.height));
+                },
+            }
+        }
+        return total;
     }
 
     fn fillFrame(self: *ShellLayout, view: app_manifest.ShellView) geometry.RectF {
