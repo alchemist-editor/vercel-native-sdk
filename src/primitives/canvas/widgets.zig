@@ -391,6 +391,8 @@ pub const WidgetCrossAlignment = enum {
 pub const WidgetAnchorPlacement = enum {
     below,
     above,
+    left,
+    right,
 };
 
 /// Horizontal alignment of an anchored floating widget against its
@@ -399,9 +401,14 @@ pub const WidgetAnchorPlacement = enum {
 /// The x position always clamps into the window.
 pub const WidgetAnchorAlignment = enum {
     start,
+    center,
     end,
     stretch,
 };
+
+/// Optional edge for a root-relative modal. `.automatic` keeps the
+/// dialog/drawer/sheet placement selected by its widget kind.
+pub const WidgetModalEdge = enum { automatic, top, right, bottom, left };
 
 /// Anchored floating placement (`WidgetLayoutStyle.anchor`): a widget
 /// carrying this is a FLOATING surface — the layout pass positions it
@@ -483,6 +490,10 @@ pub const WidgetLayoutStyle = struct {
     /// Anchored floating placement: non-null makes this widget a floating
     /// surface positioned against its parent (see `WidgetAnchor`).
     anchor: ?WidgetAnchor = null,
+    modal_edge: WidgetModalEdge = .automatic,
+    /// Fraction of the root height for top/bottom panel variants. Zero
+    /// preserves the content/explicit-height sizing contract.
+    modal_height_fraction: f32 = 0,
     min_size: geometry.SizeF = .{},
     /// Per-axis upper bound; 0 leaves the axis unbounded. An explicit
     /// author size is definite: the ui builder writes `width`/`height`
