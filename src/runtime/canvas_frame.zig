@@ -1213,7 +1213,21 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 // timestamps.
                 const tooltip_intent_armed = self.views[index].canvasTooltipIntentArmed();
                 if (render_animation_active or tooltip_intent_armed) {
-                    self.invalidateFor(.state, self.views[index].frame);
+                    // A looping spinner or skeleton changes only its own
+                    // commands. Repainting the whole catalog at display-link
+                    // cadence makes those otherwise retained animations
+                    // visibly stutter on large views.
+                    if (tooltip_intent_armed) {
+                        self.invalidateFor(.state, self.views[index].frame);
+                    } else if (canvasRenderAnimationScheduleDirtyBounds(&self.views[index], self.views[index].canvasRenderAnimations())) |local_dirty| {
+                        if (canvasDirtyRegionForView(self.views[index].frame, local_dirty)) |region| {
+                            self.invalidateFor(.state, region);
+                        } else {
+                            self.invalidateFor(.state, self.views[index].frame);
+                        }
+                    } else {
+                        self.invalidateFor(.state, self.views[index].frame);
+                    }
                     // Invalidation keeps snapshots/diagnostics honest but
                     // does not itself wake an idle retained surface. The
                     // current completion consumed its one-shot request, so
