@@ -739,7 +739,16 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 /* Occluder rects (view space): floating surfaces and modal catchers
  * that hit-block scroll regions beneath them. */
 @property(nonatomic, strong) NSArray *scrollOccluderRects;
-@property(nonatomic, assign) BOOL applyingScrollDriverOffset;
+/// The driver whose clip view the engine is writing right now, or 0.
+/// Per-driver rather than a plain flag: `setScrollDrivers:` walks every
+/// region in one pass, and a blanket "suppress bounds notifications"
+/// window swallowed a DIFFERENT driver's genuine user scroll if its
+/// clip view happened to settle inside that window. The runtime then
+/// never heard the offset, and because its belief about where the
+/// native scroller sits is what decides whether to push a correction,
+/// the two stayed silently out of step: the overlay scroller sat at the
+/// user's position while the content stayed at the engine's.
+@property(nonatomic, assign) uint64_t applyingScrollDriverOffsetId;
 @property(nonatomic, assign) BOOL scrollDriverEventPending;
 @property(nonatomic, assign) uint64_t pendingScrollDriverId;
 @property(nonatomic, assign) double pendingScrollDriverOffsetX;
@@ -7194,6 +7203,23 @@ static double NativeSdkClampedPinchMagnification(double magnification) {
                                      setX:(created || desired.set_offset_x)
                                   offsetY:desired.offset_y
                                      setY:(created || desired.set_offset_y)];
+        } else {
+            // Convergence check, run on every push. The runtime decides
+            // whether to correct a scroller from its BELIEF about where
+            // that scroller sits, and that belief only advances when a
+            // report lands — so a report lost anywhere (a coalesced
+            // notification, a view torn down mid-flight) would leave the
+            // scroller and the content permanently out of step, with
+            // neither side able to notice. Reporting the clip view's
+            // real origin whenever it has drifted from what the engine
+            // last published closes that loop: the user's position wins
+            // and the content catches up on the next frame.
+            const NSPoint origin = driver.contentView.bounds.origin;
+            const BOOL drifted_x = desired.scrolls_x && fabs(origin.x - desired.offset_x) > 0.5;
+            const BOOL drifted_y = desired.scrolls_y && fabs(origin.y - desired.offset_y) > 0.5;
+            if (drifted_x || drifted_y) {
+                [self queueScrollDriverEventWithId:driver.driverId offsetX:origin.x offsetY:origin.y];
+            }
         }
         [ordered addObject:driver];
     }
@@ -7206,10 +7232,11 @@ static double NativeSdkClampedPinchMagnification(double magnification) {
 // coalesced report is still in flight (and vice versa).
 - (void)applyScrollDriverOffset:(NativeSdkScrollDriverView *)driver offsetX:(double)offsetX setX:(BOOL)setX offsetY:(double)offsetY setY:(BOOL)setY {
     const NSPoint current = driver.contentView.bounds.origin;
-    self.applyingScrollDriverOffset = YES;
+    const uint64_t previous = self.applyingScrollDriverOffsetId;
+    self.applyingScrollDriverOffsetId = driver.driverId;
     [driver.contentView setBoundsOrigin:NSMakePoint(setX ? offsetX : current.x, setY ? offsetY : current.y)];
     [driver reflectScrolledClipView:driver.contentView];
-    self.applyingScrollDriverOffset = NO;
+    self.applyingScrollDriverOffsetId = previous;
     // A queued (frame-coalesced) report for THIS driver predates the
     // programmatic write: rewrite it to the offsets the clip view
     // actually settled on, so the stale pair can never re-land and
@@ -7323,10 +7350,15 @@ static BOOL NativeSdkScrollDriverCanConsumeHorizontally(NativeSdkScrollDriverVie
 }
 
 - (void)scrollDriverBoundsDidChange:(NSNotification *)note {
-    if (self.applyingScrollDriverOffset) return;
     NSClipView *clipView = note.object;
     for (NativeSdkScrollDriverView *driver in self.scrollDrivers) {
         if (driver.contentView != clipView) continue;
+        // Only the driver the engine is writing right now is echoing
+        // back its own programmatic offset. Every other driver's change
+        // is the user, and dropping it desynchronizes that region for
+        // good — the runtime believes the scroller is where it last put
+        // it, so it never pushes a correction either.
+        if (self.applyingScrollDriverOffsetId == driver.driverId) return;
         [self queueScrollDriverEventWithId:driver.driverId offsetX:clipView.bounds.origin.x offsetY:clipView.bounds.origin.y];
         return;
     }
