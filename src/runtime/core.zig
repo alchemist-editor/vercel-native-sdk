@@ -918,6 +918,7 @@ pub const Runtime = struct {
     pub const setCanvasDisplayList = CanvasFrameMethods.setCanvasDisplayList;
     pub const canvasDisplayList = CanvasFrameMethods.canvasDisplayList;
     pub const setCanvasRenderAnimations = CanvasFrameMethods.setCanvasRenderAnimations;
+    pub const setCanvasModelRenderAnimations = CanvasFrameMethods.setCanvasModelRenderAnimations;
     pub const clearCanvasRenderAnimations = CanvasFrameMethods.clearCanvasRenderAnimations;
     pub const canvasRenderAnimations = CanvasFrameMethods.canvasRenderAnimations;
     pub const canvasRenderAnimationStartNs = CanvasFrameMethods.canvasRenderAnimationStartNs;

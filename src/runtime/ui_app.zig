@@ -3414,7 +3414,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             const tree = &(self.tree orelse return);
             var animations: [canvas_limits.max_canvas_render_animations_per_view]canvas.CanvasRenderAnimation = undefined;
             const count = animations_fn(&self.model, tree, self.frame_timestamp_ns, &animations);
-            _ = try runtime.setCanvasRenderAnimations(window_id, self.options.canvas_label, animations[0..count]);
+            _ = try runtime.setCanvasModelRenderAnimations(window_id, self.options.canvas_label, animations[0..count]);
         }
 
         /// Re-declare the model-derived layout tweens after a rebuild.
