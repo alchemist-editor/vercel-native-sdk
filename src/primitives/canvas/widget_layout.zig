@@ -2184,7 +2184,23 @@ fn intrinsicOverlayChildrenSize(widget: Widget, tokens: DesignTokens, depth: usi
         if (!widgetTakesFlowSlot(child)) continue;
         const size = intrinsicChildSize(child, tokens, depth + 1);
         width_max = @max(width_max, size.width);
-        height_max = @max(height_max, size.height);
+        // Overlay surfaces commonly have a definite width and an automatic
+        // height. Their paragraph children must therefore reserve the height
+        // they occupy at that width, including any child padding. Measuring
+        // only the paragraph's one-line intrinsic height makes the surface
+        // clip the final wrapped line and turns the intended bottom inset
+        // into one or two pixels of leftover space.
+        const child_width = if (child.frame.width > 0)
+            child.frame.width
+        else if (widget.frame.width > 0)
+            @max(0, widget.frame.width - widget.layout.padding.left - widget.layout.padding.right)
+        else
+            size.width;
+        const child_height = if (widgetSubtreeHasTextSpans(child, depth + 1) and child_width > 0)
+            wrappedVerticalExtentForWidth(child, child_width, tokens, depth + 1)
+        else
+            size.height;
+        height_max = @max(height_max, child_height);
     }
     return paddedIntrinsicSize(widget, geometry.SizeF.init(width_max, height_max));
 }
