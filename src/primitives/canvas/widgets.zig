@@ -440,6 +440,12 @@ pub const WidgetLayoutStyle = struct {
     main_alignment: WidgetMainAlignment = .start,
     cross_alignment: WidgetCrossAlignment = .stretch,
     clip_content: bool = false,
+    /// A FLUSH button group that stacks DOWN instead of across: children
+    /// flow on the vertical axis and the segment stamp caps the top and
+    /// bottom corners rather than the leading and trailing ones. Only
+    /// `button_group` reads it; every other kind picks its axis from its
+    /// own kind (`row` vs `column`).
+    vertical: bool = false,
     columns: usize = 0,
     virtualized: bool = false,
     virtual_item_extent: f32 = 0,
@@ -1168,6 +1174,12 @@ pub const Widget = struct {
     /// Source-space range metadata for `.slider` widgets; null keeps the
     /// historical continuous 0...1 slider.
     slider_range: ?SliderRange = null,
+    /// The axis its flush group stacks on, stamped beside
+    /// `group_segment` by both render walks from the group's
+    /// `WidgetLayoutStyle.vertical`. A segment paints the same way on
+    /// either axis; only WHICH pair of corners it keeps (and which
+    /// border band it drops into its neighbor) changes.
+    group_vertical: bool = false,
     children: []const Widget = &.{},
 
     pub fn sliderHasSourceMetadata(self: Widget) bool {
@@ -1731,7 +1743,9 @@ test "Widget keeps the retained hot-path footprint after textarea policy flags" 
     // One layout tree holds thousands of Widgets by value. On the 64-bit
     // targets that run the renderer, 808 bytes is the reviewed footprint;
     // packing engine-only markers keeps the new textarea policy within it,
-    // and the optional slider source range (`slider_range`) adds 32 bytes.
+    // the optional slider source range (`slider_range`) adds 32 bytes, and
+    // the flush group axis stamp (`group_vertical`) fits in padding that
+    // range left.
     if (@sizeOf(usize) == 8) {
         try std.testing.expectEqual(@as(usize, 808), @sizeOf(Widget));
     }
