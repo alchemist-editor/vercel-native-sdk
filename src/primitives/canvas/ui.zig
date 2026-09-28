@@ -305,6 +305,10 @@ pub const VirtualWindowRecord = struct {
 
 pub const UiHandlerEvent = enum {
     press,
+    /// A slider release commit.  This is separate from press so the
+    /// runtime can deliver exactly one ordinary static message for both
+    /// rail clicks and promoted drag releases.
+    commit,
     /// The second release in a multi-click chain: the double-click
     /// channel. Resolution lives in `msgForPointerClick`:
     /// a double-click release prefers this handler and falls back to
@@ -541,6 +545,17 @@ pub fn Ui(comptime Msg: type) type {
             text: []const u8 = "",
             placeholder: []const u8 = "",
             value: f32 = 0,
+            /// Source-space range metadata for a native slider.  The
+            /// retained value remains its normalized fraction; these
+            /// fields let every input and semantic path reconstruct the
+            /// caller-owned value without a second interaction owner.
+            slider_min: f32 = 0,
+            slider_max: f32 = 1,
+            slider_step: f32 = 0,
+            slider_orientation: canvas.SliderOrientation = .horizontal,
+            slider_reversed: bool = false,
+            slider_reset_value: ?f32 = null,
+            slider_metadata_present: bool = false,
             /// HORIZONTAL scroll offset for a horizontal-capable
             /// `scroll` container (markup `value-x`) — the sideways
             /// counterpart of `value`. Follows the same source-wins
@@ -807,6 +822,10 @@ pub fn Ui(comptime Msg: type) type {
             /// the live bottom. Meaningless on every other element.
             scrollback: u32 = 0,
             on_press: ?Msg = null,
+            /// Static slider release message. The runtime dispatches this
+            /// on click-release and on promoted drag-release, once each;
+            /// cancellation never reaches this channel.
+            on_commit: ?Msg = null,
             /// Live widget drag message (markup: `on-drag`). Its payload
             /// is the closed `{ sourceId, phase, x, y, viewWidth,
             /// viewHeight }` record: markup supplies `sourceId`, while the
@@ -974,6 +993,7 @@ pub fn Ui(comptime Msg: type) type {
             wrap: ?bool = null,
             style_tokens: StyleTokenRefs = .{},
             on_press: ?Msg = null,
+            on_commit: ?Msg = null,
             on_drag: ?Msg = null,
             on_double_press: ?Msg = null,
             on_toggle: ?Msg = null,
@@ -1284,6 +1304,10 @@ pub fn Ui(comptime Msg: type) type {
                 return null;
             }
 
+            pub fn msgForCommit(self: Tree, id: ObjectId) ?Msg {
+                return self.msgFor(id, .commit);
+            }
+
             /// Build a live drag Msg by copying the handler's authored
             /// source payload and injecting runtime phase + geometry.
             pub fn msgForDrag(self: Tree, id: ObjectId, drag: canvas.WidgetDragEvent, view_size: geometry.SizeF) ?Msg {
@@ -1333,9 +1357,13 @@ pub fn Ui(comptime Msg: type) type {
             /// Typed dispatch for value changes: builds the message through
             /// the widget's `on_value` constructor.
             pub fn msgForValue(self: Tree, id: ObjectId, value: f32) ?Msg {
+                const source_value = if (self.findWidget(id)) |widget|
+                    if (widget.kind == .slider) canvas.sliderSourceValue(widget, value) else value
+                else
+                    value;
                 for (self.handlers) |handler| {
                     if (handler.id == id and handler.event == .change and handler.action == .value) {
-                        return handler.action.value(value);
+                        return handler.action.value(source_value);
                     }
                 }
                 return null;
@@ -1613,6 +1641,7 @@ pub fn Ui(comptime Msg: type) type {
                 .wrap = options.wrap,
                 .style_tokens = options.style_tokens,
                 .on_press = options.on_press,
+                .on_commit = options.on_commit,
                 .on_drag = options.on_drag,
                 .on_double_press = options.on_double_press,
                 .on_toggle = options.on_toggle,
@@ -3481,6 +3510,10 @@ pub fn Ui(comptime Msg: type) type {
             // Typed handlers imply the matching accessibility actions, the
             // same way a stringly `command` does for engine-owned dispatch.
             if (node.on_press != null) widget.semantics.actions.press = true;
+            if (widget.kind == .slider and node.on_commit != null) {
+                widget.semantics.actions.press = true;
+                widget.semantics.actions.drag = true;
+            }
             if (node.on_drag != null) widget.semantics.actions.drag = true;
             // A double-press handler makes the element pressable too:
             // the double-click's first release must land somewhere, and
@@ -3530,6 +3563,7 @@ pub fn Ui(comptime Msg: type) type {
                 widget.children = child_widgets;
             }
             appendHandler(handlers, handler_len, widget.id, .press, node.on_press);
+            appendHandler(handlers, handler_len, widget.id, .commit, node.on_commit);
             appendHandler(handlers, handler_len, widget.id, .drag, node.on_drag);
             appendHandler(handlers, handler_len, widget.id, .double_press, node.on_double_press);
             appendHandler(handlers, handler_len, widget.id, .toggle, node.on_toggle);
@@ -3683,6 +3717,7 @@ pub fn Ui(comptime Msg: type) type {
         fn countHandlers(node: Node) usize {
             var total: usize = 0;
             if (node.on_press != null) total += 1;
+            if (node.on_commit != null) total += 1;
             if (node.on_drag != null) total += 1;
             if (node.on_double_press != null) total += 1;
             if (node.on_toggle != null) total += 1;
@@ -3850,6 +3885,16 @@ pub fn Ui(comptime Msg: type) type {
             // A checked radio starts with the same canonical value as a
             // retained selection, so activating it is not a change edge.
             if (kind == .radio and widget.state.selected) widget.value = 1;
+            if (kind == .slider and options.slider_metadata_present) {
+                widget.setSliderMetadata(
+                    options.slider_min,
+                    options.slider_max,
+                    options.slider_step,
+                    options.slider_orientation,
+                    options.slider_reversed,
+                    options.slider_reset_value,
+                );
+            }
             applyKindDefaultLayout(kind, options, &widget.layout);
             return widget;
         }
