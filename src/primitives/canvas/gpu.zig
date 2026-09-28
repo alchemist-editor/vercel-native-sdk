@@ -170,6 +170,9 @@ pub const CanvasGpuText = struct {
     origin: geometry.PointF = .{},
     color: Color = .{},
     text: []const u8 = "",
+    /// Letter spacing the engine measured this run with; hosts MUST kern
+    /// by it so the painted run matches the geometry it was laid out at.
+    tracking: f32 = 0,
     glyphs: []const Glyph = &.{},
     /// Process-local measurement context used while deriving packet lines.
     /// It never crosses the wire.
@@ -570,6 +573,7 @@ pub fn canvasGpuCommandFromRenderCommand(command: RenderCommand, command_index: 
                 .size = value.size,
                 .origin = value.origin,
                 .color = value.color,
+                .tracking = value.tracking,
                 .text = value.text,
                 .glyphs = value.glyphs,
                 .measure = value.measure,

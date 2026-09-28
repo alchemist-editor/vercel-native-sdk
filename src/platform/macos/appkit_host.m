@@ -2844,7 +2844,16 @@ static BOOL NativeSdkPacketDrawText(NSDictionary *text, CGFloat opacity) {
     CGFloat size = MAX(1, NativeSdkPacketNumber(text[@"size"], 12));
     NSFont *font = NativeSdkPacketPreferredFont(text, size);
     NSPoint origin = NativeSdkPacketPoint(text[@"origin"]);
-    NSDictionary *baseAttributes = @{
+    // Letter spacing the ENGINE already measured, broke, and positioned
+    // this run with. Drawing it without the kern puts every glyph after
+    // the first at an advance layout never budgeted for, so a tracked
+    // heading drifts out of the box that was sized for it.
+    CGFloat tracking = NativeSdkPacketNumber(text[@"tracking"], 0);
+    NSDictionary *baseAttributes = tracking != 0 ? @{
+        NSFontAttributeName: font,
+        NSForegroundColorAttributeName: color,
+        NSKernAttributeName: @(tracking),
+    } : @{
         NSFontAttributeName: font,
         NSForegroundColorAttributeName: color,
     };
@@ -3265,7 +3274,7 @@ static NSRect NativeSdkPacketAlignRectToPixels(NSRect rect, CGFloat scale, NSUIn
 }
 
 /* ---------------------------------------------------------------------------
- * Compact binary gpu-surface packet decoding (wire format v5).
+ * Compact binary gpu-surface packet decoding (wire format v6).
  *
  * Little-endian, length-prefixed, mirror of the engine's binary packet
  * encoder (serialization.zig, `writeCanvasGpuPacketBinary` and the patch
@@ -3517,13 +3526,15 @@ static NSDictionary *NativeSdkBinaryReadText(NativeSdkBinaryPacketReader *reader
     NSArray *origin = NativeSdkBinaryReadF32Array(reader, 2);
     NSArray *color = NativeSdkBinaryReadF32Array(reader, 4);
     NSString *text = NativeSdkBinaryReadString(reader);
-    if (reader->failed || !origin || !color || !text) return nil;
+    NSNumber *tracking = NativeSdkBinaryReadF32Number(reader);
+    if (reader->failed || !origin || !color || !text || !tracking) return nil;
     NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:@{
         @"font" : @(fontId),
         @"size" : size,
         @"origin" : origin,
         @"color" : color,
         @"text" : text,
+        @"tracking" : tracking,
     }];
     uint8_t hasPositionedGlyphs = NativeSdkBinaryReadU8(reader);
     if (reader->failed) return nil;
@@ -3713,7 +3724,7 @@ static NSDictionary *NativeSdkPacketDictionaryFromBinary(const uint8_t *bytes, N
     if (memcmp(bytes, "NSGP", 4) != 0) return nil;
     reader.offset = 4;
     uint8_t version = NativeSdkBinaryReadU8(&reader);
-    if (version != 5) return nil;
+    if (version != 6) return nil;
     uint8_t loadActionCode = NativeSdkBinaryReadU8(&reader);
     uint8_t packetFlags = NativeSdkBinaryReadU8(&reader);
     (void)NativeSdkBinaryReadU8(&reader); /* reserved */

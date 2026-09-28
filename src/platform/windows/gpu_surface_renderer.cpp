@@ -25,13 +25,13 @@
 
 namespace {
 
-/* Compact binary gpu-surface packet decoding (wire format v5).
+/* Compact binary gpu-surface packet decoding (wire format v6).
  *
  * This independent decoder deliberately repeats the encoder's tags and
  * bounds rather than sharing packed structs across the Zig/C++ ABI. A
  * version or layout disagreement is a refused present, which makes the
  * runtime resynchronize/fall back instead of drawing corrupt content. */
-constexpr uint8_t kPacketVersion = 5;
+constexpr uint8_t kPacketVersion = 6;
 constexpr size_t kRetainedCommandCap = 2048;
 constexpr size_t kDirtyRectCap = kWindowsGpuDirtyRectCap;
 constexpr uint32_t kMaxSurfacePixels = 8192;
@@ -528,6 +528,9 @@ struct TextCommand {
     Point origin = {};
     Color color = {};
     std::string text;
+    /* Letter spacing the engine measured, broke, and positioned this run
+     * with. Ignoring it draws glyphs at advances layout never budgeted. */
+    float tracking = 0;
     bool has_positioned_glyphs = false;
     std::vector<PositionedGlyph> positioned_glyphs;
     std::vector<PositionedTextFragment> positioned_fragments;
@@ -694,6 +697,7 @@ static bool readText(Reader &reader, TextCommand *text) {
     text->origin = readPoint(reader);
     text->color = readColor(reader);
     text->text = reader.string();
+    text->tracking = reader.f32();
     text->has_positioned_glyphs = reader.u8() != 0;
     if (text->has_positioned_glyphs) {
         const uint32_t glyph_count = reader.u32();
@@ -2178,6 +2182,18 @@ private:
             IDWriteTextLayout *layout = nullptr;
             HRESULT result = createTextLayout(
                 value, format, 100000.0f, std::max(4.0f, text.size * 4.0f), &layout) ? S_OK : E_FAIL;
+            /* Trailing-only spacing matches the engine's convention: one
+             * tracking quantum after every cluster, the last one included,
+             * so the painted extent equals the measured width. */
+            if (SUCCEEDED(result) && text.tracking != 0.0f) {
+                IDWriteTextLayout1 *spacing_layout = nullptr;
+                if (SUCCEEDED(layout->QueryInterface(__uuidof(IDWriteTextLayout1),
+                        reinterpret_cast<void **>(&spacing_layout)))) {
+                    DWRITE_TEXT_RANGE range = {0, static_cast<UINT32>(value.size())};
+                    spacing_layout->SetCharacterSpacing(0.0f, text.tracking, 0.0f, range);
+                    releaseCom(spacing_layout);
+                }
+            }
             DWRITE_LINE_METRICS metrics = {};
             UINT32 actual = 0;
             if (SUCCEEDED(result)) result = layout->GetLineMetrics(&metrics, 1, &actual);

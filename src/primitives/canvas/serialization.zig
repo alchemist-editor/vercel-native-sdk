@@ -151,7 +151,11 @@ pub fn writeCommandJson(command: CanvasCommand, writer: anytype) !void {
             }
         },
         .draw_text => |value| {
-            try writer.print(",\"id\":{d},\"font\":{d},\"size\":{d},\"origin\":", .{ value.id, value.font_id, value.size });
+            try writer.print(",\"id\":{d},\"font\":{d},\"size\":{d}", .{ value.id, value.font_id, value.size });
+            // Omitted at the default so untracked runs keep their historical
+            // bytes: every golden in the tree pins this encoding.
+            if (value.tracking != 0) try writer.print(",\"tracking\":{d}", .{value.tracking});
+            try writer.writeAll(",\"origin\":");
             try writePointJson(value.origin, writer);
             try writer.writeAll(",\"color\":");
             try writeColorJson(value.color, writer);
@@ -469,7 +473,9 @@ fn writeCanvasGpuTextJson(text: ?CanvasGpuText, writer: anytype) !void {
         try writer.writeAll("null");
         return;
     };
-    try writer.print("{{\"font\":{d},\"size\":{d},\"origin\":", .{ value.font_id, value.size });
+    try writer.print("{{\"font\":{d},\"size\":{d}", .{ value.font_id, value.size });
+    if (value.tracking != 0) try writer.print(",\"tracking\":{d}", .{value.tracking});
+    try writer.writeAll(",\"origin\":");
     try writePointJson(value.origin, writer);
     try writer.writeAll(",\"color\":");
     try writeColorJson(value.color, writer);
@@ -511,6 +517,7 @@ fn packetDrawText(value: CanvasGpuText) text_model.DrawText {
         .origin = value.origin,
         .color = value.color,
         .text = value.text,
+        .tracking = value.tracking,
         .glyphs = value.glyphs,
         .measure = value.measure,
         .text_layout = value.text_layout,
@@ -981,7 +988,7 @@ fn writeGlyphsJson(glyphs: []const Glyph, writer: anytype) !void {
 }
 
 // ---------------------------------------------------------------------------
-// Compact binary gpu-surface packet encoding (wire format v5).
+// Compact binary gpu-surface packet encoding (wire format v6).
 //
 // The version this comment names, the `binary_packet_version` constant
 // below, and both host decoders' spec comments (appkit_host.m and the
@@ -1020,6 +1027,11 @@ fn writeGlyphsJson(glyphs: []const Glyph, writer: anytype) !void {
 // font override, final pen x/baseline, and advance; synthesized elision
 // markers ride as positioned UTF-8 fragments.
 //
+// v6 (from v5): text commands carry a `tracking` f32 (letter spacing, in
+// points) immediately after their UTF-8 text. Layout already measured,
+// broke, and positioned the run with it, so a host that ignores it paints
+// glyphs at the wrong advances; decoders must apply it as a kern.
+//
 // Layout:
 //   "NSGP" u8[4] | version u8 | load_action u8 (1 load / 2 clear /
 //     3 patch) | flags u8 (bit0 scissor, bit1 dirty rect list) | reserved u8
@@ -1037,7 +1049,7 @@ fn writeGlyphsJson(glyphs: []const Glyph, writer: anytype) !void {
 //     | order_count u32 | order keys u64[]
 
 pub const binary_packet_magic = "NSGP";
-pub const binary_packet_version: u8 = 5;
+pub const binary_packet_version: u8 = 6;
 
 /// Most dirty rects a patch header carries: enough to keep far-apart
 /// small changes (a switch plus a status line) from fusing into a
@@ -1124,6 +1136,7 @@ pub fn canvasGpuCommandFingerprint(command: CanvasGpuCommand) u64 {
         h = hash.resourceHashU8(h, 1);
         h = hash.resourceHashU64(h, text.font_id);
         h = hash.resourceHashF32(h, text.size);
+        h = hash.resourceHashF32(h, text.tracking);
         h = hash.resourceHashPoint(h, text.origin);
         h = hash.resourceHashColor(h, text.color);
         h = hash.resourceHashBytes(h, text.text);
@@ -1429,7 +1442,7 @@ fn writeBinaryImage(image: CanvasGpuImage, writer: anytype) !void {
 }
 
 /// Text draw: font_id u64 | size f32 | origin f32[2] | color f32[4]
-/// | text u32+bytes | has_positioned_glyphs u8 | [glyph_count u32,
+/// | text u32+bytes | tracking f32 | has_positioned_glyphs u8 | [glyph_count u32,
 /// glyphs { id u16, flags u8 (bit0 font override), [font_id u64],
 /// x f32, baseline f32, advance f32 }, fragment_count u32, fragments
 /// { x f32, baseline f32, text u32+bytes }] | has_layout u8 | layout {
@@ -1446,6 +1459,7 @@ fn writeBinaryText(text: CanvasGpuText, writer: anytype) !void {
     try writeBinaryPoint(text.origin, writer);
     try writeBinaryColor(text.color, writer);
     try writeBinarySlice(text.text, writer);
+    try writeBinaryF32(text.tracking, writer);
     var lines: [max_packet_text_layout_lines]TextLine = undefined;
     const layout = if (text.text_layout) |options| packetTextLayout(text, options, &lines) else null;
     try writeBinaryPositionedText(text, layout, writer);

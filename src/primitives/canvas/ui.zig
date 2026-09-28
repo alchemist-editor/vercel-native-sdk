@@ -670,6 +670,12 @@ pub fn Ui(comptime Msg: type) type {
             /// status bars, and surface titles consume it. Controls that
             /// own their label placement (buttons, badges) ignore it.
             text_alignment: canvas.TextAlign = .start,
+            /// Authored letter spacing for a wrapped paragraph, in points.
+            /// 0 (the default) keeps the face's natural advances. This is
+            /// SwiftUI's `.tracking(_:)` and CSS `letter-spacing`; display
+            /// headings in reference designs usually specify a negative
+            /// value to tighten.
+            tracking: f32 = 0,
             /// Fixed column count for `grid` containers. 0 (the default)
             /// keeps the derived near-square column count.
             columns: usize = 0,
@@ -3766,6 +3772,7 @@ pub fn Ui(comptime Msg: type) type {
                 .icon_placement = options.icon_placement,
                 .text_alignment = options.text_alignment,
                 .text_overflow = options.overflow,
+                .text_tracking = options.tracking,
                 .autofocus = options.autofocus,
                 .submit_on_enter = options.submit_on_enter,
                 .image_id = options.image,

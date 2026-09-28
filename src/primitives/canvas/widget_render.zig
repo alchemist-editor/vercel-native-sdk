@@ -1681,6 +1681,7 @@ fn emitVisibleTextSpansWidget(
                 .origin = origin,
                 .color = color,
                 .text = run.text,
+                .tracking = widget.text_tracking,
                 // Wrapping already happened at the span level (each run is one
                 // line segment), so the options carry no wrap work — they carry
                 // the measurement seam. Renderers that walk per-cluster
