@@ -149,6 +149,7 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
                 self.canvas_image_pixels[index] = try self.owned_allocator.alloc(u8, self.max_image_pixel_bytes);
             }
             @memcpy(self.canvas_image_pixels[index][0..byte_len], rgba8);
+            // The owned pixels stay immutable until re-registration.
             self.canvas_image_entries[index] = .{
                 .id = id,
                 .width = width,

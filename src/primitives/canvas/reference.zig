@@ -94,10 +94,10 @@ pub const ReferenceImage = struct {
     pixels: []const u8,
     /// Precomputed content fingerprint for the GPU cache planner
     /// (`renderImageFingerprintForResource` uses it when nonzero instead
-    /// of hashing `pixels` at plan time). Media-surface textures set it
-    /// at adoption so a 60 fps producer never pays a full-buffer hash
-    /// per planned frame; 0 — every registered canvas image — keeps the
-    /// classic hash-the-bytes keying byte-identically.
+    /// of hashing `pixels` at plan time). Registered images set it when
+    /// copying pixels; media-surface textures set it at adoption. It must
+    /// change whenever pixels change. Zero keeps the classic byte hashing
+    /// for caller-supplied resources without a precomputed fingerprint.
     content_fingerprint: u64 = 0,
     /// PRESENTATION-ONLY resource: composited by live GPU/packet hosts,
     /// invisible to the deterministic reference renderer (see the
