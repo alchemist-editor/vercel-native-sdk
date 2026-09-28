@@ -2811,8 +2811,16 @@ static BOOL NativeSdkPacketDrawText(NSDictionary *text, CGFloat opacity) {
     NSString *value = [text[@"text"] isKindOfClass:[NSString class]] ? text[@"text"] : @"";
     NSColor *color = NativeSdkPacketColor(text[@"color"], opacity);
     if (!color) return NO;
-    CGFloat size = MAX(1, NativeSdkPacketNumber(text[@"size"], 12));
+    CGFloat requestedSize = NativeSdkPacketNumber(text[@"size"], 12);
+    CGFloat size = isfinite(requestedSize) ? MAX(1, requestedSize) : 12;
     NSFont *font = NativeSdkPacketPreferredFont(text, size);
+    // AppKit/CoreText may return nil when a requested face or size cannot
+    // be resolved. Never put that nil into the attributed-string dictionary:
+    // fall back to the system face, or reject the command if AppKit cannot
+    // provide even that. The dictionary literal otherwise raises
+    // NSInvalidArgumentException and terminates the app.
+    if (!font) font = [NSFont systemFontOfSize:size];
+    if (!font) return NO;
     NSPoint origin = NativeSdkPacketPoint(text[@"origin"]);
     NSDictionary *baseAttributes = @{
         NSFontAttributeName: font,
