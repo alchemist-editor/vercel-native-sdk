@@ -251,6 +251,11 @@ extern fn native_sdk_appkit_present_gpu_surface_pixels(host: *AppKitHost, window
 extern fn native_sdk_appkit_present_gpu_surface_packet(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, surface_width: f64, surface_height: f64, scale: f64, clear_r: u8, clear_g: u8, clear_b: u8, clear_a: u8, requires_render: c_int, command_count: usize, unsupported_command_count: usize, representable: c_int, json: [*]const u8, json_len: usize) c_int;
 extern fn native_sdk_appkit_present_gpu_surface_packet_binary(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, surface_width: f64, surface_height: f64, scale: f64, clear_r: u8, clear_g: u8, clear_b: u8, clear_a: u8, requires_render: c_int, command_count: usize, unsupported_command_count: usize, representable: c_int, packet: [*]const u8, packet_len: usize) c_int;
 extern fn native_sdk_appkit_upload_gpu_surface_image(host: *AppKitHost, image_id: u64, width: usize, height: usize, rgba8: [*]const u8, rgba8_len: usize) c_int;
+extern fn native_sdk_appkit_upload_scene_mesh(host: *AppKitHost, mesh_id: u64, vertices: [*]const platform_mod.SceneVertex, vertex_count: usize, indices: [*]const u32, index_count: usize) c_int;
+extern fn native_sdk_appkit_upload_scene_texture(host: *AppKitHost, texture_id: u64, width: usize, height: usize, rgba8: [*]const u8, rgba8_len: usize) c_int;
+extern fn native_sdk_appkit_upload_scene_text(host: *AppKitHost, texture_id: u64, font_id: u64, size: f64, tracking: f64, text: [*]const u8, text_len: usize, width: *f64, height: *f64, baseline: *f64) c_int;
+extern fn native_sdk_appkit_register_scene_shader(host: *AppKitHost, shader_id: u32, source: [*]const u8, source_len: usize) c_int;
+extern fn native_sdk_appkit_render_scene(host: *AppKitHost, image_id: u64, frame: *const platform_mod.SceneFrame, draws: [*]const platform_mod.SceneDraw, draw_count: usize) c_int;
 extern fn native_sdk_appkit_remove_gpu_surface_image(host: *AppKitHost, image_id: u64) c_int;
 extern fn native_sdk_appkit_update_widget_accessibility(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, nodes: [*]const AppKitWidgetAccessibilityNode, node_count: usize) c_int;
 extern fn native_sdk_appkit_create_webview(host: *AppKitHost, window_id: u64, label: [*]const u8, label_len: usize, url: [*]const u8, url_len: usize, x: f64, y: f64, width: f64, height: f64, layer: c_int, transparent: c_int, bridge_enabled: c_int) c_int;
@@ -871,6 +876,11 @@ pub const MacPlatform = struct {
                 .present_gpu_surface_packet_fn = presentGpuSurfacePacket,
                 .present_gpu_surface_packet_binary_fn = presentGpuSurfacePacketBinary,
                 .upload_gpu_surface_image_fn = uploadGpuSurfaceImage,
+                .scene_mesh_upload_fn = uploadSceneMesh,
+                .scene_render_fn = renderScene,
+                .scene_texture_upload_fn = uploadSceneTexture,
+                .scene_text_upload_fn = uploadSceneText,
+                .scene_shader_register_fn = registerSceneShader,
                 .remove_gpu_surface_image_fn = removeGpuSurfaceImage,
                 .register_gpu_surface_font_fn = registerGpuSurfaceFont,
                 .unregister_gpu_surface_font_fn = unregisterGpuSurfaceFont,
@@ -2254,6 +2264,40 @@ fn uploadGpuSurfaceImage(context: ?*anyopaque, image: platform_mod.GpuSurfaceIma
         image.rgba8.ptr,
         image.rgba8.len,
     ) == 0) return error.InvalidGpuSurfaceImage;
+}
+
+fn uploadSceneMesh(context: ?*anyopaque, mesh: platform_mod.SceneMesh) anyerror!void {
+    const self: *MacPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (native_sdk_appkit_upload_scene_mesh(self.host, mesh.id, mesh.vertices.ptr, mesh.vertices.len, mesh.indices.ptr, mesh.indices.len) == 0) return error.InvalidSceneMesh;
+}
+
+fn uploadSceneTexture(context: ?*anyopaque, texture: platform_mod.SceneTexture) anyerror!void {
+    const self: *MacPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (native_sdk_appkit_upload_scene_texture(self.host, texture.id, texture.width, texture.height, texture.rgba8.ptr, texture.rgba8.len) == 0) return error.InvalidSceneTexture;
+}
+
+fn uploadSceneText(context: ?*anyopaque, text: platform_mod.SceneText) anyerror!platform_mod.SceneTextMetrics {
+    const self: *MacPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    var width: f64 = 0;
+    var height: f64 = 0;
+    var baseline: f64 = 0;
+    if (native_sdk_appkit_upload_scene_text(self.host, text.id, text.font_id, text.size, text.tracking, text.text.ptr, text.text.len, &width, &height, &baseline) == 0) return error.InvalidSceneTexture;
+    return .{ .width = @floatCast(width), .height = @floatCast(height), .baseline = @floatCast(baseline) };
+}
+
+fn registerSceneShader(context: ?*anyopaque, shader: platform_mod.SceneShader) anyerror!void {
+    const self: *MacPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (native_sdk_appkit_register_scene_shader(self.host, shader.id, shader.source.ptr, shader.source.len) == 0) return error.InvalidSceneShader;
+}
+
+fn renderScene(context: ?*anyopaque, render: platform_mod.SceneRender) anyerror!void {
+    const self: *MacPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (native_sdk_appkit_render_scene(self.host, render.image_id, &render.frame, render.draws.ptr, render.draws.len) == 0) return error.InvalidSceneRender;
 }
 
 fn removeGpuSurfaceImage(context: ?*anyopaque, id: u64) anyerror!void {
