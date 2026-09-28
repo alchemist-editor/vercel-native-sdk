@@ -339,13 +339,23 @@ pub fn RuntimeGpuSurfaceEvents(comptime Runtime: type) type {
                 // input.
                 CanvasWidgetEventMethods().updateCanvasWidgetClickCountFromPointer(self, input_event, pointer_event);
                 dismissed_surface_id = try CanvasWidgetEventMethods().dismissCanvasWidgetSurfaceFromPointerInput(self, pointer_event.*);
-                // A down consumed by a window-drag region skips the whole
+                // Focus departure is part of pointer-down routing, including
+                // canvas-owned titlebar drag regions. Stamp the old id onto
+                // the event so UiApp can dispatch a non-consuming blur before
+                // the same click continues to its ordinary target.
+                if (runtimeFindViewIndex(self, input_event.window_id, input_event.label)) |focus_index| {
+                    const previous_focus_id = self.views[focus_index].canvas_widget_focused_id;
+                    try CanvasWidgetEventMethods().updateCanvasWidgetFocusFromPointer(self, pointer_event.*);
+                    if (previous_focus_id != 0 and self.views[focus_index].canvas_widget_focused_id != previous_focus_id) {
+                        pointer_event.blurred_id = previous_focus_id;
+                    }
+                }
+                // A down consumed by a window-drag region skips the remaining
                 // widget press pipeline: the OS owns the pointer from here
                 // (the matching move/up may never reach the view), so no
-                // widget may be left pressed, no text selection may start,
-                // and keyboard focus stays where it was — exactly like a
-                // click on the native titlebar. Dismissal above still ran:
-                // clicking the header closes an open surface first.
+                // widget may be left pressed and no text selection may start.
+                // Focus departure and dismissal above still ran before the
+                // header hands the gesture to AppKit.
                 window_drag_started = try CanvasWidgetEventMethods().startCanvasWidgetWindowDragFromPointer(self, input_event, pointer_event.*);
                 if (window_drag_started) {
                     // The drag consumed the down, but "pointer-down
@@ -370,7 +380,6 @@ pub fn RuntimeGpuSurfaceEvents(comptime Runtime: type) type {
                         try CanvasWidgetEventMethods().updateCanvasWidgetTextFromPointer(self, pointer_event);
                     }
                     try CanvasWidgetEventMethods().updateCanvasWidgetScrollFromPointer(self, pointer_event.*);
-                    try CanvasWidgetEventMethods().updateCanvasWidgetFocusFromPointer(self, pointer_event.*);
                 }
             }
             // A live target-less composition owns its surface's
