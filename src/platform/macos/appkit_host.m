@@ -125,6 +125,7 @@ static BOOL NativeSdkShortcutModifiersMatch(uint32_t shortcutModifiers, NSEventM
 static NSEventModifierFlags NativeSdkMenuModifierFlags(uint32_t modifiers);
 static uint32_t NativeSdkModifierFlagsForEvent(NSEvent *event);
 static uint64_t NativeSdkTimestampNanoseconds(void);
+static BOOL NativeSdkScrollTraceEnabled(void);
 static uint64_t NativeSdkRetainedFrameIntervalNanoseconds(NSScreen *screen);
 static NSAccessibilityRole NativeSdkAccessibilityRoleForNativeViewKind(NSInteger kind);
 static NSAccessibilityRole NativeSdkAccessibilityRoleForWidgetRole(NSInteger role);
@@ -190,6 +191,19 @@ static uint64_t NativeSdkTimestampNanoseconds(void) {
      * math. CLOCK_MONOTONIC matches the runtime's monotonicNanoseconds seam
      * and cannot jump when the wall clock is adjusted. */
     return clock_gettime_nsec_np(CLOCK_MONOTONIC);
+}
+
+// Main-queue blocks cannot run inside a nested AppKit tracking loop when
+// that loop was entered from the main queue. Input and frame deadlines must
+// remain live there, so schedule one-shot timers in the common run-loop modes.
+// CoreFoundation registration is thread-safe, including GPU completions.
+static void NativeSdkScheduleMainRunLoopBlock(uint64_t delayNs, dispatch_block_t block) {
+    CFRunLoopTimerRef timer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault,
+        CFAbsoluteTimeGetCurrent() + (double)delayNs / 1e9, 0, 0, 0,
+        ^(CFRunLoopTimerRef fired) { block(); });
+    CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+    CFRelease(timer);
+    CFRunLoopWakeUp(CFRunLoopGetMain());
 }
 
 static uint64_t NativeSdkRetainedFrameIntervalNanoseconds(NSScreen *screen) {
@@ -3929,6 +3943,22 @@ static NSDictionary *NativeSdkPacketDictionaryFromBinary(const uint8_t *bytes, N
 
 @implementation NativeSdkScrollDriverView
 
+// Responsive (concurrent) scrolling must stay OFF. With it on, the first
+// gesture event the surface forwards makes AppKit latch the whole rest of
+// the gesture — every changed and momentum event — to this scroller and
+// drive its clip view from the concurrent scrolling path, so nothing
+// reaches the surface's router again until the gesture ends. That broke
+// the router's contract twice over: its per-gesture state (anchor point,
+// last native recipient, wire bindings) was never cleared, so a later
+// gesture could land on a region the pointer had left; and the clip view
+// moved on AppKit's schedule while frame emission stalled, so the overlay
+// scroller advanced over content frozen mid-scroll. Opted out, each event
+// comes back through the window and the router as designed, and the
+// scroller still supplies momentum, rubber-band, and the overlay knob.
++ (BOOL)isCompatibleWithResponsiveScrolling {
+    return NO;
+}
+
 - (NSView *)hitTest:(NSPoint)point {
     // Wheel events deliberately do NOT hit the driver: they fall
     // through to the surface, whose scrollWheel: resolves the gesture's
@@ -4330,13 +4360,17 @@ static void NativeSdkPremultiplyStraightRgba8(const uint8_t *source, uint8_t *de
 - (NSInteger)presentGpuPacketBinaryWithSurfaceWidth:(CGFloat)surfaceWidth height:(CGFloat)surfaceHeight scale:(CGFloat)scale clearR:(uint8_t)clearR clearG:(uint8_t)clearG clearB:(uint8_t)clearB clearA:(uint8_t)clearA requiresRender:(BOOL)requiresRender commandCount:(NSUInteger)commandCount unsupportedCommandCount:(NSUInteger)unsupportedCommandCount representable:(BOOL)representable packet:(const uint8_t *)packet byteLength:(NSUInteger)byteLength {
     if (![self isAvailable]) return -1;
     if (!requiresRender) return 1;
-    if (!representable || unsupportedCommandCount != 0 || !packet || byteLength == 0 || surfaceWidth <= 0 || surfaceHeight <= 0) return 0;
+    if (!representable || unsupportedCommandCount != 0 || !packet || byteLength == 0 || surfaceWidth <= 0 || surfaceHeight <= 0) {
+        if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] refuse representable=%d unsupported=%lu commands=%lu bytes=%lu\n", representable, (unsigned long)unsupportedCommandCount, (unsigned long)commandCount, (unsigned long)byteLength);
+        return 0;
+    }
 
     const uint64_t decodeBeginNs = NativeSdkTimestampNanoseconds();
     NSDictionary *decoded = NativeSdkPacketDictionaryFromBinary(packet, byteLength);
-    if (!decoded) return 0;
+    if (!decoded) { if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] refuse decode bytes=%lu\n", (unsigned long)byteLength); return 0; }
     const uint64_t drawBeginNs = NativeSdkTimestampNanoseconds();
     const NSInteger result = [self presentGpuPacketObject:decoded surfaceWidth:surfaceWidth height:surfaceHeight scale:scale clearR:clearR clearG:clearG clearB:clearB clearA:clearA commandCount:commandCount];
+    if (result != 1 && NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] refuse object result=%ld\n", (long)result);
     if (result == 1) {
         self.lastPacketDecodeNs = drawBeginNs - decodeBeginNs;
         self.lastPacketDrawNs = NativeSdkTimestampNanoseconds() - drawBeginNs;
@@ -4370,6 +4404,16 @@ static BOOL NativeSdkGpuFrameTraceEnabled(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         const char *value = getenv("NATIVE_SDK_GPU_FRAME_TRACE");
+        enabled = value && value[0] != 0 && strcmp(value, "0") != 0;
+    });
+    return enabled;
+}
+
+static BOOL NativeSdkScrollTraceEnabled(void) {
+    static BOOL enabled;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        const char *value = getenv("NATIVE_SDK_SCROLL_TRACE");
         enabled = value && value[0] != 0 && strcmp(value, "0") != 0;
     });
     return enabled;
@@ -6244,8 +6288,8 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
 /* Schedule the surface's next frame event on the display-interval grid.
  * At most one emission is ever in flight; producers arriving while it
  * is queued fold into it (see the property comment). Always fires
- * through the queue — a request lands mid engine dispatch and a
- * synchronous emission would re-enter the engine — and the pacing
+ * through a common-mode timer — a request lands mid engine dispatch and
+ * a synchronous emission would re-enter the engine — and the pacing
  * clock's grid stamping keeps the queue hop out of the period. */
 - (void)scheduleFrameEventEmission {
     [self scheduleFrameEventEmissionForPresentCompletion:NO];
@@ -6304,7 +6348,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     }
     const NSUInteger generation = self.frameEventEmissionGeneration;
     __weak NativeSdkMetalSurfaceView *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)delayNs), dispatch_get_main_queue(), ^{
+    NativeSdkScheduleMainRunLoopBlock(delayNs, ^{
         NativeSdkMetalSurfaceView *strongSelf = weakSelf;
         if (!strongSelf) return;
         // Superseded (de-occlusion rescheduled a fresher emission while
@@ -6499,7 +6543,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
             sampleColor = ((uint32_t)bytes[3] << 24) | ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[1] << 8) | (uint32_t)bytes[0];
             nonblank = bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 0;
         }
-        dispatch_async(dispatch_get_main_queue(), ^{
+        NativeSdkScheduleMainRunLoopBlock(0, ^{
             NativeSdkMetalSurfaceView *strongSelf = weakSelf;
             if (!strongSelf) return;
             if (nonblank) {
@@ -6761,6 +6805,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     NativeSdkScrollDriverView *native = dominantVertical ? (ownerY ?: ownerX) : (ownerX ?: ownerY);
     const BOOL splitOwners = ownerX && ownerY && ownerX != ownerY;
     const BOOL nativeWireBound = native && [self.wireBoundDriverIds containsObject:@(native.driverId)];
+    if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] %llu wheel dy=%.1f phase=%ld mom=%ld chain=%lu native=%llu split=%d wire=%d nativeY=%.1f doc=%.1f frame=%.1f\n", NativeSdkTimestampNanoseconds() / 1000000ull, canvasDy, (long)event.phase, (long)event.momentumPhase, (unsigned long)chain.count, native ? native.driverId : 0, splitOwners, nativeWireBound, native ? native.contentView.bounds.origin.y : -1, native ? native.documentView.frame.size.height : -1, native ? native.frame.size.height : -1);
     if (!native || splitOwners || nativeWireBound) {
         if (ownerX) [self.wireBoundDriverIds addObject:@(ownerX.driverId)];
         if (ownerY) [self.wireBoundDriverIds addObject:@(ownerY.driverId)];
@@ -6893,6 +6938,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     const uint64_t packetDrawNs = self.lastPacketDrawNs;
     self.lastPacketDecodeNs = 0;
     self.lastPacketDrawNs = 0;
+    const uint64_t traceFrameStart = NativeSdkTimestampNanoseconds();
     [self.host emitEvent:(native_sdk_appkit_event_t){
         .kind = NATIVE_SDK_APPKIT_EVENT_GPU_SURFACE_FRAME,
         .window_id = self.windowId,
@@ -6910,6 +6956,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         .packet_draw_ns = packetDrawNs,
         .occluded = occluded ? 1 : 0,
     }];
+    if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] %llu frame idx=%lu took=%.2fms decode=%.2fms draw=%.2fms\n", traceFrameStart / 1000000ull, (unsigned long)frameIndex, (NativeSdkTimestampNanoseconds() - traceFrameStart) / 1e6, self.lastPacketDecodeNs / 1e6, self.lastPacketDrawNs / 1e6);
     [self.host scheduleFrame];
 }
 
@@ -6963,7 +7010,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         delayNs = self.pointerMotionInputLastEmitNs + frameIntervalNs - now;
     }
     __weak NativeSdkMetalSurfaceView *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)delayNs), dispatch_get_main_queue(), ^{
+    NativeSdkScheduleMainRunLoopBlock(delayNs, ^{
         NativeSdkMetalSurfaceView *strongSelf = weakSelf;
         if (!strongSelf) return;
         [strongSelf emitQueuedPointerMotionInputEvent];
@@ -7015,7 +7062,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         delayNs = self.scrollInputLastEmitNs + frameIntervalNs - now;
     }
     __weak NativeSdkMetalSurfaceView *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)delayNs), dispatch_get_main_queue(), ^{
+    NativeSdkScheduleMainRunLoopBlock(delayNs, ^{
         NativeSdkMetalSurfaceView *strongSelf = weakSelf;
         if (!strongSelf) return;
         [strongSelf emitQueuedScrollInputEvent];
@@ -7218,6 +7265,7 @@ static double NativeSdkClampedPinchMagnification(double magnification) {
             const BOOL drifted_x = desired.scrolls_x && fabs(origin.x - desired.offset_x) > 0.5;
             const BOOL drifted_y = desired.scrolls_y && fabs(origin.y - desired.offset_y) > 0.5;
             if (drifted_x || drifted_y) {
+                if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] %llu drift driver=%llu native=%.1f engine=%.1f\n", NativeSdkTimestampNanoseconds() / 1000000ull, driver.driverId, origin.y, desired.offset_y);
                 [self queueScrollDriverEventWithId:driver.driverId offsetX:origin.x offsetY:origin.y];
             }
         }
@@ -7234,6 +7282,7 @@ static double NativeSdkClampedPinchMagnification(double magnification) {
     const NSPoint current = driver.contentView.bounds.origin;
     const uint64_t previous = self.applyingScrollDriverOffsetId;
     self.applyingScrollDriverOffsetId = driver.driverId;
+    if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] %llu apply driver=%llu from=%.1f to=%.1f setY=%d\n", NativeSdkTimestampNanoseconds() / 1000000ull, driver.driverId, current.y, offsetY, setY);
     [driver.contentView setBoundsOrigin:NSMakePoint(setX ? offsetX : current.x, setY ? offsetY : current.y)];
     [driver reflectScrolledClipView:driver.contentView];
     self.applyingScrollDriverOffsetId = previous;
@@ -7359,6 +7408,7 @@ static BOOL NativeSdkScrollDriverCanConsumeHorizontally(NativeSdkScrollDriverVie
         // good — the runtime believes the scroller is where it last put
         // it, so it never pushes a correction either.
         if (self.applyingScrollDriverOffsetId == driver.driverId) return;
+        if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] %llu bounds driver=%llu y=%.1f\n", NativeSdkTimestampNanoseconds() / 1000000ull, driver.driverId, clipView.bounds.origin.y);
         [self queueScrollDriverEventWithId:driver.driverId offsetX:clipView.bounds.origin.x offsetY:clipView.bounds.origin.y];
         return;
     }
@@ -7382,7 +7432,7 @@ static BOOL NativeSdkScrollDriverCanConsumeHorizontally(NativeSdkScrollDriverVie
         delayNs = self.scrollDriverEventLastEmitNs + frameIntervalNs - now;
     }
     __weak NativeSdkMetalSurfaceView *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)delayNs), dispatch_get_main_queue(), ^{
+    NativeSdkScheduleMainRunLoopBlock(delayNs, ^{
         NativeSdkMetalSurfaceView *strongSelf = weakSelf;
         if (!strongSelf) return;
         [strongSelf emitQueuedScrollDriverEvent];
@@ -7398,6 +7448,7 @@ static BOOL NativeSdkScrollDriverCanConsumeHorizontally(NativeSdkScrollDriverVie
     if (!self.host || self.surfaceLabel.length == 0) return;
     self.scrollDriverEventLastEmitNs = NativeSdkTimestampNanoseconds();
     const char *labelBytes = self.surfaceLabel.UTF8String ?: "";
+    const uint64_t traceStart = NativeSdkTimestampNanoseconds();
     [self.host emitEvent:(native_sdk_appkit_event_t){
         .kind = NATIVE_SDK_APPKIT_EVENT_GPU_SURFACE_SCROLL_DRIVER,
         .window_id = self.windowId,
@@ -7408,6 +7459,7 @@ static BOOL NativeSdkScrollDriverCanConsumeHorizontally(NativeSdkScrollDriverVie
         .scroll_driver_offset_x = offsetX,
         .scroll_driver_offset_y = offsetY,
     }];
+    if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] %llu emit driver=%llu y=%.1f took=%.2fms\n", traceStart / 1000000ull, driverId, offsetY, (NativeSdkTimestampNanoseconds() - traceStart) / 1e6);
 }
 
 - (void)emitInputEventWithKind:(NSInteger)kind point:(NSPoint)point timestampNs:(uint64_t)timestampNs modifiers:(uint32_t)modifiers keyText:(NSString *)keyText inputText:(NSString *)inputText button:(NSInteger)button deltaX:(double)deltaX deltaY:(double)deltaY {
