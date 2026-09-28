@@ -491,6 +491,13 @@ pub const WidgetLayoutStyle = struct {
     /// surface positioned against its parent (see `WidgetAnchor`).
     anchor: ?WidgetAnchor = null,
     modal_edge: WidgetModalEdge = .automatic,
+    /// A centered modal (`dialog`) pinned to a FIXED distance down the
+    /// root instead of vertically centered, as a fraction of the root
+    /// height. The Spotlight shape: the surface keeps its top edge while
+    /// its content grows and shrinks below, so a palette that filters
+    /// down to two results does not crawl up the window. 0 keeps the
+    /// centered placement. Ignored by edge-pinned drawers and sheets.
+    modal_top_fraction: f32 = 0,
     /// Fraction of the root height for top/bottom panel variants. Zero
     /// preserves the content/explicit-height sizing contract.
     modal_height_fraction: f32 = 0,
@@ -1660,9 +1667,10 @@ fn mergeLayoutDefaults(explicit: WidgetLayoutStyle, defaults: WidgetLayoutStyle)
 
 test "Widget keeps the retained hot-path footprint after textarea policy flags" {
     // One layout tree holds thousands of Widgets by value. On the 64-bit
-    // targets that run the renderer, 776 bytes is the reviewed footprint;
-    // packing engine-only markers keeps the new textarea policy within it.
+    // targets that run the renderer, 784 bytes is the reviewed footprint;
+    // packing engine-only markers keeps the new textarea policy within it,
+    // and the dialog placement fraction (`modal_top_fraction`) adds an f32.
     if (@sizeOf(usize) == 8) {
-        try std.testing.expectEqual(@as(usize, 776), @sizeOf(Widget));
+        try std.testing.expectEqual(@as(usize, 784), @sizeOf(Widget));
     }
 }

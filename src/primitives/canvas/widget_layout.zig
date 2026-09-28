@@ -220,10 +220,18 @@ fn rootRelativeModalFrame(widget: Widget, proposed: geometry.RectF, root: geomet
             .automatic => unreachable,
         };
     }
-    return widget_model.builtinSurfaceFrame(kind, .{
+    const centered = widget_model.builtinSurfaceFrame(kind, .{
         .bounds = root,
         .preferred_size = preferred,
     }) orelse proposed;
+    // A palette pins its TOP and grows downward (see
+    // `WidgetLayoutStyle.modal_top_fraction`): centering would walk the
+    // whole surface up the window every time a result is filtered out.
+    if (kind == .dialog and widget.layout.modal_top_fraction > 0) {
+        const top = root.y + root.height * std.math.clamp(widget.layout.modal_top_fraction, 0, 1);
+        return geometry.RectF.init(centered.x, @min(top, @max(root.y, root.maxY() - centered.height)), centered.width, centered.height);
+    }
+    return centered;
 }
 
 fn widgetTakesFlowSlot(widget: Widget) bool {
