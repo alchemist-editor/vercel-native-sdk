@@ -2893,7 +2893,13 @@ static BOOL NativeSdkPacketDrawEffect(NSDictionary *effect, CGFloat opacity, CGC
         if (!color) return NO;
         NSRect rect = NativeSdkPacketRect(effect[@"rect"]);
         NSArray *offset = NativeSdkPacketArray(effect[@"offset"], 2);
-        NSSize shadowOffset = offset ? NSMakeSize(NativeSdkPacketNumber(offset[0], 0), NativeSdkPacketNumber(offset[1], 0)) : NSZeroSize;
+        /* Canvas packets use the top-left coordinate convention shared by
+         * layout and the Windows renderer: positive Y moves a shadow down.
+         * NSShadow interprets a positive height in AppKit's bottom-left
+         * shadow space even while this flipped surface paints top-down, so
+         * passing the packet value through verbatim inverted every vertical
+         * shadow on macOS. */
+        NSSize shadowOffset = offset ? NSMakeSize(NativeSdkPacketNumber(offset[0], 0), -NativeSdkPacketNumber(offset[1], 0)) : NSZeroSize;
         NSShadow *shadow = [[NSShadow alloc] init];
         shadow.shadowColor = color;
         shadow.shadowOffset = shadowOffset;
