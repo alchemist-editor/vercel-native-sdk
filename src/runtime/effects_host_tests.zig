@@ -373,6 +373,34 @@ test "file path host requests answer the platform dialogs behind the dialog perm
     try std.testing.expectEqual(@as(usize, 1), h.harness.null_platform.save_dialog_count);
 }
 
+test "audio output validates its format and records the stream under the fake executor" {
+    var h = try Harness.create();
+    defer h.destroy();
+    const fx = &h.app_state.effects;
+    fx.executor = .fake;
+
+    const Silence = struct {
+        fn render(_: ?*anyopaque, samples: [*]f32, frames: u32, channels: u32, _: f64) callconv(.c) void {
+            @memset(samples[0 .. frames * channels], 0);
+        }
+    };
+    const renderer: platform.AudioOutputRenderer = .{ .render_fn = Silence.render };
+
+    try std.testing.expectError(error.InvalidAudioOptions, fx.startAudioOutput(.{ .channels = 3, .renderer = renderer }));
+    try std.testing.expectError(error.InvalidAudioOptions, fx.startAudioOutput(.{ .sample_rate = 4_000, .renderer = renderer }));
+    try std.testing.expect(!fx.audioOutputActive());
+
+    // The fake executor opens no device: it answers the requested format,
+    // 48 kHz when the device's native rate was asked for.
+    const opened = try fx.startAudioOutput(.{ .renderer = renderer });
+    try std.testing.expectEqual(@as(u32, 48_000), opened.sample_rate);
+    try std.testing.expectEqual(@as(u8, 2), opened.channels);
+    try std.testing.expect(fx.audioOutputActive());
+    fx.stopAudioOutput();
+    try std.testing.expect(!fx.audioOutputActive());
+    fx.stopAudioOutput();
+}
+
 test "re-issuing a live host key replaces the pending request and drops the undelivered result" {
     var h = try Harness.create();
     defer h.destroy();
