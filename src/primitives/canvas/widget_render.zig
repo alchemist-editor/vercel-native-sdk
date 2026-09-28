@@ -152,9 +152,20 @@ threadlocal var scrim_viewport: ?geometry.RectF = null;
 threadlocal var tree_visible_bounds: ?geometry.RectF = null;
 
 pub fn emitWidgetTree(builder: *Builder, widget: Widget, tokens: DesignTokens) Error!void {
+    // Widget painters re-enter this entry point to emit a nested widget (a
+    // field's native editor, an icon inside a chip), so the tree state must
+    // be saved and restored rather than assigned: a nested call that left
+    // its own little frame behind sized every later modal's scrim to that
+    // widget instead of the window, and cleared the visible bounds that
+    // cull the rest of the outer tree.
+    const parent_scrim_viewport = scrim_viewport;
+    const parent_visible_bounds = tree_visible_bounds;
+    defer {
+        scrim_viewport = parent_scrim_viewport;
+        tree_visible_bounds = parent_visible_bounds;
+    }
     scrim_viewport = widget.frame.normalized();
     tree_visible_bounds = widget.frame.normalized();
-    defer tree_visible_bounds = null;
     try emitWidgetDepth(builder, widget, tokens, 0);
 }
 
