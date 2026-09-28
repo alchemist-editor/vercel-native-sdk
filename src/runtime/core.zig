@@ -917,6 +917,7 @@ pub const Runtime = struct {
     const CanvasFrameMethods = canvas_frame_helpers.RuntimeCanvasFrames(Runtime);
     pub const setCanvasDisplayList = CanvasFrameMethods.setCanvasDisplayList;
     pub const canvasDisplayList = CanvasFrameMethods.canvasDisplayList;
+    pub const canvasAnimationTimestampNs = CanvasFrameMethods.canvasAnimationTimestampNs;
     pub const setCanvasRenderAnimations = CanvasFrameMethods.setCanvasRenderAnimations;
     pub const setCanvasModelRenderAnimations = CanvasFrameMethods.setCanvasModelRenderAnimations;
     pub const clearCanvasRenderAnimations = CanvasFrameMethods.clearCanvasRenderAnimations;

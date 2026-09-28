@@ -2148,6 +2148,13 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             // panes, the status item — leaves a genuinely current pair,
             // so hover enters keep flowing even when an idle app
             // performs no further rebuild.
+            // Arm model-owned render motion against the freshly built tree
+            // before publishing its display list.  Publishing first exposes
+            // one settled frame before the animation's from-state is installed
+            // (modal flashes at full size, jumps back, then animates).  Runtime
+            // mutation is synchronous, so the pre-armed ids apply to the new
+            // list on its very first present.
+            try self.scheduleAnimationsForTree(runtime, window_id, &tree);
             if (self.options.chrome) |chrome| {
                 try self.installChromeDisplayList(runtime, window_id, chrome, layout, tokens);
             } else {
@@ -2179,7 +2186,6 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             if (self.contextMenuFallbackTargetForLabel(self.options.canvas_label) != 0 and tree.context_menu_fallback == null) {
                 self.clearContextMenuFallback();
             }
-            try self.scheduleAnimations(runtime, window_id);
             try self.scheduleLayoutTweens(runtime, window_id);
             self.applyWebPanes(runtime, window_id, layout);
             try self.applyTerminalLayout(runtime, window_id, layout, tokens);
@@ -3409,11 +3415,11 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
 
         /// Re-apply the model-derived render animations with the latest
         /// frame timestamp.
-        fn scheduleAnimations(self: *Self, runtime: *Runtime, window_id: platform.WindowId) anyerror!void {
+        fn scheduleAnimationsForTree(self: *Self, runtime: *Runtime, window_id: platform.WindowId, tree: *const Ui.Tree) anyerror!void {
             const animations_fn = self.options.animations orelse return;
-            const tree = &(self.tree orelse return);
             var animations: [canvas_limits.max_canvas_render_animations_per_view]canvas.CanvasRenderAnimation = undefined;
-            const count = animations_fn(&self.model, tree, self.frame_timestamp_ns, &animations);
+            const timeline_ns = try runtime.canvasAnimationTimestampNs(window_id, self.options.canvas_label);
+            const count = animations_fn(&self.model, tree, timeline_ns, &animations);
             _ = try runtime.setCanvasModelRenderAnimations(window_id, self.options.canvas_label, animations[0..count]);
         }
 

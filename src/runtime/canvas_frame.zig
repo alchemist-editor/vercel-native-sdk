@@ -141,6 +141,23 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             return self.views[index].canvasDisplayList();
         }
 
+        /// The newest timestamp that can safely anchor a render animation.
+        /// Input is recorded before its derived widget event rebuilds the
+        /// declarative tree, while the next presented frame may still be an
+        /// occluded/idle heartbeat hundreds of milliseconds behind. Starting
+        /// from only the last frame would make a short transition complete on
+        /// its first visible frame. A pending input is in the same monotonic
+        /// clock domain as frame timestamps, so the newer value is the honest
+        /// start of interaction-driven motion.
+        pub fn canvasAnimationTimestampNs(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror!u64 {
+            try validateRuntimeViewParent(self, window_id);
+            try validateViewLabel(label);
+            const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
+            if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
+            const view = &self.views[index];
+            return @max(view.gpu_timestamp_ns, view.gpu_pending_input_timestamp_ns);
+        }
+
         pub fn setCanvasRenderAnimations(self: *Runtime, window_id: platform.WindowId, label: []const u8, animations: []const canvas.CanvasRenderAnimation) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
             try validateViewLabel(label);
