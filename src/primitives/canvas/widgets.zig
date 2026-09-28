@@ -841,6 +841,7 @@ pub const WidgetSemantics = struct {
 /// table, keyed by widget id + item index).
 pub const WidgetContextMenuItem = struct {
     label: []const u8 = "",
+    checked: bool = false,
     enabled: bool = true,
     separator: bool = false,
 };
