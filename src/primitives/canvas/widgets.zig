@@ -950,6 +950,11 @@ pub const Widget = struct {
     /// and CSS `letter-spacing`; negative values tighten a display
     /// heading, which is what most reference designs specify.
     text_tracking: f32 = 0,
+    /// Authored line ADVANCE for a span paragraph, in points. 0 keeps the
+    /// face's natural line height. This is the channel a design system needs
+    /// to reproduce a reference's text block rhythm (SwiftUI spells the same
+    /// thing `lineSpacing`, relative to the natural height).
+    text_line_height: f32 = 0,
     /// Renderer-owned logical-line gutter for a syntax-code paragraph.
     /// Zero keeps an ordinary paragraph; a positive value is the decimal
     /// digit width of the largest marker. The gutter is decoration, not
@@ -1659,8 +1664,9 @@ test "Widget keeps the retained hot-path footprint after textarea policy flags" 
     // One layout tree holds thousands of Widgets by value. On the 64-bit
     // targets that run the renderer, 792 bytes is the reviewed footprint;
     // packing engine-only markers keeps the new textarea policy within it,
-    // the paragraph letter spacing (`text_tracking`) adds one f32, and the
-    // authored text size (`WidgetStyle.text_size`) adds an optional f32.
+    // and the paragraph letter spacing (`text_tracking`), authored text
+    // size (`WidgetStyle.text_size`), and paragraph line advance
+    // (`text_line_height`) add an f32 each.
     if (@sizeOf(usize) == 8) {
         try std.testing.expectEqual(@as(usize, 792), @sizeOf(Widget));
     }
