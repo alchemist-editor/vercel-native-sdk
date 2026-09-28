@@ -1852,7 +1852,7 @@ static NSBezierPath *NativeSdkPacketShapePath(NSDictionary *shape) {
         NSBezierPath *path = [NSBezierPath bezierPath];
         [path moveToPoint:NativeSdkPacketPoint(shape[@"from"])];
         [path lineToPoint:NativeSdkPacketPoint(shape[@"to"])];
-        path.lineWidth = MAX(1, NativeSdkPacketNumber(shape[@"width"], 1));
+        path.lineWidth = fmax(0, NativeSdkPacketNumber(shape[@"width"], 1));
         return path;
     }
     return nil;
@@ -1860,6 +1860,9 @@ static NSBezierPath *NativeSdkPacketShapePath(NSDictionary *shape) {
 
 static BOOL NativeSdkPacketDrawPaintedPath(NSBezierPath *path, NSDictionary *paint, CGFloat opacity, BOOL stroke) {
     if (!path || !paint) return NO;
+    /* AppKit strokes a zero width as the thinnest device line; the
+     * reference renderer draws nothing, and so does this host. */
+    if (stroke && !(path.lineWidth > 0)) return YES;
     NSString *kind = [paint[@"kind"] isKindOfClass:[NSString class]] ? paint[@"kind"] : @"";
     if ([kind isEqualToString:@"color"]) {
         NSColor *color = NativeSdkPacketColor(paint[@"color"], opacity);
@@ -3175,7 +3178,7 @@ static BOOL NativeSdkPacketDrawCommandBody(NSDictionary *command, NSString *kind
         ok = NativeSdkPacketDrawPaintedPath(NativeSdkPacketShapePath(NativeSdkPacketDictionary(command[@"shape"])), NativeSdkPacketDictionary(command[@"paint"]), opacity, NO);
     } else if ([kind hasPrefix:@"stroke_rect"]) {
         NSBezierPath *path = NativeSdkPacketShapePath(NativeSdkPacketDictionary(command[@"shape"]));
-        path.lineWidth = MAX(1, NativeSdkPacketNumber(command[@"strokeWidth"], path.lineWidth));
+        path.lineWidth = fmax(0, NativeSdkPacketNumber(command[@"strokeWidth"], path.lineWidth));
         ok = NativeSdkPacketDrawPaintedPath(path, NativeSdkPacketDictionary(command[@"paint"]), opacity, YES);
     } else if ([kind hasPrefix:@"draw_line"]) {
         ok = NativeSdkPacketDrawPaintedPath(NativeSdkPacketShapePath(NativeSdkPacketDictionary(command[@"shape"])), NativeSdkPacketDictionary(command[@"paint"]), opacity, YES);
@@ -3183,7 +3186,7 @@ static BOOL NativeSdkPacketDrawCommandBody(NSDictionary *command, NSString *kind
         ok = NativeSdkPacketDrawPaintedPath(NativeSdkPacketShapePath(NativeSdkPacketDictionary(command[@"shape"])), NativeSdkPacketDictionary(command[@"paint"]), opacity, NO);
     } else if ([kind isEqualToString:@"stroke_path"]) {
         NSBezierPath *path = NativeSdkPacketShapePath(NativeSdkPacketDictionary(command[@"shape"]));
-        path.lineWidth = MAX(1, NativeSdkPacketNumber(command[@"strokeWidth"], path.lineWidth));
+        path.lineWidth = fmax(0, NativeSdkPacketNumber(command[@"strokeWidth"], path.lineWidth));
         /* End caps come from the command's cap channel (the engine's
          * reference renderer honors the same field); joins are always
          * round for path strokes — the engine rounds every stroke-path
