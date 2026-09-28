@@ -500,6 +500,13 @@ pub const WidgetLayoutStyle = struct {
     /// surface positioned against its parent (see `WidgetAnchor`).
     anchor: ?WidgetAnchor = null,
     modal_edge: WidgetModalEdge = .automatic,
+    /// A centered modal (`dialog`) pinned to a FIXED distance down the
+    /// root instead of vertically centered, as a fraction of the root
+    /// height. The Spotlight shape: the surface keeps its top edge while
+    /// its content grows and shrinks below, so a palette that filters
+    /// down to two results does not crawl up the window. 0 keeps the
+    /// centered placement. Ignored by edge-pinned drawers and sheets.
+    modal_top_fraction: f32 = 0,
     /// Fraction of the root height for top/bottom panel variants. Zero
     /// preserves the content/explicit-height sizing contract.
     modal_height_fraction: f32 = 0,
@@ -1783,12 +1790,10 @@ fn mergeLayoutDefaults(explicit: WidgetLayoutStyle, defaults: WidgetLayoutStyle)
 
 test "Widget keeps the reviewed retained footprint with portable radio policy" {
     // One layout tree holds thousands of Widgets by value. On the 64-bit
-    // targets that run the renderer, 808 bytes is the reviewed footprint;
-    // packing engine-only markers keeps the new textarea policy within it,
-    // the optional slider source range (`slider_range`) adds 32 bytes, and
-    // the flush group axis stamp (`group_vertical`) fits in padding that
-    // range left.
+    // targets that run the renderer, 880 bytes includes the combined radio
+    // policy callback, painter/payload, text tracking/size/line advance,
+    // slider range and orientation, and dialog placement policies.
     if (@sizeOf(usize) == 8) {
-        try std.testing.expectEqual(@as(usize, 808), @sizeOf(Widget));
+        try std.testing.expectEqual(@as(usize, 880), @sizeOf(Widget));
     }
 }
