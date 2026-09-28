@@ -7782,6 +7782,44 @@ pub fn Effects(comptime Msg: type) type {
             capture.platform_started = true;
         }
 
+        /// Claim a media-surface texture channel for an APP-OWNED
+        /// producer — an embedded renderer, a pixel pipeline, a
+        /// compositor thread — and answer the copyable, any-thread frame
+        /// sink it pushes RGBA8 frames through (latest-wins, paced by the
+        /// presented-frame clock; see `media_surface.zig`). `surface_id`
+        /// is the same model-owned u64 a `media_surface` widget binds.
+        /// Loop-thread only. Frame CONTENTS are presentation chrome:
+        /// replay and goldens show the surface's placeholder. Errors:
+        /// `error.UnsupportedService` with no texture-channel host, and
+        /// the runtime's claim errors (invalid id, all channels claimed).
+        pub fn acquireFrameSink(self: *Self, surface_id: u64) anyerror!platform.VideoFrameSink {
+            const binding = self.media_surfaces orelse return error.UnsupportedService;
+            return binding.acquire_fn(binding.context, surface_id);
+        }
+
+        /// End a claim made by `acquireFrameSink`. Idempotent; pushes
+        /// through the released sink (or any copy of it) are refused.
+        /// Loop-thread only.
+        pub fn releaseFrameSink(self: *Self, sink: platform.VideoFrameSink) void {
+            const binding = self.media_surfaces orelse return;
+            binding.release_fn(binding.context, sink);
+        }
+
+        /// Decode encoded image bytes (PNG, JPEG, ... — whatever the
+        /// platform codec reads) into APP-OWNED straight-alpha RGBA8 in
+        /// `buffer`, without registering anything: the path for pixels an
+        /// app processes itself (an editor's source image, a renderer's
+        /// texture). Images larger than `max_pixels` decode
+        /// aspect-preservingly to fit; `buffer` must hold `max_pixels * 4`
+        /// bytes. Synchronous and loop-thread only. Errors:
+        /// `error.UnsupportedService` (no codec), `error.ImageDecodeFailed`,
+        /// `error.ImageTooLarge`.
+        pub fn decodeImage(self: *Self, bytes: []const u8, buffer: []u8, max_pixels: usize) anyerror!platform.DecodedImage {
+            const services = self.services orelse return error.UnsupportedService;
+            if (buffer.len / 4 < max_pixels) return error.ImageTooLarge;
+            return services.decodeImage(bytes, buffer, max_pixels);
+        }
+
         /// Stop a keyed capture. Accepted PCM already staged drains first,
         /// then exactly one `.stopped` terminal delivers through the channel.
         pub fn stopAudioCapture(self: *Self, key: u64) void {
