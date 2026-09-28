@@ -445,6 +445,11 @@ fn emitWidgetDepth(builder: *Builder, widget: Widget, tokens: DesignTokens, dept
 
 fn emitWidgetDepthContent(builder: *Builder, widget: Widget, tokens: DesignTokens, depth: usize) Error!void {
     const paint_widget = widgetWithFrame(widget, pixelSnapGeometryRect(tokens, widget.frame));
+    if (paint_widget.paint) |paint| {
+        try paint(builder, paint_widget, tokens);
+        try emitWidgetClippedChildren(builder, paint_widget, tokens, depth);
+        return;
+    }
     try emitWidgetBackdropBlur(builder, paint_widget, tokens);
     switch (paint_widget.kind) {
         .stack, .row, .column => {
@@ -786,6 +791,11 @@ fn emitWidgetLayoutNodeContent(
     widget: Widget,
 ) Error!void {
     const paint_widget = widgetWithFrame(widget, pixelSnapGeometryRect(tokens, widget.frame));
+    if (paint_widget.paint) |paint| {
+        try paint(builder, paint_widget, tokens);
+        try emitWidgetLayoutClippedChildren(builder, layout, node_index, tokens, state, paint_widget);
+        return;
+    }
     try emitWidgetBackdropBlur(builder, paint_widget, tokens);
     switch (paint_widget.kind) {
         .stack, .row, .column => try emitLayoutContainerBackground(builder, paint_widget, tokens),
