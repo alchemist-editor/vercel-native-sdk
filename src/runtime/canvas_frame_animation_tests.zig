@@ -65,6 +65,33 @@ const builtinBridgeErrorMessage = support.builtinBridgeErrorMessage;
 const testViewByLabel = support.testViewByLabel;
 const testCanvasWidgetPartId = support.testCanvasWidgetPartId;
 
+test "canvas animation timeline starts from pending input instead of a stale frame" {
+    const harness = try TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    harness.null_platform.gpu_surfaces = true;
+    var app_state: struct {
+        fn app(self: *@This()) App {
+            return .{ .context = self, .name = "animation-timeline-input-anchor", .source = platform.WebViewSource.html("") };
+        }
+    } = .{};
+    try harness.start(app_state.app());
+    _ = try harness.runtime.createView(.{
+        .window_id = 1,
+        .label = "canvas",
+        .kind = .gpu_surface,
+        .frame = geometry.RectF.init(0, 0, 40, 20),
+    });
+
+    harness.runtime.views[0].gpu_timestamp_ns = 100;
+    try std.testing.expectEqual(@as(u64, 100), try harness.runtime.canvasAnimationTimestampNs(1, "canvas"));
+
+    harness.runtime.views[0].recordGpuSurfaceInputTimestamp(250);
+    try std.testing.expectEqual(@as(u64, 250), try harness.runtime.canvasAnimationTimestampNs(1, "canvas"));
+
+    harness.runtime.views[0].gpu_timestamp_ns = 300;
+    try std.testing.expectEqual(@as(u64, 300), try harness.runtime.canvasAnimationTimestampNs(1, "canvas"));
+}
+
 test "model render animation refresh preserves runtime-owned motion" {
     const harness = try TestHarness().create(std.testing.allocator, .{});
     defer harness.destroy(std.testing.allocator);
