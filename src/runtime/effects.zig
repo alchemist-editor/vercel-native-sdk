@@ -388,6 +388,9 @@ pub const SystemServiceBinding = struct {
     reveal_path_fn: *const fn (context: *anyopaque, path: []const u8) anyerror!void,
     format_local_time_fn: *const fn (context: *anyopaque, timestamp_ms: i64, style: platform.LocalTimeStyle, buffer: []u8) anyerror![]const u8,
     open_file_dialog_fn: ?*const fn (context: *anyopaque, title: []const u8, buffer: []u8) anyerror!platform.OpenDialogResult = null,
+    /// The platform save panel, seeded with a suggested file name. Answers
+    /// the chosen path, or null when the user cancelled.
+    save_file_dialog_fn: ?*const fn (context: *anyopaque, default_name: []const u8, buffer: []u8) anyerror!?[]const u8 = null,
 };
 
 /// Type-erased handle to the embedding host's named-command services,
@@ -9521,6 +9524,7 @@ pub fn Effects(comptime Msg: type) type {
                 std.mem.eql(u8, name, "native-sdk.launch-at-login.status") or
                 std.mem.eql(u8, name, "native-sdk.launch-at-login.set") or
                 std.mem.eql(u8, name, "native-sdk.dialog.openFilePath") or
+                std.mem.eql(u8, name, "native-sdk.dialog.saveFilePath") or
                 std.mem.eql(u8, name, "native-sdk.time.formatLocal");
         }
 
@@ -9549,7 +9553,10 @@ pub fn Effects(comptime Msg: type) type {
                 self.performBoundStoreRequest(name, key, payload);
                 return;
             }
-            if (std.mem.eql(u8, name, "native-sdk.time.formatLocal") or std.mem.eql(u8, name, "native-sdk.dialog.openFilePath")) {
+            if (std.mem.eql(u8, name, "native-sdk.time.formatLocal") or
+                std.mem.eql(u8, name, "native-sdk.dialog.openFilePath") or
+                std.mem.eql(u8, name, "native-sdk.dialog.saveFilePath"))
+            {
                 self.performBoundSystemRequest(name, key, payload);
                 return;
             }
@@ -9883,6 +9890,22 @@ pub fn Effects(comptime Msg: type) type {
                     return;
                 };
                 self.feedHostResult(key, true, if (result.count == 0) "" else result.paths) catch {};
+                return;
+            }
+
+            if (std.mem.eql(u8, name, "native-sdk.dialog.saveFilePath")) {
+                // The payload is the suggested file name; the result is
+                // the chosen path, or empty when the user cancelled.
+                const save_dialog = binding.save_file_dialog_fn orelse {
+                    self.feedHostResult(key, false, "unsupported") catch {};
+                    return;
+                };
+                var buffer: [platform.max_dialog_paths_bytes]u8 = undefined;
+                const chosen = save_dialog(binding.context, payload, &buffer) catch |err| {
+                    self.feedHostResult(key, false, systemServiceErrorName(err)) catch {};
+                    return;
+                };
+                self.feedHostResult(key, true, chosen orelse "") catch {};
                 return;
             }
 
