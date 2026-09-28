@@ -87,6 +87,7 @@ const buttonBorderFill = widget_render_style.buttonBorderFill;
 const buttonControlVisualTokens = widget_render_style.buttonControlVisualTokens;
 const selectControlVisualTokens = widget_render_style.selectControlVisualTokens;
 const buttonStateBackground = widget_render_style.buttonStateBackground;
+const controlStateBackground = widget_render_style.controlStateBackground;
 const textInputControlVisualTokens = widget_render_style.textInputControlVisualTokens;
 const textInputFill = widget_render_style.textInputFill;
 const textInputBorderFill = widget_render_style.textInputBorderFill;
@@ -1336,7 +1337,10 @@ pub fn emitSliderWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
     const value = std.math.clamp(widget.value, 0, 1);
     const visual = selectionControlVisualTokens(widget, tokens);
     const track = sliderWidgetTrackRect(widget, tokens);
-    const active = pixelSnapGeometryRect(tokens, geometry.RectF.init(track.x, track.y, track.width * value, track.height));
+    const active = if (widget.sliderOrientation() == .vertical)
+        pixelSnapGeometryRect(tokens, geometry.RectF.init(track.x, track.y + track.height * (1 - value), track.width, track.height * value))
+    else
+        pixelSnapGeometryRect(tokens, geometry.RectF.init(track.x, track.y, track.width * value, track.height));
     const knob = sliderWidgetKnobRect(widget, tokens);
     // The rail is a pill in every register; the RADIUS channel (widget
     // style or the themed slider table) shapes only the thumb, because
@@ -1362,7 +1366,7 @@ pub fn emitSliderWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
         .id = widgetPartId(widget.id, 1),
         .rect = track,
         .radius = track_radius,
-        .fill = colorFill(disabledWash(widgetBackgroundColor(widget, visual.background orelse tokens.colors.surface_subtle), washed, tokens.states.disabled_alpha)),
+        .fill = colorFill(disabledWash(controlStateBackground(visual, widget.state.pressed, widget.state.selected, widget.state.hovered, visual.background orelse tokens.colors.surface_subtle), washed, tokens.states.disabled_alpha)),
     });
     const active_rest = widgetAccentColor(widget, visual.active_background orelse tokens.colors.accent);
     // Zero range paints NOTHING — same guard the progress bar wears. A
@@ -1377,7 +1381,7 @@ pub fn emitSliderWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
             .fill = colorFill(if (widget.state.disabled)
                 visual.disabled_background orelse disabledWash(active_rest, true, tokens.states.disabled_alpha)
             else
-                active_rest),
+                controlStateBackground(visual, widget.state.pressed, true, widget.state.hovered, active_rest)),
         });
     }
     // Paper-white in BOTH schemes: the thumb must read against the
@@ -1449,6 +1453,15 @@ fn sliderWidgetTrackRect(widget: Widget, tokens: DesignTokens) geometry.RectF {
     // The rail thickness comes off the metric ladder (house register:
     // a quiet 4px line — the thumb, not the rail, gives the control its
     // weight); packs with a heavier rail restate the token.
+    if (widget.sliderOrientation() == .vertical) {
+        const track_width: f32 = @min(widget.frame.width, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_track_height));
+        return pixelSnapGeometryRect(tokens, geometry.RectF.init(
+            widget.frame.x + (widget.frame.width - track_width) * 0.5,
+            widget.frame.y,
+            track_width,
+            widget.frame.height,
+        ));
+    }
     const track_height: f32 = @min(widget.frame.height, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_track_height));
     return pixelSnapGeometryRect(tokens, geometry.RectF.init(
         widget.frame.x,
@@ -1467,6 +1480,19 @@ pub fn sliderWidgetKnobRect(widget: Widget, tokens: DesignTokens) geometry.RectF
     // clamped only so a shallow row never overflows.
     const knob_width = @min(widget.frame.width, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_thumb_width));
     const knob_height = @min(widget.frame.height, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_thumb_height));
+    if (widget.sliderOrientation() == .vertical) {
+        const knob_y = std.math.clamp(
+            widget.frame.y + widget.frame.height * (1 - value) - knob_height * 0.5,
+            widget.frame.y,
+            widget.frame.y + @max(0, widget.frame.height - knob_height),
+        );
+        return pixelSnapGeometryRect(tokens, geometry.RectF.init(
+            widget.frame.x + (widget.frame.width - knob_width) * 0.5,
+            knob_y,
+            knob_width,
+            knob_height,
+        ));
+    }
     const knob_x = std.math.clamp(
         widget.frame.x + widget.frame.width * value - knob_width * 0.5,
         widget.frame.x,

@@ -5115,6 +5115,14 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             // through the target's `.context_menu` handler entry and
             // closes the surface.
             if (pointer_event.pointer.phase == .up) {
+                if (tree.findWidget(target.id)) |widget| {
+                    if (widget.kind == .slider) {
+                        if (tree.msgForCommit(target.id)) |msg| {
+                            try self.dispatch(runtime, pointer_event.window_id, msg);
+                            return;
+                        }
+                    }
+                }
                 if (try self.dispatchContextMenuFallbackItem(runtime, tree, pointer_event.window_id, target.id)) return;
                 // House video chrome is runtime-consumed: a release on
                 // the transport's play/pause control drives the video
@@ -6189,6 +6197,20 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             if (drag_event.drag.phase == .change) self.disarmHold(runtime);
             const tree = self.treeForViewLabel(drag_event.view_label);
             const live_template = if (tree) |value| value.msgFor(source.id, .drag) else null;
+            // A terminal native drag release is the slider commit edge.
+            // Dispatch it before the optional drag template so a regular
+            // static Msg works without a payload-shaped on-drag contract.
+            if (drag_event.drag.phase == .end) {
+                if (tree) |value| {
+                    if (value.findWidget(source.id)) |widget| {
+                        if (widget.kind == .slider) {
+                            if (value.msgForCommit(source.id)) |msg| {
+                                try self.dispatch(runtime, drag_event.window_id, msg);
+                            }
+                        }
+                    }
+                }
+            }
             const layout: ?canvas.WidgetLayoutTree = runtime.canvasWidgetLayout(drag_event.window_id, drag_event.view_label) catch null;
             const live_view_size: ?geometry.SizeF = if (layout) |value| if (canvas.widgetLayoutRootBounds(value)) |root_value| blk: {
                 const root = root_value.normalized();

@@ -715,10 +715,42 @@ pub fn RuntimeGpuSurfaceEvents(comptime Runtime: type) type {
                 }
             }
             if (widget_pointer_event) |pointer_event| {
-                if (!window_drag_started) {
-                    try CanvasWidgetEventMethods().dispatchCanvasWidgetCommandFromPointer(self, app, pointer_event);
+                const dispatch_pointer_event = pointer_event;
+                if (widget_drag_terminal and pointer_event.pointer.phase == .up) {
+                    // A promoted slider drag retires its click target before
+                    // this point, but the release coordinate still belongs
+                    // to the native control. Apply that final sample before
+                    // the drag terminal commit is dispatched. Other drag
+                    // sources safely no-op with the cleared target.
+                    if (widget_drag_event) |drag_event| {
+                        if (drag_event.drag.phase == .end) {
+                            if (drag_event.source) |source| {
+                                if (source.kind == .slider) {
+                                    const index = runtimeFindViewIndex(self, dispatch_pointer_event.window_id, dispatch_pointer_event.view_label) orelse return;
+                                    _ = try self.views[index].applyCanvasWidgetSliderValue(
+                                        source.id,
+                                        dispatch_pointer_event.pointer.point,
+                                        dispatch_pointer_event.pointer.click_count,
+                                        dispatch_pointer_event.pointer.phase,
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
-                try self.dispatchEvent(app, .{ .canvas_widget_pointer = pointer_event });
+                // Slider changes are the model's source-range edge and must
+                // be observed before the release commit. Drain after the
+                // native control applies this pointer sample, so click and
+                // promoted-drag releases both deliver on_change first.
+                if (dispatch_pointer_event.pointer.phase == .up) {
+                    if (runtimeFindViewIndex(self, dispatch_pointer_event.window_id, dispatch_pointer_event.view_label)) |index| {
+                        try dispatchPendingCanvasWidgetChangeEvents(self, app, index);
+                    }
+                }
+                if (!window_drag_started) {
+                    try CanvasWidgetEventMethods().dispatchCanvasWidgetCommandFromPointer(self, app, dispatch_pointer_event);
+                }
+                try self.dispatchEvent(app, .{ .canvas_widget_pointer = dispatch_pointer_event });
             }
             if (widget_drag_event) |drag_event| {
                 try self.dispatchEvent(app, .{ .canvas_widget_drag = drag_event });

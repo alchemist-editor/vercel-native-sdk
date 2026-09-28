@@ -438,6 +438,41 @@ test "icon widgets render built-in vector icons as tinted path commands" {
     }
 }
 
+test "a slider source range maps, snaps, reverses, and steps in source space" {
+    var slider = Widget{
+        .id = 80,
+        .kind = WidgetKind.slider,
+        .frame = geometry.RectF.init(0, 0, 20, 100),
+        .value = 0.5,
+    };
+    // Without a range the slider stays the historical continuous 0...1.
+    try std.testing.expectEqual(@as(f32, 0.5), canvas.sliderSourceValue(slider, 0.5));
+
+    slider.setSliderMetadata(0, 100, 5, .vertical, false, 50);
+    try std.testing.expectEqual(@as(f32, 50), canvas.sliderSourceValue(slider, 0.5));
+    // Source values snap to the step.
+    try std.testing.expectEqual(@as(f32, 35), canvas.sliderSourceValue(slider, 0.36));
+    try std.testing.expectEqual(@as(f32, 0.25), canvas.sliderNormalizedFraction(slider, 24));
+    try std.testing.expectEqual(@as(?f32, 50), slider.sliderResetValue());
+    // A vertical slider grows upward: the top edge is the maximum.
+    try std.testing.expectEqual(@as(f32, 1), canvas.widgetSliderPointerFraction(slider, geometry.PointF.init(10, 0)));
+    try std.testing.expectEqual(@as(f32, 0), canvas.widgetSliderPointerFraction(slider, geometry.PointF.init(10, 100)));
+    // Arrow keys follow the orientation and move one source step; Shift
+    // moves ten; Home and End reach the ends.
+    const up = widgetSliderKeyboardValue(slider, .{ .phase = .key_down, .key = "ArrowUp" }).?;
+    try std.testing.expectEqual(@as(f32, 55), canvas.sliderSourceValue(slider, up));
+    const shifted = widgetSliderKeyboardValue(slider, .{ .phase = .key_down, .key = "ArrowDown", .modifiers = .{ .shift = true } }).?;
+    try std.testing.expectEqual(@as(f32, 0), canvas.sliderSourceValue(slider, shifted));
+    try std.testing.expectEqual(@as(?f32, null), widgetSliderKeyboardValue(slider, .{ .phase = .key_down, .key = "ArrowRight" }));
+    try std.testing.expectEqual(@as(f32, 1), widgetSliderKeyboardValue(slider, .{ .phase = .key_down, .key = "End" }).?);
+
+    // Reversed: the minimum sits at the top, and ArrowUp decreases.
+    slider.setSliderMetadata(0, 100, 5, .vertical, true, null);
+    try std.testing.expectEqual(@as(f32, 0.75), canvas.sliderNormalizedFraction(slider, 25));
+    const reversed_up = widgetSliderKeyboardValue(slider, .{ .phase = .key_down, .key = "ArrowUp" }).?;
+    try std.testing.expectEqual(@as(f32, 45), canvas.sliderSourceValue(slider, reversed_up));
+}
+
 test "checkbox check mark and label render through their pinned part slots" {
     const checkbox = Widget{
         .id = 63,
