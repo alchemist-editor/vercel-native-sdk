@@ -1611,7 +1611,16 @@ static const uint32_t NativeSdkWidgetPressActionFlags =
          [attribute isEqualToString:NSAccessibilitySelectedTextRangesAttribute])) {
         return (self.actionFlags & NATIVE_SDK_APPKIT_WIDGET_ACTION_SET_SELECTION) != 0;
     }
-    return [super accessibilityIsAttributeSettable:attribute];
+    /* NSAccessibilityElement does not implement the legacy informal
+     * protocol: forwarding to super raised (and unwound) an exception for
+     * every property the host set on every element of every published
+     * tree. Answer "not settable" the way the caught exception did. */
+    static BOOL superSettable;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        superSettable = [NSAccessibilityElement instancesRespondToSelector:@selector(accessibilityIsAttributeSettable:)];
+    });
+    return superSettable ? [super accessibilityIsAttributeSettable:attribute] : NO;
 }
 
 - (void)accessibilitySetValue:(id)value forAttribute:(NSAccessibilityAttributeName)attribute {
