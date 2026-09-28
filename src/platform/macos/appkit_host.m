@@ -3950,8 +3950,9 @@ static void NativeSdkPremultiplyStraightRgba8(const uint8_t *source, uint8_t *de
     // Common modes: default-mode timers stall inside AppKit tracking
     // runloops (live window resize, menu tracking), freezing frames for
     // the whole gesture.
-    _displayTimer = [NSTimer timerWithTimeInterval:(1.0 / 60.0) target:self selector:@selector(renderFrame) userInfo:nil repeats:YES];
-    _displayTimer.tolerance = 1.0 / 240.0;
+    const NSTimeInterval displayInterval = (NSTimeInterval)NativeSdkRetainedFrameIntervalNanoseconds(NSScreen.mainScreen) / (NSTimeInterval)NativeSdkNanosecondsPerSecond;
+    _displayTimer = [NSTimer timerWithTimeInterval:displayInterval target:self selector:@selector(renderFrame) userInfo:nil repeats:YES];
+    _displayTimer.tolerance = displayInterval / 4.0;
     [[NSRunLoop mainRunLoop] addTimer:_displayTimer forMode:NSRunLoopCommonModes];
     [self renderFrame];
     return self;
@@ -10871,11 +10872,13 @@ static NSString *NativeSdkSigningTeamIdentifier(NSString *bundlePath) {
     if (self.timer) return;
     // Common modes so frames keep pumping during live resize and menu
     // tracking (default-mode timers do not fire in tracking runloops).
-    NSTimer *frame_timer = [NSTimer timerWithTimeInterval:(1.0 / 60.0)
+    const NSTimeInterval frameInterval = (NSTimeInterval)NativeSdkRetainedFrameIntervalNanoseconds(self.window.screen ?: NSScreen.mainScreen) / (NSTimeInterval)NativeSdkNanosecondsPerSecond;
+    NSTimer *frame_timer = [NSTimer timerWithTimeInterval:frameInterval
                                                    target:self
                                                  selector:@selector(emitFrame)
                                                  userInfo:nil
                                                   repeats:NO];
+    frame_timer.tolerance = frameInterval / 4.0;
     [[NSRunLoop mainRunLoop] addTimer:frame_timer forMode:NSRunLoopCommonModes];
     self.timer = frame_timer;
 }
