@@ -580,7 +580,15 @@ pub fn RuntimeViewCanvasWidgetTree(comptime RuntimeView: type) type {
             // trigger's own toggle gesture: skip the outside-dismiss so a
             // click on the open picker's trigger dispatches exactly one
             // Msg (the toggle), never dismiss-then-reopen.
-            if (canvas.widgetIsAnchored(self.widget_layout_nodes[surface_index].widget)) {
+            //
+            // A POINT-anchored surface has no trigger — a context menu
+            // hangs off the pointer, and its "anchor" is the whole region
+            // it was summoned over. Treating that region as a trigger
+            // made every left click inside it a no-op, so the menu could
+            // only be dismissed by clicking somewhere else entirely.
+            const surface_widget = self.widget_layout_nodes[surface_index].widget;
+            const point_anchored = if (surface_widget.layout.anchor) |anchor| anchor.point != null else false;
+            if (canvas.widgetIsAnchored(surface_widget) and !point_anchored) {
                 if (self.widget_layout_nodes[surface_index].parent_index) |anchor_index| {
                     if (self.canvasWidgetRouteDescendsFromIndex(route, anchor_index)) return null;
                 }
@@ -981,7 +989,14 @@ pub fn RuntimeViewCanvasWidgetTree(comptime RuntimeView: type) type {
             var found: ?usize = null;
             var found_order: ?canvas.WidgetPaintOrder = null;
             for (self.widget_layout_nodes[0..self.widget_layout_node_count], 0..) |node, index| {
-                if (!canvas.widgetIsAnchored(node.widget)) continue;
+                // Root-relative modals float in the same late window pass
+                // as anchored surfaces and are dismissible kinds, but they
+                // carry no `anchor` — scanning for the anchor alone left
+                // dialogs, alerts, drawers and sheets with no Escape and
+                // no light dismiss at all. Paint order still decides which
+                // surface a gesture closes, so a menu opened INSIDE a
+                // dialog closes before the dialog does.
+                if (!canvas.widgetIsAnchored(node.widget) and !canvas.widgetIsRootRelativeModal(node.widget)) continue;
                 if (!canvasWidgetAnchoredSurfaceKindInScope(node.widget.kind, scope)) continue;
                 if (canvasWidgetNodeHiddenInTree(self, index)) continue;
                 const order = canvas.widgetLayoutWindowSurfaceOrder(self.widgetLayoutTree(), index, self.widget_tokens);
