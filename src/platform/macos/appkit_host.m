@@ -688,6 +688,7 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 @property(nonatomic, strong) id<MTLRenderPipelineState> canvasCompositeBlendPipeline;
 @property(nonatomic, strong) id<MTLRenderPipelineState> canvasCompositeOpaquePipeline;
 @property(nonatomic, strong) id<MTLTexture> canvasCompositeFlatTexture;
+@property(nonatomic, strong) id<MTLSamplerState> canvasCompositeSampler;
 @property(nonatomic, assign) BOOL canvasTextureRenderable;
 @property(nonatomic, assign) BOOL canvasCompositeContentValid;
 @property(nonatomic, strong) id<MTLCommandBuffer> canvasCompositeLastCommandBuffer;
@@ -3296,7 +3297,7 @@ static BOOL NativeSdkPacketDrawCommandBody(NSDictionary *command, NSString *kind
  * directly (a full-surface background fill is cheaper to paint than to
  * hold); the total cap evicts least-recently-used entries. */
 enum {
-    NativeSdkPacketRasterCacheMaxEntryBytes = 4 * 1024 * 1024,
+    NativeSdkPacketRasterCacheMaxEntryBytes = 16 * 1024 * 1024,
     NativeSdkPacketRasterCacheMaxBytes = 64 * 1024 * 1024,
 };
 
@@ -3331,13 +3332,131 @@ static BOOL NativeSdkGpuCompositeEnabled(void) {
  * caching the SCALED output turns the expensive per-present resample
  * (the dominant cost of image-heavy first frames) into a 1:1 blit. */
 static BOOL NativeSdkPacketCommandRasterCacheable(NSDictionary *command, NSString *kind) {
-    if (command[@"transform"]) return NO;
+    // Resolved transforms are immutable command content. A changed
+    // command invalidates the raster just like a changed color or path.
     if (command[@"clip"] && !NativeSdkPacketArray(command[@"clip"], 4)) return NO;
     if ([kind isEqualToString:@"draw_text"] || [kind isEqualToString:@"shadow"]) return YES;
     if ([kind hasPrefix:@"fill_rect"] || [kind hasPrefix:@"fill_rounded_rect"] || [kind hasPrefix:@"stroke_rect"] || [kind hasPrefix:@"draw_line"]) return YES;
     if ([kind isEqualToString:@"fill_path"] || [kind isEqualToString:@"stroke_path"]) return YES;
     if ([kind isEqualToString:@"draw_image"]) return YES;
     return NO;
+}
+
+static BOOL NativeSdkPacketNumberTranslatedEqual(id oldValue, id newValue, CGFloat delta) {
+    if (![oldValue isKindOfClass:[NSNumber class]] || ![newValue isKindOfClass:[NSNumber class]]) return NO;
+    return fabs(NativeSdkPacketNumber(newValue, 0) - NativeSdkPacketNumber(oldValue, 0) - delta) < 1e-5;
+}
+
+/* Scroll layout changes only the absolute position of retained commands.
+ * Compare their complete payloads while accounting for one translation, so
+ * the already exact command raster can move as a texture instead of being
+ * rebuilt by CoreGraphics on every wheel tick. Fractional translations are
+ * sampled by the compositor, matching AppKit/SwiftUI retained-layer motion. */
+static BOOL NativeSdkPacketObjectsEqualUnderTranslation(id oldValue, id newValue, NSString *key, CGFloat dx, CGFloat dy) {
+    if (oldValue == newValue) return YES;
+    if (!oldValue || !newValue || ![oldValue isKindOfClass:[newValue class]]) return NO;
+    if ([oldValue isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *oldDictionary = oldValue;
+        NSDictionary *newDictionary = newValue;
+        if (oldDictionary.count != newDictionary.count) return NO;
+        for (id childKey in oldDictionary) {
+            if (![childKey isKindOfClass:[NSString class]] || !newDictionary[childKey]) return NO;
+            if (!NativeSdkPacketObjectsEqualUnderTranslation(oldDictionary[childKey], newDictionary[childKey], childKey, dx, dy)) return NO;
+        }
+        return YES;
+    }
+    if ([oldValue isKindOfClass:[NSArray class]]) {
+        // A viewport clip can stay fixed or translate with its content.
+        // The retarget guard below proves whether its baked mask is reusable.
+        if ([key isEqualToString:@"clip"] && [oldValue isEqual:newValue]) return YES;
+        NSArray *oldArray = oldValue;
+        NSArray *newArray = newValue;
+        if (oldArray.count != newArray.count) return NO;
+        const BOOL translatedRect = oldArray.count == 4 && ([key isEqualToString:@"bounds"] || [key isEqualToString:@"rect"] || [key isEqualToString:@"dst"] || [key isEqualToString:@"clip"]);
+        const BOOL translatedPoint = oldArray.count == 2 && ([key isEqualToString:@"origin"] || [key isEqualToString:@"start"] || [key isEqualToString:@"end"] || [key isEqualToString:@"from"] || [key isEqualToString:@"to"] || [key isEqualToString:@"points"]);
+        if (translatedRect || translatedPoint) {
+            if (!NativeSdkPacketNumberTranslatedEqual(oldArray[0], newArray[0], dx) || !NativeSdkPacketNumberTranslatedEqual(oldArray[1], newArray[1], dy)) return NO;
+            for (NSUInteger index = 2; index < oldArray.count; index += 1) if (![oldArray[index] isEqual:newArray[index]]) return NO;
+            return YES;
+        }
+        for (NSUInteger index = 0; index < oldArray.count; index += 1) {
+            if (!NativeSdkPacketObjectsEqualUnderTranslation(oldArray[index], newArray[index], key, dx, dy)) return NO;
+        }
+        return YES;
+    }
+    if ([key isEqualToString:@"x"]) return NativeSdkPacketNumberTranslatedEqual(oldValue, newValue, dx);
+    if ([key isEqualToString:@"y"] || [key isEqualToString:@"baseline"]) return NativeSdkPacketNumberTranslatedEqual(oldValue, newValue, dy);
+    return [oldValue isEqual:newValue];
+}
+
+static BOOL NativeSdkPacketRetargetRasterForTranslation(NativeSdkPacketCommandRaster *entry, NSDictionary *command, CGFloat scale, NSUInteger pixelWidth, NSUInteger pixelHeight) {
+    if (!entry || !entry.command || !command) return NO;
+    NSArray *oldBoundsArray = NativeSdkPacketArray(entry.command[@"bounds"], 4);
+    NSArray *newBoundsArray = NativeSdkPacketArray(command[@"bounds"], 4);
+    if (!oldBoundsArray || !newBoundsArray) return NO;
+    NSRect oldBounds = CGRectStandardize(NativeSdkPacketRect(oldBoundsArray));
+    NSRect newBounds = CGRectStandardize(NativeSdkPacketRect(newBoundsArray));
+    if (fabs(oldBounds.size.width - newBounds.size.width) >= 1e-5 || fabs(oldBounds.size.height - newBounds.size.height) >= 1e-5) return NO;
+    const CGFloat dx = newBounds.origin.x - oldBounds.origin.x;
+    const CGFloat dy = newBounds.origin.y - oldBounds.origin.y;
+    NSArray *oldTransform = NativeSdkPacketArray(entry.command[@"transform"], 6);
+    NSArray *newTransform = NativeSdkPacketArray(command[@"transform"], 6);
+    BOOL equivalent = NO;
+    if (oldTransform || newTransform) {
+        if (!oldTransform || !newTransform) return NO;
+        for (NSUInteger index = 0; index < 4; index += 1) {
+            if (![oldTransform[index] isEqual:newTransform[index]]) return NO;
+        }
+        const BOOL unchangedTransform = [oldTransform[4] isEqual:newTransform[4]] && [oldTransform[5] isEqual:newTransform[5]];
+        if (unchangedTransform) {
+            /* Text and other absolute-layout commands move their local
+             * geometry while keeping an identity transform. */
+            equivalent = NativeSdkPacketObjectsEqualUnderTranslation(entry.command, command, nil, dx, dy);
+        } else {
+            if (!NativeSdkPacketNumberTranslatedEqual(oldTransform[4], newTransform[4], dx) ||
+                !NativeSdkPacketNumberTranslatedEqual(oldTransform[5], newTransform[5], dy)) return NO;
+            /* Vector paths keep their local geometry and carry the scroll
+             * displacement in the transform itself. */
+            NSMutableDictionary *oldPayload = [entry.command mutableCopy];
+            NSMutableDictionary *newPayload = [command mutableCopy];
+            if (!NativeSdkPacketObjectsEqualUnderTranslation(oldPayload[@"clip"], newPayload[@"clip"], @"clip", dx, dy)) return NO;
+            [oldPayload removeObjectsForKeys:@[@"bounds", @"transform", @"clip"]];
+            [newPayload removeObjectsForKeys:@[@"bounds", @"transform", @"clip"]];
+            equivalent = [oldPayload isEqual:newPayload];
+        }
+    } else {
+        equivalent = NativeSdkPacketObjectsEqualUnderTranslation(entry.command, command, nil, dx, dy);
+    }
+    if (!equivalent) return NO;
+
+    const CGFloat guard = 1.0 / scale;
+    NSRect oldPadded = NSInsetRect(oldBounds, -guard, -guard);
+    NSRect newPadded = NSInsetRect(newBounds, -guard, -guard);
+    NSRect surface = NSMakeRect(0, 0, (CGFloat)pixelWidth / scale, (CGFloat)pixelHeight / scale);
+    if (!NSContainsRect(surface, oldPadded) || !NSContainsRect(surface, newPadded)) return NO;
+    NSArray *oldClipArray = NativeSdkPacketArray(entry.command[@"clip"], 4);
+    NSArray *clipArray = NativeSdkPacketArray(command[@"clip"], 4);
+    if ((command[@"clip"] && !clipArray) || (entry.command[@"clip"] && !oldClipArray)) return NO;
+    if (clipArray) {
+        NSRect oldClip = CGRectStandardize(NativeSdkPacketRect(oldClipArray));
+        NSRect clip = CGRectStandardize(NativeSdkPacketRect(clipArray));
+        const BOOL translatedClip = fabs(clip.origin.x - oldClip.origin.x - dx) < 1e-5 &&
+            fabs(clip.origin.y - oldClip.origin.y - dy) < 1e-5 &&
+            NSEqualSizes(oldClip.size, clip.size);
+        if (!translatedClip) {
+            // A fixed mask is reusable only when neither position touches
+            // it. Insetting by the largest radius conservatively excludes
+            // every curved corner; moving through one must rasterize again.
+            CGFloat radius = 0;
+            for (NSNumber *value in NativeSdkPacketArray(command[@"clipRadius"], 4)) radius = MAX(radius, value.doubleValue);
+            NSRect interior = NSInsetRect(clip, radius, radius);
+            if (!NSContainsRect(interior, oldPadded) || !NSContainsRect(interior, newPadded)) return NO;
+        }
+    }
+
+    entry.command = command;
+    entry.destination = NSOffsetRect(entry.destination, dx, dy);
+    return YES;
 }
 
 /* Snap a point-space rect outward to the device-pixel grid and clamp it
@@ -4492,7 +4611,7 @@ static const char *NativeSdkGpuShotDir(void) {
  * pixel composites exactly once, like the CPU union clip). */
 
 typedef struct {
-    uint8_t type; /* 0 skip, 1 flat copy quad, 2 textured blend quad, 3 blur sandwich */
+    uint8_t type; /* 0 skip, 1 flat copy quad, 2 textured blend quad, 3 blur sandwich, 4 flat blend quad */
     BOOL hasCullBounds;
     NSRect cullBounds;      /* point space */
     float pxX, pxY, pxW, pxH; /* device-pixel quad */
@@ -4511,7 +4630,7 @@ typedef struct {
     uint32_t pad[3];
 } NativeSdkCompositeUniforms;
 
-static void NativeSdkCompositeEncodeQuad(id<MTLRenderCommandEncoder> encoder, NSUInteger viewportWidth, NSUInteger viewportHeight, float pxX, float pxY, float pxW, float pxH, float texOriginX, float texOriginY, const float color[4], BOOL textured, id<MTLTexture> texture) {
+static void NativeSdkCompositeEncodeQuad(id<MTLRenderCommandEncoder> encoder, NSUInteger viewportWidth, NSUInteger viewportHeight, float pxX, float pxY, float pxW, float pxH, float texOriginX, float texOriginY, const float color[4], BOOL textured, id<MTLTexture> texture, id<MTLSamplerState> sampler) {
     NativeSdkCompositeUniforms uniforms;
     memset(&uniforms, 0, sizeof(uniforms));
     uniforms.viewport[0] = (float)viewportWidth;
@@ -4527,6 +4646,7 @@ static void NativeSdkCompositeEncodeQuad(id<MTLRenderCommandEncoder> encoder, NS
     [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:0];
     [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
     [encoder setFragmentTexture:texture atIndex:0];
+    [encoder setFragmentSamplerState:sampler atIndex:0];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
 }
 
@@ -4571,7 +4691,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
 }
 
 - (BOOL)ensureCanvasCompositor {
-    if (self.canvasCompositeBlendPipeline && self.canvasCompositeOpaquePipeline && self.canvasCompositeFlatTexture) return YES;
+    if (self.canvasCompositeBlendPipeline && self.canvasCompositeOpaquePipeline && self.canvasCompositeFlatTexture && self.canvasCompositeSampler) return YES;
     if (!self.device || !self.commandQueue) return NO;
     /* Shared-storage render targets (needed for cheap readback and the
      * blur sandwich) require unified memory. */
@@ -4582,7 +4702,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         @"using namespace metal;\n"
         @"struct NativeSdkCompositeUniforms {\n"
         @"  float2 viewport; float2 rect_origin; float2 rect_size; float2 tex_origin;\n"
-        @"  float4 color; uint textured; uint3 pad;\n"
+        @"  float4 color; uint textured; uint pad0; uint pad1; uint pad2;\n"
         @"};\n"
         @"struct NativeSdkCompositeVertexOut { float4 position [[position]]; };\n"
         @"vertex NativeSdkCompositeVertexOut native_sdk_composite_vertex(uint vertex_id [[vertex_id]], constant NativeSdkCompositeUniforms &u [[buffer(0)]]) {\n"
@@ -4592,12 +4712,11 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         @"  out.position = float4(px.x / u.viewport.x * 2.0 - 1.0, 1.0 - px.y / u.viewport.y * 2.0, 0.0, 1.0);\n"
         @"  return out;\n"
         @"}\n"
-        @"fragment float4 native_sdk_composite_fragment(NativeSdkCompositeVertexOut in [[stage_in]], constant NativeSdkCompositeUniforms &u [[buffer(0)]], texture2d<float, access::read> quad_texture [[texture(0)]]) {\n"
+        @"fragment float4 native_sdk_composite_fragment(NativeSdkCompositeVertexOut in [[stage_in]], constant NativeSdkCompositeUniforms &u [[buffer(0)]], texture2d<float> quad_texture [[texture(0)]], sampler quad_sampler [[sampler(0)]]) {\n"
         @"  if (u.textured == 0u) return u.color;\n"
-        @"  int2 pixel = int2(in.position.xy);\n"
-        @"  int2 texel = pixel - int2(u.rect_origin) + int2(u.tex_origin);\n"
-        @"  texel = clamp(texel, int2(0), int2(int(quad_texture.get_width()) - 1, int(quad_texture.get_height()) - 1));\n"
-        @"  return quad_texture.read(uint2(texel));\n"
+        @"  float2 texel = in.position.xy - u.rect_origin + u.tex_origin;\n"
+        @"  float2 uv = texel / float2(quad_texture.get_width(), quad_texture.get_height());\n"
+        @"  return quad_texture.sample(quad_sampler, uv);\n"
         @"}\n";
 
     NSError *libraryError = nil;
@@ -4640,9 +4759,25 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     const uint8_t flatPixel[4] = {0, 0, 0, 0};
     [flatTexture replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:flatPixel bytesPerRow:4];
 
+    /* Composite quads are rasterized at backing scale and drawn 1:1 into
+     * device pixels — the same contract the presenter states for the canvas
+     * texture, so they take the same sampler. A linear filter buys nothing
+     * on a 1:1 blit and costs sharpness the moment a quad's origin or the
+     * fragment's texel math drifts by a fraction of a pixel, which softens
+     * every composited command including glyph runs. */
+    MTLSamplerDescriptor *samplerDescriptor = [[MTLSamplerDescriptor alloc] init];
+    samplerDescriptor.minFilter = MTLSamplerMinMagFilterNearest;
+    samplerDescriptor.magFilter = MTLSamplerMinMagFilterNearest;
+    samplerDescriptor.mipFilter = MTLSamplerMipFilterNotMipmapped;
+    samplerDescriptor.sAddressMode = MTLSamplerAddressModeClampToEdge;
+    samplerDescriptor.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    id<MTLSamplerState> sampler = [self.device newSamplerStateWithDescriptor:samplerDescriptor];
+    if (!sampler) return NO;
+
     self.canvasCompositeBlendPipeline = blendPipeline;
     self.canvasCompositeOpaquePipeline = opaquePipeline;
     self.canvasCompositeFlatTexture = flatTexture;
+    self.canvasCompositeSampler = sampler;
     return YES;
 }
 
@@ -4804,6 +4939,43 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     NativeSdkCompositeOp *ops = (NativeSdkCompositeOp *)opsData.mutableBytes;
     NSMutableArray *opTextures = [NSMutableArray array];
     [self rasterCacheEnsureScale:scale pixelWidth:pixelWidth pixelHeight:pixelHeight];
+    // Build independent command bitmaps concurrently, then publish in order.
+    // Cache mutation and draw order stay on the main thread.
+    if (keys && self.canvasCommandRasterCache) {
+        NSMutableArray *missCommands = [NSMutableArray array];
+        NSMutableArray *missKeys = [NSMutableArray array];
+        for (NSUInteger index = 0; index < commands.count && index < keys.count; index += 1) {
+            NSDictionary *command = NativeSdkPacketDictionary(commands[index]);
+            NSNumber *key = [keys[index] isKindOfClass:[NSNumber class]] ? keys[index] : nil;
+            NSString *kind = [command[@"kind"] isKindOfClass:[NSString class]] ? command[@"kind"] : @"";
+            if (!key || !command[@"bounds"] || !NativeSdkPacketCommandRasterCacheable(command, kind)) continue;
+            if (cullToRects && !NativeSdkPacketRectIntersects(NativeSdkPacketRect(command[@"bounds"]), repaintUnion)) continue;
+            NativeSdkPacketCommandRaster *entry = self.canvasCommandRasterCache[key];
+            if (entry && entry.texture && (entry.command == command || NativeSdkPacketRetargetRasterForTranslation(entry, command, scale, pixelWidth, pixelHeight))) continue;
+            [missCommands addObject:command];
+            [missKeys addObject:key];
+        }
+        const NSUInteger count = missCommands.count;
+        void **built = count >= 2 ? calloc(count, sizeof(void *)) : NULL;
+        if (built) {
+            uint64_t begin = NativeSdkTimestampNanoseconds();
+            dispatch_apply(count, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^(size_t index) {
+                @autoreleasepool {
+                    NSDictionary *command = missCommands[index];
+                    NativeSdkPacketCommandRaster *entry = [self rasterCacheBuildEntryForCommand:command kind:command[@"kind"] scale:scale pixelWidth:pixelWidth pixelHeight:pixelHeight];
+                    if (entry) built[index] = (void *)CFBridgingRetain(entry);
+                }
+            });
+            for (NSUInteger index = 0; index < count; index += 1) {
+                if (!built[index]) continue;
+                NativeSdkPacketCommandRaster *entry = CFBridgingRelease(built[index]);
+                [self rasterCacheStoreEntry:entry forKey:missKeys[index]];
+                self.canvasTraceCacheFillCount += 1;
+            }
+            free(built);
+            self.canvasTraceCacheFillNs += NativeSdkTimestampNanoseconds() - begin;
+        }
+    }
     for (NSUInteger index = 0; index < commands.count; index += 1) {
         NativeSdkCompositeOp *op = &ops[index];
         op->type = 0;
@@ -4840,15 +5012,24 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
             self.canvasTraceDirectCount += 1;
             continue;
         }
-        /* Pixel-aligned fully-opaque solid rect: exact flat quad. */
-        if ([kind isEqualToString:@"fill_rect_solid"] && !command[@"transform"]) {
+        /* Translation-only transforms still permit an exact flat quad. */
+        NSArray *flatTransform = NativeSdkPacketArray(command[@"transform"], 6);
+        BOOL flatTranslation = !command[@"transform"] || (flatTransform &&
+            NativeSdkPacketNumber(flatTransform[0], 1) == 1 && NativeSdkPacketNumber(flatTransform[1], 0) == 0 &&
+            NativeSdkPacketNumber(flatTransform[2], 0) == 0 && NativeSdkPacketNumber(flatTransform[3], 1) == 1);
+        NSDictionary *flatShape = NativeSdkPacketDictionary(command[@"shape"]);
+        NSArray *flatRadii = NativeSdkPacketArray(flatShape[@"radius"], 4);
+        BOOL squareCorners = flatRadii && NativeSdkPacketNumber(flatRadii[0], 0) == 0 &&
+            NativeSdkPacketNumber(flatRadii[1], 0) == 0 && NativeSdkPacketNumber(flatRadii[2], 0) == 0 && NativeSdkPacketNumber(flatRadii[3], 0) == 0;
+        if (([kind isEqualToString:@"fill_rect_solid"] || ([kind isEqualToString:@"fill_rounded_rect_solid"] && squareCorners)) && flatTranslation) {
             NSDictionary *paint = NativeSdkPacketDictionary(command[@"paint"]);
             NSDictionary *shape = NativeSdkPacketDictionary(command[@"shape"]);
             NSArray *colorArray = paint ? NativeSdkPacketArray(paint[@"color"], 4) : nil;
             CGFloat opacity = fmax(0.0, fmin(1.0, NativeSdkPacketNumber(command[@"opacity"], 1)));
-            if (colorArray && shape && [[paint[@"kind"] description] isEqualToString:@"color"] && opacity >= 1.0 &&
-                NativeSdkPacketNumber(colorArray[3], 1) >= 1.0) {
+            if (colorArray && shape && [[paint[@"kind"] description] isEqualToString:@"color"]) {
+                const CGFloat sourceAlpha = opacity * fmax(0.0, fmin(1.0, NativeSdkPacketNumber(colorArray[3], 1)));
                 NSRect rect = CGRectStandardize(NativeSdkPacketRect(shape[@"rect"]));
+                if (flatTransform) rect = NSOffsetRect(rect, NativeSdkPacketNumber(flatTransform[4], 0), NativeSdkPacketNumber(flatTransform[5], 0));
                 NSArray *clipArray = NativeSdkPacketArray(command[@"clip"], 4);
                 /* The solid-quad fast path can only honor a RECTANGULAR
                  * clip. A command carrying corner radii falls through to
@@ -4867,15 +5048,16 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
                     pxMaxX = fmax(pxMinX, fmin((CGFloat)pixelWidth, round(pxMaxX)));
                     pxMaxY = fmax(pxMinY, fmin((CGFloat)pixelHeight, round(pxMaxY)));
                     if (pxMaxX > pxMinX && pxMaxY > pxMinY) {
-                        op->type = 1;
+                        if (sourceAlpha <= 0) continue;
+                        op->type = sourceAlpha >= 1.0 ? 1 : 4;
                         op->pxX = (float)pxMinX;
                         op->pxY = (float)pxMinY;
                         op->pxW = (float)(pxMaxX - pxMinX);
                         op->pxH = (float)(pxMaxY - pxMinY);
-                        op->colorR = (float)fmax(0.0, fmin(1.0, NativeSdkPacketNumber(colorArray[0], 0)));
-                        op->colorG = (float)fmax(0.0, fmin(1.0, NativeSdkPacketNumber(colorArray[1], 0)));
-                        op->colorB = (float)fmax(0.0, fmin(1.0, NativeSdkPacketNumber(colorArray[2], 0)));
-                        op->colorA = 1;
+                        op->colorR = (float)(fmax(0.0, fmin(1.0, NativeSdkPacketNumber(colorArray[0], 0))) * sourceAlpha);
+                        op->colorG = (float)(fmax(0.0, fmin(1.0, NativeSdkPacketNumber(colorArray[1], 0))) * sourceAlpha);
+                        op->colorB = (float)(fmax(0.0, fmin(1.0, NativeSdkPacketNumber(colorArray[2], 0))) * sourceAlpha);
+                        op->colorA = (float)sourceAlpha;
                         self.canvasTraceDirectCount += 1;
                         continue;
                     }
@@ -4912,8 +5094,8 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
                 self.canvasCommandRasterCacheTick += 1;
                 entry.lastUseTick = self.canvasCommandRasterCacheTick;
                 op->type = 2;
-                op->pxX = (float)entry.pixelX;
-                op->pxY = (float)entry.pixelY;
+                op->pxX = (float)(entry.destination.origin.x * scale);
+                op->pxY = (float)(entry.destination.origin.y * scale);
                 op->pxW = (float)entry.pixelWidth;
                 op->pxH = (float)entry.pixelHeight;
                 op->texture = (__bridge void *)entry.texture;
@@ -4925,7 +5107,13 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         MTLRegion region = {0};
         const uint64_t scratchBegin = NativeSdkTimestampNanoseconds();
         id<MTLTexture> scratch = [self compositeScratchTextureForCommand:command poolKey:key scale:scale pixelWidth:pixelWidth pixelHeight:pixelHeight repaintRect:repaintUnion hasRepaintRect:cullToRects outRegion:&region];
-        self.canvasTraceDirectNs += NativeSdkTimestampNanoseconds() - scratchBegin;
+        const uint64_t scratchNs = NativeSdkTimestampNanoseconds() - scratchBegin;
+        self.canvasTraceDirectNs += scratchNs;
+        if (getenv("NATIVE_SDK_GPU_DRAW_TRACE_KINDS") && scratchNs >= 300000) {
+            fprintf(stderr, "native-sdk: gpu scratch kind=%s us=%llu bounds=%.1f,%.1f %.1fx%.1f\n",
+                kind.UTF8String ?: "", (unsigned long long)(scratchNs / 1000),
+                op->cullBounds.origin.x, op->cullBounds.origin.y, op->cullBounds.size.width, op->cullBounds.size.height);
+        }
         if (!scratch) return 0;
         self.canvasTraceDirectCount += 1;
         op->type = 2;
@@ -4972,7 +5160,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         self.canvasTraceBindCount += 1;
         for (NSUInteger rectIndex = 0; rectIndex < rectCount; rectIndex += 1) {
             [encoder setScissorRect:pxRects[rectIndex]];
-            NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, (float)pxRects[rectIndex].x, (float)pxRects[rectIndex].y, (float)pxRects[rectIndex].width, (float)pxRects[rectIndex].height, 0, 0, clearComponents, NO, self.canvasCompositeFlatTexture);
+            NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, (float)pxRects[rectIndex].x, (float)pxRects[rectIndex].y, (float)pxRects[rectIndex].width, (float)pxRects[rectIndex].height, 0, 0, clearComponents, NO, self.canvasCompositeFlatTexture, self.canvasCompositeSampler);
             self.canvasTraceQuadCount += 1;
         }
     }
@@ -5045,7 +5233,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
             currentPipeline = self.canvasCompositeOpaquePipeline;
             self.canvasTraceBindCount += 1;
             [encoder setScissorRect:fullScissor];
-            NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, op->pxX, op->pxY, op->pxW, op->pxH, 0, 0, NULL, YES, blurTexture);
+            NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, op->pxX, op->pxY, op->pxW, op->pxH, 0, 0, NULL, YES, blurTexture, self.canvasCompositeSampler);
             self.canvasTraceQuadCount += 1;
             continue;
         }
@@ -5058,11 +5246,11 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
                 self.canvasTraceBindCount += 1;
             }
             [encoder setScissorRect:pxRects[rectIndex]];
-            if (op->type == 1) {
+            if (op->type == 1 || op->type == 4) {
                 const float color[4] = {op->colorR, op->colorG, op->colorB, op->colorA};
-                NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, op->pxX, op->pxY, op->pxW, op->pxH, 0, 0, color, NO, self.canvasCompositeFlatTexture);
+                NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, op->pxX, op->pxY, op->pxW, op->pxH, 0, 0, color, NO, self.canvasCompositeFlatTexture, self.canvasCompositeSampler);
             } else {
-                NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, op->pxX, op->pxY, op->pxW, op->pxH, 0, 0, NULL, YES, (__bridge id<MTLTexture>)op->texture);
+                NativeSdkCompositeEncodeQuad(encoder, pixelWidth, pixelHeight, op->pxX, op->pxY, op->pxW, op->pxH, 0, 0, NULL, YES, (__bridge id<MTLTexture>)op->texture, self.canvasCompositeSampler);
             }
             self.canvasTraceQuadCount += 1;
         }
@@ -5085,6 +5273,9 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
  * a missing/resized/invalid target refuses (0) so the engine resyncs
  * with a full present. */
 - (NSInteger)presentCompositePacketWithCommands:(NSArray *)commands keys:(NSArray *)keys pixelWidth:(NSUInteger)pixelWidth pixelHeight:(NSUInteger)pixelHeight scale:(CGFloat)scale surfaceWidth:(CGFloat)surfaceWidth surfaceHeight:(CGFloat)surfaceHeight clearColor:(NSColor *)clearColor loadAction:(NSString *)loadAction fullSurfacePass:(BOOL)fullSurfacePass hasScissor:(BOOL)hasScissor scissorRect:(NSRect)scissorRect dirtyRects:(NSArray<NSValue *> *)dirtyRects directRetainedDirtyUpdate:(BOOL)directRetainedDirtyUpdate {
+    // Composite packets bypass presentPixels, which normally prepares
+    // the final texture-to-window pipeline and sampler.
+    if (![self ensureCanvasPresenter]) return -1;
     const BOOL needNewTexture = !self.canvasTexture || !self.canvasTextureRenderable ||
         self.canvasTextureWidth != pixelWidth || self.canvasTextureHeight != pixelHeight;
     if (!fullSurfacePass && (needNewTexture || !self.canvasCompositeContentValid)) return 0;
@@ -5378,7 +5569,8 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     if (hasCommandClip) {
         NativeSdkPacketApplyCommandClip(command, commandClip);
     }
-    BOOL ok = NativeSdkPacketDrawCommandBody(command, kind, opacity, bitmap, scale, hasCommandClip, commandClip, self.canvasImageCache);
+    BOOL ok = NativeSdkPacketApplyTransform(command[@"transform"]);
+    if (ok) ok = NativeSdkPacketDrawCommandBody(command, kind, opacity, bitmap, scale, hasCommandClip, commandClip, self.canvasImageCache);
     [NSGraphicsContext restoreGraphicsState];
     CGImageRef cgImage = ok ? CGBitmapContextCreateImage(bitmap) : NULL;
     CGContextRelease(bitmap);
@@ -5729,7 +5921,9 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
             NSDictionary *command = NativeSdkPacketDictionary(upsert[@"command"]);
             if (!key || !command) { self.hasCanvasRetainedState = NO; return 0; }
             self.canvasRetainedCommands[key] = command;
-            [self rasterCacheRemoveKey:key];
+            /* Keep the old raster until the draw pass compares the new
+             * command. Exact scroll translations retarget it; every other
+             * change removes it through the ordinary cache validation. */
         }
         if (self.canvasRetainedCommands.count > NativeSdkPacketRetainedCommandCap) { self.hasCanvasRetainedState = NO; return 0; }
         /* Draw order comes exclusively from the order vector, and it must
