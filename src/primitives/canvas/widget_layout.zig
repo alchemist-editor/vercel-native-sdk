@@ -150,7 +150,7 @@ pub fn layoutWidgetDepth(
                 _ = try layoutWidgetDepth(child, stackChildFrame(child_content, child, tokens), index, depth + 1, output, len, tokens);
             }
         },
-        .stack, .bubble, .card, .resizable, .panel, .popover => {
+        .stack, .bubble, .card, .resizable, .panel, .popover, .tooltip => {
             for (widget.children) |child| {
                 if (!widgetTakesFlowSlot(child)) continue;
                 _ = try layoutWidgetDepth(child, stackChildFrame(content, child, tokens), index, depth + 1, output, len, tokens);
@@ -174,7 +174,7 @@ pub fn layoutWidgetDepth(
             try layoutTextSpanLinkChildren(widget, content, index, depth, output, len, tokens)
         else
             try layoutAxisChildren(widget.children, content, .horizontal, index, depth, output, len, widget.layout, tokens),
-        .icon, .image, .avatar, .badge, .button, .toggle_button, .icon_button, .select, .input, .text_field, .search_field, .combobox, .textarea, .tooltip, .menu_item, .status_bar, .segmented_control, .checkbox, .radio, .switch_control, .toggle, .slider, .progress, .separator, .skeleton, .spinner, .chart, .split_divider, .media_surface, .terminal => {},
+        .icon, .image, .avatar, .badge, .button, .toggle_button, .icon_button, .select, .input, .text_field, .search_field, .combobox, .textarea, .menu_item, .status_bar, .segmented_control, .checkbox, .radio, .switch_control, .toggle, .slider, .progress, .separator, .skeleton, .spinner, .chart, .split_divider, .media_surface, .terminal => {},
     }
 
     // Root-relative modals and anchored floating children are excluded from
@@ -1095,7 +1095,8 @@ fn wrappedVerticalExtentForWidth(widget: Widget, width: f32, tokens: DesignToken
             }
             break :blk sum;
         },
-        .stack, .panel, .card, .bubble, .resizable, .popover => blk: {
+        .stack, .panel, .card, .bubble, .resizable, .popover, .tooltip => blk: {
+            if (widget.kind == .tooltip and widget.children.len == 0) return preferredMainExtent(widget, .vertical, tokens);
             var max_height: f32 = 0;
             for (widget.children) |child| {
                 if (!widgetTakesFlowSlot(child)) continue;
@@ -1960,7 +1961,7 @@ pub fn slideSplitChildren(
 /// excluded on purpose.
 pub fn widgetKindStacksChildren(kind: widget_model.WidgetKind) bool {
     return switch (kind) {
-        .stack, .alert, .bubble, .card, .dialog, .drawer, .sheet, .resizable, .panel, .popover => true,
+        .stack, .alert, .bubble, .card, .dialog, .drawer, .sheet, .resizable, .panel, .popover, .tooltip => true,
         else => false,
     };
 }
@@ -2086,7 +2087,10 @@ fn intrinsicWidgetSizeDepth(widget: Widget, tokens: DesignTokens, depth: usize) 
         .input, .text_field => geometry.SizeF.init(widgetSizedDensityValue(widget, tokens, 160), widgetControlHeight(widget, tokens)),
         .search_field, .combobox => geometry.SizeF.init(widgetSizedDensityValue(widget, tokens, 200), widgetControlHeight(widget, tokens)),
         .textarea => geometry.SizeF.init(widgetSizedDensityValue(widget, tokens, 200), widgetSizedDensityValue(widget, tokens, 80)),
-        .tooltip => intrinsicPaddedTextWidgetSize(widget, tokens, widgetLabelTextSize(widget, tokens), widgetControlInset(widget, tokens, tokens.spacing.sm)),
+        .tooltip => if (widget.children.len > 0)
+            intrinsicOverlayChildrenSize(widget, tokens, depth)
+        else
+            intrinsicPaddedTextWidgetSize(widget, tokens, widgetLabelTextSize(widget, tokens), widgetControlInset(widget, tokens, tokens.spacing.sm)),
         // Menu rows measure like list rows PLUS the trailing checkmark
         // slot every option reserves (committed or not, so commit moves
         // never reflow labels), on the menu's comfortable row band.
