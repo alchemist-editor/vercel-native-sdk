@@ -57,6 +57,9 @@ pub fn widgetBadgeTextSize(widget: Widget, tokens: DesignTokens) f32 {
 }
 
 pub fn widgetTypographySize(widget: Widget, base: f32) f32 {
+    if (widget.style.text_size) |size| {
+        if (std.math.isFinite(size) and size > 0) return size;
+    }
     return switch (widget.size) {
         .sm => @max(8, base - 1),
         // heading/display are text-leaf typography rungs (resolved in
