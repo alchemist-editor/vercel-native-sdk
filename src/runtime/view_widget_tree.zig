@@ -418,6 +418,52 @@ pub fn RuntimeViewCanvasWidgetTree(comptime RuntimeView: type) type {
             return layout.nodes[target_index].widget.id;
         }
 
+        /// Whether a hover-triangle grace is currently protecting the
+        /// pointer's trip into an open menu, and should therefore hold
+        /// the standing hover where it is instead of re-resolving onto
+        /// whatever row the diagonal passes over. Answers false — and
+        /// disarms — the moment the pointer leaves the triangle, the
+        /// surface closes, or the pointer reaches the surface itself.
+        pub fn canvasWidgetMenuSafeAreaHolds(self: *RuntimeView, point: geometry.PointF) bool {
+            const surface_id = self.canvas_widget_menu_safe_surface_id;
+            if (surface_id == 0) return false;
+            const layout = self.widgetLayoutTree();
+            const index = self.canvasWidgetNodeIndexById(surface_id) orelse {
+                self.canvas_widget_menu_safe_surface_id = 0;
+                return false;
+            };
+            if (canvas.menuSafeTriangleContains(layout.nodes[index].frame, self.canvas_widget_menu_safe_apex, point)) return true;
+            self.canvas_widget_menu_safe_surface_id = 0;
+            return false;
+        }
+
+        /// Arm the grace when the pointer stands on a row that owns an
+        /// open anchored menu: the apex is where it stands now, so the
+        /// triangle covers the diagonal it is about to travel.
+        pub fn armCanvasWidgetMenuSafeArea(self: *RuntimeView, hit: ?canvas.WidgetHit, point: geometry.PointF) void {
+            const target = hit orelse {
+                self.canvas_widget_menu_safe_surface_id = 0;
+                return;
+            };
+            const layout = self.widgetLayoutTree();
+            const node_index = self.canvasWidgetNodeIndexById(target.id) orelse {
+                self.canvas_widget_menu_safe_surface_id = 0;
+                return;
+            };
+            // The hit can land on a label or icon inside the row, so walk
+            // up until an ancestor owns an anchored menu.
+            var current: ?usize = node_index;
+            while (current) |index| {
+                if (canvas.widgetLayoutAnchoredMenuChildIndex(layout, index)) |surface_index| {
+                    self.canvas_widget_menu_safe_surface_id = layout.nodes[surface_index].widget.id;
+                    self.canvas_widget_menu_safe_apex = point;
+                    return;
+                }
+                current = layout.nodes[index].parent_index;
+            }
+            self.canvas_widget_menu_safe_surface_id = 0;
+        }
+
         /// Recompute the standing hover-Msg chain from a raw hit — the
         /// pointer and scroll seams call this with the SAME raw hit the
         /// wash resolution consumed, so containment and the wash always
