@@ -1001,3 +1001,68 @@ test "tooltip coexistence: escape peels the tooltip first, then the menu, one pe
     try std.testing.expectEqual(@as(u32, 99), fixture.app_state.model.picked);
     try std.testing.expectEqual(trigger_id, fixture.harness.runtime.views[0].canvas_widget_focused_id);
 }
+
+const DialogModel = struct {
+    open: bool = true,
+    dismissals: u32 = 0,
+};
+
+const DialogMsg = union(enum) {
+    close,
+};
+
+const DialogApp = ui_app_model.UiApp(DialogModel, DialogMsg);
+
+fn dialogUpdate(model: *DialogModel, msg: DialogMsg) void {
+    switch (msg) {
+        .close => {
+            model.open = false;
+            model.dismissals += 1;
+        },
+    }
+}
+
+fn dialogView(ui: *DialogApp.Ui, model: *const DialogModel) DialogApp.Ui.Node {
+    const page = ui.text(.{}, "Page");
+    if (!model.open) return ui.column(.{ .padding = 12 }, .{page});
+    return ui.column(.{ .padding = 12 }, .{
+        page,
+        ui.el(.dialog, .{ .width = 200, .height = 120, .on_dismiss = .close }, .{
+            ui.text(.{}, "Dialog body"),
+        }),
+    });
+}
+
+fn dialogOptions() DialogApp.Options {
+    return .{
+        .name = "ui-app-dialog-dismissal",
+        .scene = picker_scene,
+        .canvas_label = canvas_label,
+        .update = dialogUpdate,
+        .view = dialogView,
+    };
+}
+
+const DialogFixture = AppFixture(DialogApp, dialogOptions);
+
+test "escape dismisses a root-relative dialog through on_dismiss" {
+    const fixture = try DialogFixture.create();
+    defer fixture.destroy();
+
+    // Dialogs carry no anchor, yet they are dismissible surfaces: Escape
+    // reaches them through the same on_dismiss contract as a menu.
+    try fixture.key("escape");
+    try std.testing.expectEqual(@as(u32, 1), fixture.app_state.model.dismissals);
+    try std.testing.expect(!fixture.app_state.model.open);
+}
+
+test "an outside click dismisses a root-relative dialog and an inside click does not" {
+    const fixture = try DialogFixture.create();
+    defer fixture.destroy();
+
+    const body_id = fixture.widgetIdByText(.text, "Dialog body").?;
+    try fixture.clickWidget(body_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.app_state.model.dismissals);
+    try fixture.click(geometry.PointF.init(4, 296));
+    try std.testing.expectEqual(@as(u32, 1), fixture.app_state.model.dismissals);
+}
