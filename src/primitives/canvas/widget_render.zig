@@ -1148,18 +1148,22 @@ fn widgetContentClip(widget: Widget, tokens: DesignTokens) Clip {
 
 fn widgetContentClipRadius(widget: Widget, tokens: DesignTokens) Radius {
     if (!widget.layout.clip_content) return .{};
-    return switch (widget.kind) {
         // The bubble clips at its own capsule arc so wide content (an
         // image child, a full-bleed row) shears along the chrome's
-        // corners instead of the generic surface radius.
-        .bubble => widget_render_surfaces.bubbleWidgetRadius(widget, tokens),
-        // Keep a surface's child clip exactly in step with its chrome.
-        // In particular, an explicit `radius="none"` must not round a
-        // full-bleed child after the surface itself has become square.
+    // corners instead of the generic surface radius. Its four corners
+    // differ, so no single authored scalar can stand in for them.
+    if (widget.kind == .bubble) return widget_render_surfaces.bubbleWidgetRadius(widget, tokens);
+    // Authored clipping belongs to the authored surface geometry: the
+    // curve the chrome paints is the curve its children are cut by.
+    // This outranks the per-kind default, which only describes the
+    // chrome a surface draws when the author names no radius — a
+    // popover styled at 5pt would otherwise have its content shaved by
+    // the 12pt arc of a surface nothing ever painted.
+    if (widget.style.radius) |radius| return Radius.all(@max(0, radius));
+    return switch (widget.kind) {
         .alert => controlRadius(widget, alertControlVisualTokens(tokens), tokens.radius.lg),
         .card => controlRadius(widget, cardControlVisualTokens(tokens), tokens.radius.lg),
         .resizable, .panel, .menu_surface, .dropdown_menu => controlRadius(widget, surfaceControlVisualTokens(widget, tokens), tokens.radius.lg),
-        .accordion => .{},
         .dialog => controlRadius(widget, dialogControlVisualTokens(tokens), tokens.radius.xl),
         .drawer => controlRadius(widget, drawerControlVisualTokens(tokens), tokens.radius.xl),
         .sheet => controlRadius(widget, sheetControlVisualTokens(tokens), tokens.radius.lg),

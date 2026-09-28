@@ -564,6 +564,10 @@ struct Command {
     uint64_t id = 0;
     bool has_clip = false;
     Rect clip = {};
+    /* v6: a clip may carry corner radii, which the engine attaches only
+     * where the command's own geometry reaches one of them. */
+    bool has_clip_radius = false;
+    Radius clip_radius = {};
     bool has_transform = false;
     Affine transform = {};
     Shape shape;
@@ -797,6 +801,10 @@ static bool readCommand(Reader &reader, Command *command) {
     if (flags & kCommandFlagClip) {
         command->has_clip = true;
         command->clip = readRect(reader);
+        if (reader.u8()) {
+            command->has_clip_radius = true;
+            command->clip_radius = readRadius(reader);
+        }
     }
     if (flags & kCommandFlagTransform) {
         command->has_transform = true;
@@ -2473,7 +2481,32 @@ private:
         if (outer_clip && !intersects(command.bounds, *outer_clip)) return true;
         ctx()->SetTransform(D2D1::Matrix3x2F::Identity());
         if (outer_clip) ctx()->PushAxisAlignedClip(d2dRect(*outer_clip), D2D1_ANTIALIAS_MODE_ALIASED);
-        if (command.has_clip) ctx()->PushAxisAlignedClip(d2dRect(command.clip), D2D1_ANTIALIAS_MODE_ALIASED);
+        /* A rounded clip needs a geometric mask; an axis-aligned clip
+         * can only square the corners off. The mask layer costs more
+         * than the clip, which is why the engine only attaches radii to
+         * commands whose geometry actually reaches a corner. */
+        ID2D1PathGeometry *clip_mask = nullptr;
+        ID2D1Layer *clip_layer = nullptr;
+        bool clip_pushed = false;
+        if (command.has_clip && command.has_clip_radius) {
+            if (makeRoundedGeometry(renderer_->d2dFactory(), command.clip, command.clip_radius, &clip_mask) &&
+                SUCCEEDED(ctx()->CreateLayer(nullptr, &clip_layer))) {
+                D2D1_LAYER_PARAMETERS parameters = D2D1::LayerParameters();
+                parameters.contentBounds = D2D1::InfiniteRect();
+                parameters.geometricMask = clip_mask;
+                parameters.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
+                parameters.opacity = 1.0f;
+                ctx()->PushLayer(parameters, clip_layer);
+            } else {
+                releaseCom(clip_mask);
+                releaseCom(clip_layer);
+                if (outer_clip) ctx()->PopAxisAlignedClip();
+                return false;
+            }
+        } else if (command.has_clip) {
+            ctx()->PushAxisAlignedClip(d2dRect(command.clip), D2D1_ANTIALIAS_MODE_ALIASED);
+            clip_pushed = true;
+        }
         if (command.has_transform) {
             const Affine &value = command.transform;
             ctx()->SetTransform(D2D1::Matrix3x2F(value.a, value.b, value.c, value.d, value.tx, value.ty));
@@ -2500,7 +2533,13 @@ private:
                 break;
         }
         ctx()->SetTransform(D2D1::Matrix3x2F::Identity());
-        if (command.has_clip) ctx()->PopAxisAlignedClip();
+        if (clip_layer) {
+            ctx()->PopLayer();
+            releaseCom(clip_layer);
+            releaseCom(clip_mask);
+        } else if (clip_pushed) {
+            ctx()->PopAxisAlignedClip();
+        }
         if (outer_clip) ctx()->PopAxisAlignedClip();
         return ok;
     }
