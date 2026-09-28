@@ -1348,6 +1348,60 @@ test "flush button groups collapse corners and interior seams in both render wal
     try std.testing.expect(spaced_list.findCommandById(widgetPartId(4, 0)) == null);
 }
 
+test "a vertical flush group caps top and bottom corners and drops the top seam" {
+    const tokens = DesignTokens{};
+    const segments = [_]Widget{
+        .{ .id = 2, .kind = .button, .frame = geometry.RectF.init(0, 0, 32, 28), .text = "+", .variant = .outline },
+        .{ .id = 3, .kind = .button, .frame = geometry.RectF.init(0, 28, 32, 28), .text = "-", .variant = .outline },
+    };
+    var group = Widget{
+        .id = 1,
+        .kind = .button_group,
+        .frame = geometry.RectF.init(0, 0, 32, 56),
+        .children = &segments,
+    };
+    group.layout.vertical = true;
+
+    // The stepper is one capsule: the top segment keeps only its top
+    // corners, the bottom only its bottom ones, and the seam between
+    // them is painted once — by the upper segment's bottom edge.
+    var commands: [16]CanvasCommand = undefined;
+    var builder = Builder.init(&commands);
+    try emitWidgetTree(&builder, group, tokens);
+    const list = builder.displayList();
+    switch (list.findCommandById(widgetPartId(2, 1)).?.command) {
+        .fill_rounded_rect => |fill| try std.testing.expectEqualDeep(Radius{ .top_left = 10, .top_right = 10 }, fill.radius),
+        else => return error.TestUnexpectedResult,
+    }
+    switch (list.findCommandById(widgetPartId(3, 1)).?.command) {
+        .fill_rounded_rect => |fill| try std.testing.expectEqualDeep(Radius{ .bottom_left = 10, .bottom_right = 10 }, fill.radius),
+        else => return error.TestUnexpectedResult,
+    }
+    // The seam clip is the vertical twin of the horizontal bar's: it
+    // opens below the shared edge, not to the right of it.
+    switch (list.findCommandById(widgetPartId(3, 0)).?.command) {
+        .push_clip => |clip| try std.testing.expect(clip.rect.y > segments[1].frame.y),
+        else => return error.TestUnexpectedResult,
+    }
+    try std.testing.expect(list.findCommandById(widgetPartId(2, 0)) == null);
+
+    // The layout walk has to agree, or a live app and a docs scene
+    // would render different steppers.
+    var nodes: [3]WidgetLayoutNode = undefined;
+    const layout = try layoutWidgetTree(group, group.frame, &nodes);
+    var layout_commands: [16]CanvasCommand = undefined;
+    var layout_builder = Builder.init(&layout_commands);
+    try layout.emitDisplayList(&layout_builder, tokens);
+    switch (layout_builder.displayList().findCommandById(widgetPartId(3, 1)).?.command) {
+        .fill_rounded_rect => |fill| try std.testing.expectEqualDeep(Radius{ .bottom_left = 10, .bottom_right = 10 }, fill.radius),
+        else => return error.TestUnexpectedResult,
+    }
+    // Stacked, not packed side by side.
+    try std.testing.expectEqual(@as(f32, 0), layout.nodes[1].frame.x);
+    try std.testing.expectEqual(@as(f32, 0), layout.nodes[2].frame.x);
+    try std.testing.expect(layout.nodes[2].frame.y >= layout.nodes[1].frame.maxY());
+}
+
 test "detached button groups render chip members with the group table and the metric gap" {
     // A detached-register token set with every channel stated, so the
     // assertions read the table straight back: rest wash, ink-inverted

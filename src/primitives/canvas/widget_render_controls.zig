@@ -283,6 +283,12 @@ pub fn emitIconButtonWidget(builder: *Builder, widget: Widget, tokens: DesignTok
 fn buttonGroupSegmentRadius(widget: Widget, visual: ControlVisualTokens, tokens: DesignTokens) Radius {
     const radius = buttonControlRadius(widget, visual, tokens);
     if (widget_render_style.buttonInDetachedGroup(widget, tokens)) return radius;
+    if (widget.group_vertical) return switch (widget.group_segment) {
+        .none => radius,
+        .first => .{ .top_left = radius.top_left, .top_right = radius.top_right },
+        .middle => .{},
+        .last => .{ .bottom_left = radius.bottom_left, .bottom_right = radius.bottom_right },
+    };
     return switch (widget.group_segment) {
         .none => radius,
         .first => .{ .top_left = radius.top_left, .bottom_left = radius.bottom_left },
@@ -314,26 +320,41 @@ fn emitButtonBorder(builder: *Builder, widget: Widget, tokens: DesignTokens, rad
         },
     });
     // Seams exist only in the segmented register — a detached chip has
-    // no shared boundary to collapse.
-    const drop_left_border = !widget_render_style.buttonInDetachedGroup(widget, tokens) and
+    // no shared boundary to collapse. A vertical group's shared boundary
+    // is the TOP edge (the upper neighbor's bottom band paints it), so
+    // the same rule drops a band on the other axis.
+    const drop_seam_border = !widget_render_style.buttonInDetachedGroup(widget, tokens) and
         (widget.group_segment == .middle or widget.group_segment == .last);
-    if (drop_left_border) {
-        // The clip's left edge sits on the border band's INNER edge —
+    if (drop_seam_border) {
+        // The clip's leading edge sits on the border band's INNER edge —
         // computed from the (possibly snapped) emitted stroke, so the
-        // whole left band drops whether or not snapping moved it.
-        const band_inner_x = border.rect.x + border.stroke.width * 0.5;
-        try builder.pushClip(.{
-            .id = widgetPartId(widget.id, 0),
-            .rect = geometry.RectF.init(
-                band_inner_x,
-                widget.frame.y - stroke_width,
-                @max(0, widget.frame.maxX() + stroke_width - band_inner_x),
-                widget.frame.height + stroke_width * 2,
-            ),
-        });
+        // whole band drops whether or not snapping moved it.
+        if (widget.group_vertical) {
+            const band_inner_y = border.rect.y + border.stroke.width * 0.5;
+            try builder.pushClip(.{
+                .id = widgetPartId(widget.id, 0),
+                .rect = geometry.RectF.init(
+                    widget.frame.x - stroke_width,
+                    band_inner_y,
+                    widget.frame.width + stroke_width * 2,
+                    @max(0, widget.frame.maxY() + stroke_width - band_inner_y),
+                ),
+            });
+        } else {
+            const band_inner_x = border.rect.x + border.stroke.width * 0.5;
+            try builder.pushClip(.{
+                .id = widgetPartId(widget.id, 0),
+                .rect = geometry.RectF.init(
+                    band_inner_x,
+                    widget.frame.y - stroke_width,
+                    @max(0, widget.frame.maxX() + stroke_width - band_inner_x),
+                    widget.frame.height + stroke_width * 2,
+                ),
+            });
+        }
     }
     try builder.strokeRect(border);
-    if (drop_left_border) try builder.popClip();
+    if (drop_seam_border) try builder.popClip();
 }
 
 /// Draw a parsed vector icon fitted (contain, centered) into `rect`: a
