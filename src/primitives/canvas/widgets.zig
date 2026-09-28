@@ -505,6 +505,9 @@ pub const WidgetLayoutStyle = struct {
 pub const WidgetStyle = struct {
     background: ?Color = null,
     foreground: ?Color = null,
+    /// Exact type size for authored controls whose reference typography
+    /// falls between the theme's default/small/large rungs.
+    text_size: ?f32 = null,
     accent: ?Color = null,
     accent_foreground: ?Color = null,
     border: ?Color = null,
@@ -1657,8 +1660,9 @@ fn mergeLayoutDefaults(explicit: WidgetLayoutStyle, defaults: WidgetLayoutStyle)
 test "Widget keeps the reviewed retained footprint with portable radio policy" {
     // One layout tree holds thousands of Widgets by value. On the 64-bit
     // targets that run the renderer, the footprint includes the portable
-    // radio policy callback and paragraph letter spacing (`text_tracking`).
+    // radio policy callback, paragraph letter spacing (`text_tracking`), and
+    // authored text size (`WidgetStyle.text_size`).
     if (@sizeOf(usize) == 8) {
-        try std.testing.expectEqual(@as(usize, 784), @sizeOf(Widget));
+        try std.testing.expectEqual(@as(usize, 792), @sizeOf(Widget));
     }
 }
