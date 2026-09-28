@@ -320,6 +320,10 @@ pub const UiHandlerEvent = enum {
     toggle,
     change,
     submit,
+    /// Keyboard focus left this widget. Pointer dispatch continues after
+    /// this message, so clicking another control both blurs the editor and
+    /// activates the clicked control.
+    blur,
     input,
     scroll,
     context_menu,
@@ -821,6 +825,10 @@ pub fn Ui(comptime Msg: type) type {
             on_toggle: ?Msg = null,
             on_change: ?Msg = null,
             on_submit: ?Msg = null,
+            /// Dispatched when keyboard focus leaves this widget. This is
+            /// distinct from submit: callers may commit, cancel, or preserve
+            /// their draft, while the outside pointer gesture still routes.
+            on_blur: ?Msg = null,
             /// Dismissal Msg for dismissible surfaces (dialog, drawer,
             /// sheet, popover, menu_surface, dropdown_menu): dispatched
             /// when the user dismisses the surface — Escape, a click
@@ -971,6 +979,7 @@ pub fn Ui(comptime Msg: type) type {
             on_toggle: ?Msg = null,
             on_change: ?Msg = null,
             on_submit: ?Msg = null,
+            on_blur: ?Msg = null,
             on_dismiss: ?Msg = null,
             on_hold: ?Msg = null,
             on_hover_enter: ?Msg = null,
@@ -1609,6 +1618,7 @@ pub fn Ui(comptime Msg: type) type {
                 .on_toggle = options.on_toggle,
                 .on_change = options.on_change,
                 .on_submit = options.on_submit,
+                .on_blur = options.on_blur,
                 .on_dismiss = options.on_dismiss,
                 .on_hold = options.on_hold,
                 .on_hover_enter = options.on_hover_enter,
@@ -3525,6 +3535,7 @@ pub fn Ui(comptime Msg: type) type {
             appendHandler(handlers, handler_len, widget.id, .toggle, node.on_toggle);
             appendHandler(handlers, handler_len, widget.id, .change, node.on_change);
             appendHandler(handlers, handler_len, widget.id, .submit, node.on_submit);
+            appendHandler(handlers, handler_len, widget.id, .blur, node.on_blur);
             appendHandler(handlers, handler_len, widget.id, .dismiss, node.on_dismiss);
             appendHandler(handlers, handler_len, widget.id, .hold, node.on_hold);
             appendHandler(handlers, handler_len, widget.id, .hover_enter, node.on_hover_enter);
@@ -3677,6 +3688,7 @@ pub fn Ui(comptime Msg: type) type {
             if (node.on_toggle != null) total += 1;
             if (node.on_change != null) total += 1;
             if (node.on_submit != null) total += 1;
+            if (node.on_blur != null) total += 1;
             if (node.on_dismiss != null) total += 1;
             if (node.on_hold != null) total += 1;
             if (node.on_hover_enter != null) total += 1;
