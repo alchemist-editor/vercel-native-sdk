@@ -219,6 +219,10 @@ pub const CanvasGpuCommand = struct {
     text: ?CanvasGpuText = null,
     effect: CanvasGpuEffect = .none,
     clip: ?geometry.RectF = null,
+    /// Corner radii of `clip`, present only when this command's own
+    /// geometry reaches one of them (`RenderClip.bindsBounds`). Hosts
+    /// that see a zero radius clip to the rectangle exactly as before.
+    clip_radius: Radius = .{},
     opacity: f32 = 1,
     transform: Affine = .{},
     uses_path_geometry: bool = false,
@@ -479,6 +483,7 @@ pub fn canvasGpuCommandFromRenderCommand(command: RenderCommand, command_index: 
         .kind = .unsupported,
         .bounds = command.bounds,
         .clip = command.clip,
+        .clip_radius = command.clip_radius,
         .opacity = command.opacity,
         .transform = command.transform,
     };
