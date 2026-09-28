@@ -976,10 +976,12 @@ fn emitWidgetLayoutNodeContent(
 /// Flow and stacking containers have no implicit surface treatment. An
 /// actionable container, however, wears the same neutral hover/pressed
 /// ladder as a list row over its full hit frame; an authored background is
-/// its rest fill. Non-actionable containers paint only that authored fill.
+/// its rest fill. Non-actionable containers paint only that authored fill,
+/// and so do actionable ones under a theme that turns
+/// `controls.container_feedback` off.
 fn emitLayoutContainerBackground(builder: *Builder, widget: Widget, tokens: DesignTokens) Error!void {
     const actions = widget.semantics.actions;
-    const actionable = widget.id != 0 and !widget.state.disabled and
+    const actionable = tokens.controls.container_feedback and widget.id != 0 and !widget.state.disabled and
         (actions.press or actions.toggle or actions.drag);
     if (!actionable) {
         const background = widget.style.background orelse return;
