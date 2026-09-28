@@ -4611,13 +4611,14 @@ static const char *NativeSdkGpuShotDir(void) {
  * pixel composites exactly once, like the CPU union clip). */
 
 typedef struct {
-    uint8_t type; /* 0 skip, 1 flat copy quad, 2 textured blend quad, 3 blur sandwich, 4 flat blend quad */
+    uint8_t type; /* 0 skip, 1 flat copy quad, 2 textured blend quad, 3 blur sandwich, 4 flat blend quad, 5 raster pending a layer group */
     BOOL hasCullBounds;
     NSRect cullBounds;      /* point space */
     float pxX, pxY, pxW, pxH; /* device-pixel quad */
     float colorR, colorG, colorB, colorA; /* premultiplied flat color */
     NSUInteger commandIndex;
     void *texture; /* unretained; kept alive by opTextures/raster cache */
+    void *poolKey; /* unretained NSNumber; scratch pooling for a lone raster */
 } NativeSdkCompositeOp;
 
 typedef struct {
@@ -4785,10 +4786,12 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
  * clip + transform + opacity) into a transient texture over the padded,
  * pixel-aligned intersection of its bounds and the repaint region. Used
  * for transform-carrying and over-cache-budget commands. */
-- (id<MTLTexture>)compositeScratchTextureForCommand:(NSDictionary *)command poolKey:(NSNumber *)poolKey scale:(CGFloat)scale pixelWidth:(NSUInteger)pixelWidth pixelHeight:(NSUInteger)pixelHeight repaintRect:(NSRect)repaintRect hasRepaintRect:(BOOL)hasRepaintRect outRegion:(MTLRegion *)outRegion {
-    NSArray *boundsArray = NativeSdkPacketArray(command[@"bounds"], 4);
-    if (!boundsArray || !self.canvasColorSpace) return nil;
-    NSRect bounds = CGRectStandardize(NativeSdkPacketRect(boundsArray));
+/* One layer for a run of commands: they are drawn in order into a single CG
+ * surface, exactly as the CPU path draws them into the shared backing, so
+ * their antialiased edges resolve against each other instead of each being
+ * resolved against transparent and composited separately. */
+- (id<MTLTexture>)compositeScratchTextureForCommands:(NSArray *)batch bounds:(NSRect)bounds poolKey:(NSNumber *)poolKey scale:(CGFloat)scale pixelWidth:(NSUInteger)pixelWidth pixelHeight:(NSUInteger)pixelHeight repaintRect:(NSRect)repaintRect hasRepaintRect:(BOOL)hasRepaintRect outRegion:(MTLRegion *)outRegion {
+    if (batch.count == 0 || !self.canvasColorSpace) return nil;
     if (hasRepaintRect) bounds = NSIntersectionRect(bounds, repaintRect);
     if (NSIsEmptyRect(bounds)) return nil;
     CGFloat minX = floor(NSMinX(bounds) * scale) - 1;
@@ -4825,7 +4828,11 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     NSGraphicsContext *graphics = [NSGraphicsContext graphicsContextWithCGContext:bitmap flipped:YES];
     [NSGraphicsContext saveGraphicsState];
     [NSGraphicsContext setCurrentContext:graphics];
-    BOOL ok = NativeSdkPacketDrawCommand(command, bitmap, scale, NO, NSZeroRect, self.canvasImageCache);
+    BOOL ok = YES;
+    for (NSDictionary *command in batch) {
+        if (!ok) break;
+        ok = NativeSdkPacketDrawCommand(command, bitmap, scale, NO, NSZeroRect, self.canvasImageCache);
+    }
     [NSGraphicsContext restoreGraphicsState];
     CGContextRelease(bitmap);
     if (!ok) return nil;
@@ -4836,8 +4843,6 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
         if (pooled && pooled.width >= rasterWidth && pooled.height >= rasterHeight) texture = pooled;
     }
     if (!texture) {
-        /* Round capacity up so an animated command's wobbling padded
-         * extent keeps hitting the same pooled texture. */
         NSUInteger capacityWidth = MIN((NSUInteger)8192, (rasterWidth + 63) / 64 * 64);
         NSUInteger capacityHeight = MIN((NSUInteger)8192, (rasterHeight + 63) / 64 * 64);
         MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:capacityWidth height:capacityHeight mipmapped:NO];
@@ -4854,6 +4859,7 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     if (outRegion) *outRegion = MTLRegionMake2D((NSUInteger)minX, (NSUInteger)minY, rasterWidth, rasterHeight);
     return texture;
 }
+
 
 - (NSInteger)compositePacketCommands:(NSArray *)commands keys:(NSArray *)keys target:(id<MTLTexture>)target pixelWidth:(NSUInteger)pixelWidth pixelHeight:(NSUInteger)pixelHeight scale:(CGFloat)scale clearColor:(NSColor *)clearColor fullSurfacePass:(BOOL)fullSurfacePass hasScissor:(BOOL)hasScissor scissorRect:(NSRect)scissorRect dirtyRects:(NSArray<NSValue *> *)dirtyRects waitUntilCompleted:(BOOL)waitUntilCompleted {
     if (!target) return -1;
@@ -5104,25 +5110,79 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
             }
             /* Over budget or clamped empty: fall through to scratch. */
         }
+        /* Defer: the grouping pass below decides whether this command
+         * rasterizes alone or shares a layer with the commands it overlaps. */
+        op->type = 5;
+        op->poolKey = (__bridge void *)key;
+        continue;
+    }
+
+    /* Layer grouping.
+     *
+     * Rasterizing one command per layer means two overlapping antialiased
+     * edges each resolve against TRANSPARENT and are then composited as
+     * separate 8-bit quads, so the shared edge is quantized twice and reads
+     * softer than the same pair drawn one after the other into a single
+     * surface (what the CPU path does). Source-over is associative, so a run
+     * of consecutive commands can be drawn into one layer and composited
+     * once with an identical result — and inside that layer their edges
+     * resolve against each other at full precision.
+     *
+     * Only OVERLAPPING consecutive commands need to share: disjoint ones
+     * never blend with each other, so keeping them apart preserves the
+     * per-command raster cache for static chrome. A command that draws
+     * nothing (culled) is transparent to the run; anything that is not a
+     * deferred raster is an ordering barrier and ends it. */
+    for (NSUInteger start = 0; start < commands.count;) {
+        if (ops[start].type != 5) { start += 1; continue; }
+        NSRect unionBounds = ops[start].cullBounds;
+        NSUInteger end = start + 1;
+        NSUInteger members = 1;
+        while (end < commands.count) {
+            if (ops[end].type == 0) { end += 1; continue; }
+            if (ops[end].type != 5 || !ops[end].hasCullBounds) break;
+            if (!NativeSdkPacketRectIntersects(ops[end].cullBounds, unionBounds)) break;
+            unionBounds = NSUnionRect(unionBounds, ops[end].cullBounds);
+            members += 1;
+            end += 1;
+        }
+
+        NSMutableArray *batch = [NSMutableArray arrayWithCapacity:members];
+        for (NSUInteger member = start; member < end; member += 1) {
+            if (ops[member].type != 5) continue;
+            NSDictionary *memberCommand = NativeSdkPacketDictionary(commands[ops[member].commandIndex]);
+            if (!memberCommand) return 0;
+            [batch addObject:memberCommand];
+        }
+        if (batch.count == 0) { start = end; continue; }
+
         MTLRegion region = {0};
         const uint64_t scratchBegin = NativeSdkTimestampNanoseconds();
-        id<MTLTexture> scratch = [self compositeScratchTextureForCommand:command poolKey:key scale:scale pixelWidth:pixelWidth pixelHeight:pixelHeight repaintRect:repaintUnion hasRepaintRect:cullToRects outRegion:&region];
-        const uint64_t scratchNs = NativeSdkTimestampNanoseconds() - scratchBegin;
-        self.canvasTraceDirectNs += scratchNs;
-        if (getenv("NATIVE_SDK_GPU_DRAW_TRACE_KINDS") && scratchNs >= 300000) {
-            fprintf(stderr, "native-sdk: gpu scratch kind=%s us=%llu bounds=%.1f,%.1f %.1fx%.1f\n",
-                kind.UTF8String ?: "", (unsigned long long)(scratchNs / 1000),
-                op->cullBounds.origin.x, op->cullBounds.origin.y, op->cullBounds.size.width, op->cullBounds.size.height);
+        NSNumber *poolKey = batch.count == 1 ? (__bridge NSNumber *)ops[start].poolKey : nil;
+        id<MTLTexture> scratch = [self compositeScratchTextureForCommands:batch bounds:unionBounds poolKey:poolKey scale:scale pixelWidth:pixelWidth pixelHeight:pixelHeight repaintRect:repaintUnion hasRepaintRect:cullToRects outRegion:&region];
+        self.canvasTraceDirectNs += NativeSdkTimestampNanoseconds() - scratchBegin;
+        if (!scratch) {
+            /* An empty layer (fully clipped away) draws nothing. */
+            for (NSUInteger member = start; member < end; member += 1) {
+                if (ops[member].type == 5) ops[member].type = 0;
+            }
+            start = end;
+            continue;
         }
-        if (!scratch) return 0;
         self.canvasTraceDirectCount += 1;
+
+        NativeSdkCompositeOp *op = &ops[start];
+        for (NSUInteger member = start + 1; member < end; member += 1) {
+            if (ops[member].type == 5) ops[member].type = 0;
+        }
         op->type = 2;
+        op->texture = (__bridge void *)scratch;
+        [opTextures addObject:scratch];
         op->pxX = (float)region.origin.x;
         op->pxY = (float)region.origin.y;
         op->pxW = (float)region.size.width;
         op->pxH = (float)region.size.height;
-        op->texture = (__bridge void *)scratch;
-        [opTextures addObject:scratch];
+        start = end;
     }
 
     /* Encode. Everything is validated; failures past this point are
