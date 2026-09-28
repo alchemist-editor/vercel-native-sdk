@@ -4740,6 +4740,8 @@ pub fn Effects(comptime Msg: type) type {
         /// is fed instead, so replay delivers exactly what the recorded
         /// session delivered, in the same order.
         replay: bool = false,
+        /// Whether `startAudioOutput` opened (or, faked, recorded) a stream.
+        audio_output_active: bool = false,
         /// Journaled wall-clock values queued for replay-mode `wallMs`
         /// reads (FIFO; fed from `.clock` records before the consuming
         /// event dispatches).
@@ -7818,6 +7820,56 @@ pub fn Effects(comptime Msg: type) type {
             const services = self.services orelse return error.UnsupportedService;
             if (buffer.len / 4 < max_pixels) return error.ImageTooLarge;
             return services.decodeImage(bytes, buffer, max_pixels);
+        }
+
+        /// Options for the app's real-time synthesized output stream.
+        pub const StartAudioOutputOptions = struct {
+            /// Requested rate; 0 opens the device's native rate. The
+            /// answered format is the rate the renderer must tune to.
+            sample_rate: u32 = 0,
+            channels: u8 = 2,
+            renderer: platform.AudioOutputRenderer,
+        };
+
+        /// Open the platform's real-time output stream and start pulling
+        /// PCM from an app-owned renderer on the host audio thread — the
+        /// synthesis counterpart of `playAudio` for instruments, DAWs,
+        /// and generated scores. Synchronous (not a journaled effect):
+        /// audio is presentation, like media-surface textures, so replay
+        /// and the fake executor never open a device. Both answer the
+        /// requested format (48 kHz when unspecified) without rendering,
+        /// and tests drive the renderer by calling it directly. A second
+        /// start replaces the running stream. Errors:
+        /// `error.UnsupportedService` on hosts without an output path,
+        /// `error.InvalidAudioOptions`, and the host's start failure.
+        pub fn startAudioOutput(self: *Self, options: StartAudioOutputOptions) anyerror!platform.AudioOutputFormat {
+            const format: platform.AudioOutputFormat = .{ .sample_rate = options.sample_rate, .channels = options.channels };
+            if (!format.valid()) return error.InvalidAudioOptions;
+            if (self.executor == .fake or self.replay) {
+                self.audio_output_active = true;
+                return .{ .sample_rate = if (format.sample_rate == 0) 48_000 else format.sample_rate, .channels = format.channels };
+            }
+            const services = self.services orelse return error.UnsupportedService;
+            const opened = try services.audioOutputStart(format, options.renderer);
+            self.audio_output_active = true;
+            return opened;
+        }
+
+        /// Stop the output stream. When this returns, the renderer is
+        /// never entered again, so its context may be released. Idle
+        /// streams no-op.
+        pub fn stopAudioOutput(self: *Self) void {
+            if (!self.audio_output_active) return;
+            self.audio_output_active = false;
+            if (self.executor == .fake or self.replay) return;
+            const services = self.services orelse return;
+            services.audioOutputStop() catch {};
+        }
+
+        /// Whether an output stream is running (for the fake executor and
+        /// replay, whether one was requested).
+        pub fn audioOutputActive(self: *const Self) bool {
+            return self.audio_output_active;
         }
 
         /// Stop a keyed capture. Accepted PCM already staged drains first,
