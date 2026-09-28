@@ -249,7 +249,10 @@ pub const WidgetCursor = enum {
     arrow,
     pointing_hand,
     text,
+    /// Drag left/right — a vertical divider between side-by-side panes.
     resize_horizontal,
+    /// Drag up/down — a horizontal divider between stacked panes.
+    resize_vertical,
 };
 
 pub const WidgetState = struct {
@@ -521,6 +524,11 @@ pub const WidgetStyle = struct {
     /// selection fills, the focus ring, cursor intent, and hit testing
     /// resolve on their own channels and stay exactly as they were.
     quiet_hover: bool = false,
+    /// Override the cursor the kind would resolve (`cursorForWidgetTarget`).
+    /// A composed control — a hand-rolled divider between stacked panes,
+    /// say — advertises the gesture it actually accepts instead of the
+    /// arrow its container kind implies.
+    cursor: ?WidgetCursor = null,
 };
 
 pub const WidgetVariant = enum {

@@ -740,6 +740,7 @@ pub const textInputCaretVisibleScrollOffsetForWidget = widget_runtime.textInputC
 pub const intrinsicWidgetSize = widget_runtime.intrinsicWidgetSize;
 pub const cursorForWidgetHit = widget_runtime.cursorForWidgetHit;
 pub const cursorForWidgetTarget = widget_runtime.cursorForWidgetTarget;
+pub const cursorForWidget = widget_runtime.cursorForWidget;
 /// Whether the engine hit-tests widgets of this kind (widget_access.zig —
 /// the single source of truth the runtime, both markup engines, and the
 /// markup validator's element list all derive from). Kind-level only: the
