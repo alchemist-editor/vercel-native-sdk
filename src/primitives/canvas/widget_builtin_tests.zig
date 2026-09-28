@@ -482,6 +482,47 @@ test "a widget painter replaces the built-in chrome and its children still rende
     try std.testing.expect(!saw_builtin_label);
 }
 
+test "a painter's nested widget tree leaves later modal scrims at the root" {
+    // A painter can re-enter emitWidgetTree for a nested widget (a
+    // field's editor, an icon inside a chip). The dialog emitted after
+    // it must still scrim the whole root, not the nested widget's frame.
+    const Painter = struct {
+        fn paint(builder: *Builder, widget: Widget, tokens: DesignTokens) canvas.Error!void {
+            try emitWidgetTree(builder, .{
+                .id = 81,
+                .kind = WidgetKind.icon,
+                .frame = geometry.RectF.init(widget.frame.x + 4, widget.frame.y + 4, 16, 16),
+                .text = "+",
+            }, tokens);
+        }
+    };
+    const children = [_]Widget{
+        .{
+            .id = 80,
+            .kind = WidgetKind.button,
+            .frame = geometry.RectF.init(8, 8, 80, 24),
+            .text = "Field",
+            .paint = Painter.paint,
+        },
+        builtinComponentWidget(.dialog, .{ .id = 82, .frame = geometry.RectF.init(200, 160, 240, 140) }),
+    };
+    const root = Widget{
+        .id = 1,
+        .kind = .stack,
+        .frame = geometry.RectF.init(0, 0, 640, 360),
+        .children = &children,
+    };
+    var commands: [24]CanvasCommand = undefined;
+    var builder = Builder.init(&commands);
+    try emitWidgetTree(&builder, root, .{});
+    const display_list = builder.displayList();
+    try std.testing.expect(display_list.findCommandById(widgetPartId(81, 1)) != null);
+    switch (display_list.findCommandById(widgetPartId(82, 14)).?.command) {
+        .fill_rect => |fill| try std.testing.expectEqualDeep(geometry.RectF.init(0, 0, 640, 360), fill.rect),
+        else => return error.TestUnexpectedResult,
+    }
+}
+
 test "checkbox check mark and label render through their pinned part slots" {
     const checkbox = Widget{
         .id = 63,
