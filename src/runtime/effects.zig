@@ -387,6 +387,7 @@ pub const SystemServiceBinding = struct {
     open_external_url_fn: *const fn (context: *anyopaque, url: []const u8) anyerror!void,
     reveal_path_fn: *const fn (context: *anyopaque, path: []const u8) anyerror!void,
     format_local_time_fn: *const fn (context: *anyopaque, timestamp_ms: i64, style: platform.LocalTimeStyle, buffer: []u8) anyerror![]const u8,
+    open_file_dialog_fn: ?*const fn (context: *anyopaque, title: []const u8, buffer: []u8) anyerror!platform.OpenDialogResult = null,
 };
 
 /// Type-erased handle to the embedding host's named-command services,
@@ -9519,6 +9520,7 @@ pub fn Effects(comptime Msg: type) type {
             return std.mem.startsWith(u8, name, "core.store.") or
                 std.mem.eql(u8, name, "native-sdk.launch-at-login.status") or
                 std.mem.eql(u8, name, "native-sdk.launch-at-login.set") or
+                std.mem.eql(u8, name, "native-sdk.dialog.openFilePath") or
                 std.mem.eql(u8, name, "native-sdk.time.formatLocal");
         }
 
@@ -9547,7 +9549,7 @@ pub fn Effects(comptime Msg: type) type {
                 self.performBoundStoreRequest(name, key, payload);
                 return;
             }
-            if (std.mem.eql(u8, name, "native-sdk.time.formatLocal")) {
+            if (std.mem.eql(u8, name, "native-sdk.time.formatLocal") or std.mem.eql(u8, name, "native-sdk.dialog.openFilePath")) {
                 self.performBoundSystemRequest(name, key, payload);
                 return;
             }
@@ -9869,6 +9871,20 @@ pub fn Effects(comptime Msg: type) type {
                 self.feedHostResult(key, false, "unsupported") catch {};
                 return;
             };
+
+            if (std.mem.eql(u8, name, "native-sdk.dialog.openFilePath")) {
+                const open_dialog = binding.open_file_dialog_fn orelse {
+                    self.feedHostResult(key, false, "unsupported") catch {};
+                    return;
+                };
+                var buffer: [platform.max_dialog_paths_bytes]u8 = undefined;
+                const result = open_dialog(binding.context, payload, &buffer) catch |err| {
+                    self.feedHostResult(key, false, systemServiceErrorName(err)) catch {};
+                    return;
+                };
+                self.feedHostResult(key, true, if (result.count == 0) "" else result.paths) catch {};
+                return;
+            }
 
             if (std.mem.eql(u8, name, "native-sdk.time.formatLocal")) {
                 if (payload.len != 16) return self.feedInvalidNativeRequest(key);
