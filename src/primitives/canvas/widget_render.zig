@@ -850,7 +850,7 @@ fn emitWidgetLayoutNodeContent(
             switch (accordionLayoutDisclosure(layout, node_index, paint_widget, state)) {
                 .closed => return,
                 .revealing => {
-                    try builder.pushClip(.{ .id = widgetPartId(paint_widget.id, 9), .rect = paint_widget.frame });
+                    try builder.pushClip(widgetContentClip(paint_widget, tokens));
                     try emitWidgetLayoutChildren(builder, layout, node_index, tokens, state);
                     try builder.popClip();
                     return;
@@ -2732,7 +2732,16 @@ fn emitVectorIconWidget(builder: *Builder, widget: Widget, tokens: DesignTokens,
 fn emitImageWidget(builder: *Builder, widget: Widget) Error!void {
     if (widget.image_id == 0 or widget.frame.normalized().isEmpty()) return;
     const clips_image = widget.image_fit == .cover;
-    if (clips_image) try builder.pushClip(.{ .id = widgetPartId(widget.id, 2), .rect = widget.frame });
+    // A clip_content image with an authored radius crops to that curve,
+    // like any other clipping surface.
+    if (clips_image) try builder.pushClip(.{
+        .id = widgetPartId(widget.id, 2),
+        .rect = widget.frame,
+        .radius = if (widget.layout.clip_content and widget.style.radius != null)
+            Radius.all(@max(0, widget.style.radius.?))
+        else
+            .{},
+    });
     try builder.drawImage(.{
         .id = widgetPartId(widget.id, 1),
         .image_id = widget.image_id,
