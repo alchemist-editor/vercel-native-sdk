@@ -791,7 +791,8 @@ pub const ReferenceRenderSurface = struct {
         var x = line.bounds.x;
         while (text_offset < end) {
             const next_offset = nextTextOffset(value.text, text_offset);
-            const advance = measureTextAdvance(measure, value.font_id, value.size, value.text, line.text_start, text_offset, next_offset);
+            const advance = measureTextAdvance(measure, value.font_id, value.size, value.text, line.text_start, text_offset, next_offset) +
+                value.tracking;
             defer {
                 text_offset = next_offset;
                 x += advance;

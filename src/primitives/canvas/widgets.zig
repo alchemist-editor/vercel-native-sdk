@@ -942,6 +942,11 @@ pub const Widget = struct {
     /// tooling and write-back can round-trip it. Span paragraphs
     /// (`spans`) wrap by design and ignore it.
     text_no_wrap: bool = false,
+    /// Authored letter spacing for a span paragraph, in points. 0 keeps
+    /// the face's natural advances. SwiftUI spells this `.tracking(_:)`
+    /// and CSS `letter-spacing`; negative values tighten a display
+    /// heading, which is what most reference designs specify.
+    text_tracking: f32 = 0,
     /// Renderer-owned logical-line gutter for a syntax-code paragraph.
     /// Zero keeps an ordinary paragraph; a positive value is the decimal
     /// digit width of the largest marker. The gutter is decoration, not
@@ -1649,9 +1654,10 @@ fn mergeLayoutDefaults(explicit: WidgetLayoutStyle, defaults: WidgetLayoutStyle)
 
 test "Widget keeps the retained hot-path footprint after textarea policy flags" {
     // One layout tree holds thousands of Widgets by value. On the 64-bit
-    // targets that run the renderer, 776 bytes is the reviewed footprint;
-    // packing engine-only markers keeps the new textarea policy within it.
+    // targets that run the renderer, 784 bytes is the reviewed footprint;
+    // packing engine-only markers keeps the new textarea policy within it,
+    // and the paragraph letter spacing (`text_tracking`) adds one f32.
     if (@sizeOf(usize) == 8) {
-        try std.testing.expectEqual(@as(usize, 776), @sizeOf(Widget));
+        try std.testing.expectEqual(@as(usize, 784), @sizeOf(Widget));
     }
 }
