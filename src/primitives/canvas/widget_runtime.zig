@@ -323,6 +323,10 @@ pub fn textSelectionCommandId(widget_id: ObjectId, ordinal: usize) ObjectId {
     return widget_render.textSelectionCommandId(widget_id, ordinal);
 }
 
+pub fn textSpanRunCommandId(widget_id: ObjectId, ordinal: usize) ObjectId {
+    return widget_render.textSpanRunCommandId(widget_id, ordinal);
+}
+
 pub fn colorWithAlpha(color: Color, alpha: f32) Color {
     return widget_render.colorWithAlpha(color, alpha);
 }
