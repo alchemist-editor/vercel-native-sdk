@@ -16,6 +16,7 @@ const ui_app_mod = @import("ui_app.zig");
 const effects_mod = @import("effects.zig");
 const session_record = @import("session_record.zig");
 const session_replay = @import("session_replay.zig");
+const security = @import("../security/root.zig");
 
 const canvas_label = "host-canvas";
 
@@ -345,6 +346,31 @@ test "native system commands use runtime validation and platform services" {
     });
     try h.wake();
     try std.testing.expectEqualStrings("2024-01-01 21:04:05", h.app_state.model.bytesPrefix());
+}
+
+test "file path host requests answer the platform dialogs behind the dialog permission" {
+    var h = try Harness.create();
+    defer h.destroy();
+    const fx = &h.app_state.effects;
+
+    // Without the dialog permission both requests fail and no panel opens.
+    fx.hostRequest(.{ .key = ask_key, .name = "native-sdk.dialog.openFilePath", .payload = "Open", .on_result = HostEffects.hostMsg(.host_result) });
+    try h.wake();
+    try std.testing.expectEqual(@as(u32, 1), h.app_state.model.err_count);
+    try std.testing.expectEqual(@as(usize, 0), h.harness.null_platform.open_dialog_count);
+
+    const dialog_permission = [_][]const u8{security.permission_dialog};
+    h.harness.runtime.options.security.permissions = &dialog_permission;
+    fx.hostRequest(.{ .key = ask_key, .name = "native-sdk.dialog.openFilePath", .payload = "Open", .on_result = HostEffects.hostMsg(.host_result) });
+    try h.wake();
+    try std.testing.expectEqualStrings("/tmp/native-sdk-open.txt", h.app_state.model.bytesPrefix());
+    try std.testing.expectEqual(@as(usize, 1), h.harness.null_platform.open_dialog_count);
+
+    // The save panel is seeded with the payload as the suggested name.
+    fx.hostRequest(.{ .key = ask_key, .name = "native-sdk.dialog.saveFilePath", .payload = "export.png", .on_result = HostEffects.hostMsg(.host_result) });
+    try h.wake();
+    try std.testing.expectEqualStrings("export.png", h.app_state.model.bytesPrefix());
+    try std.testing.expectEqual(@as(usize, 1), h.harness.null_platform.save_dialog_count);
 }
 
 test "re-issuing a live host key replaces the pending request and drops the undelivered result" {
