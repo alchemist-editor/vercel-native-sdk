@@ -970,6 +970,7 @@ pub fn Ui(comptime Msg: type) type {
         pub const ContextMenuItem = struct {
             label: []const u8 = "",
             msg: ?Msg = null,
+            checked: bool = false,
             enabled: bool = true,
             separator: bool = false,
         };
@@ -3626,6 +3627,7 @@ pub fn Ui(comptime Msg: type) type {
                 for (node.context_menu, 0..) |item, index| {
                     items[index] = .{
                         .label = item.label,
+                        .checked = item.checked,
                         .enabled = item.enabled,
                         .separator = item.separator,
                     };
