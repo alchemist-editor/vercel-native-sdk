@@ -166,7 +166,7 @@ const Backend = types.Backend;
 pub const max_null_timers: usize = 16;
 /// Matches the runtime image registry's slot count
 /// (`canvas_limits.max_registered_canvas_images`).
-pub const max_gpu_surface_images: usize = 16;
+pub const max_gpu_surface_images: usize = 129;
 
 /// One recorded side-channel image upload (see `gpu_surface_images`).
 pub const NullGpuSurfaceImage = struct {

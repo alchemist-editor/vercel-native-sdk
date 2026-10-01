@@ -325,7 +325,10 @@ fn manifestShellStartupTitlebar() native_sdk.WindowTitlebarStyle {
     const shell = app_manifest.shell;
     if (comptime !@hasField(@TypeOf(shell), "windows")) return .standard;
     if (comptime shell.windows.len == 0) return .standard;
-    return windowTitlebarStyle(shell.windows[0]);
+    const declared = windowTitlebarStyle(shell.windows[0]);
+    if (@import("builtin").os.tag == .windows and
+        (declared == .hidden_inset or declared == .hidden_inset_tall)) return .chromeless;
+    return declared;
 }
 
 /// The startup window's resizability for scene-first apps: like the

@@ -190,6 +190,12 @@ pub const RuntimeView = struct {
     kind: platform.ViewKind = .toolbar,
     parent: ?[]const u8 = null,
     frame: geometry.RectF = geometry.RectF.init(0, 0, 0, 0),
+    /// The app patched this view's frame via updateView: the frame is
+    /// app-owned layout state from here on, and shell relayout (which
+    /// reapplies MANIFEST geometry after window changes) must not stomp
+    /// it — the stomp/repair race reads as panels jumping or vanishing
+    /// during window move/resize.
+    frame_app_patched: bool = false,
     layer: i32 = 0,
     visible: bool = true,
     enabled: bool = true,

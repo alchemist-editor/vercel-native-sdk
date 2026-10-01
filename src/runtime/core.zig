@@ -209,6 +209,10 @@ pub const Runtime = struct {
     window_count: usize = 0,
     views: [platform.max_views]RuntimeView = undefined,
     view_count: usize = 0,
+    /// True only while relayoutShellViews reapplies manifest geometry;
+    /// updateView uses it to leave app-patched frames alone (see
+    /// RuntimeView.frame_app_patched).
+    shell_relayout_in_progress: bool = false,
     webviews: [platform.max_webviews]RuntimeWebView = undefined,
     webview_count: usize = 0,
     status_items: [platform.max_status_items]RuntimeStatusItem = [_]RuntimeStatusItem{.{}} ** platform.max_status_items,
@@ -692,6 +696,7 @@ pub const Runtime = struct {
     pub const focusWindow = WindowViewMethods.focusWindow;
     pub const closeWindow = WindowViewMethods.closeWindow;
     pub const minimizeWindow = WindowViewMethods.minimizeWindow;
+    pub const toggleWindowZoom = WindowViewMethods.toggleWindowZoom;
     pub const hideWindow = WindowViewMethods.hideWindow;
     pub const showWindow = WindowViewMethods.showWindow;
     pub const quitApp = WindowViewMethods.quitApp;

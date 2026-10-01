@@ -106,7 +106,7 @@ pub const max_canvas_text_layout_lines_per_view: usize = 8192;
 // refusing photo-scale sources. Apps may raise the frozen per-runtime
 // budget through app.zon; raw-pixel registration stays strict because
 // that caller already owns the decoded pixels.
-pub const max_registered_canvas_images: usize = 16;
+pub const max_registered_canvas_images: usize = 129;
 pub const max_registered_canvas_image_pixel_bytes: usize = 1024 * 1024;
 /// Hard ceiling for an app-declared registered-image budget. Deliberately
 /// matches one media-surface channel: 8 MiB holds a 1080p RGBA8 image and

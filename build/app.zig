@@ -2734,8 +2734,9 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
                 // stubbed host teaches at runtime by reporting
                 // WebViewNotFound the moment an app actually uses a
                 // WebView.
-                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/windows/webview2_host.cpp"), .flags = &.{ "-std=c++17", "-DNATIVE_SDK_ALLOW_WEBVIEW2_STUB" } });
-                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/windows/gpu_surface_renderer.cpp"), .flags = &.{"-std=c++17"} });
+                // Alchemist: RED's MT archive matches Zig's static CRT.
+                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/windows/webview2_host.cpp"), .flags = &.{ "-std=c++17", "-DNATIVE_SDK_ALLOW_WEBVIEW2_STUB", "-Wno-unused-command-line-argument" } });
+                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/windows/gpu_surface_renderer.cpp"), .flags = &.{ "-std=c++17", "-Wno-unused-command-line-argument" } });
             },
             .chromium => {
                 const cef_check = addCefCheck(b, target, cef_dir);
@@ -2752,7 +2753,10 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
             },
         }
         app_mod.linkSystemLibrary("c", .{});
-        app_mod.linkSystemLibrary("c++", .{});
+        if (target.result.abi == .msvc)
+            app_mod.linkSystemLibrary("libcpmt", .{})
+        else
+            app_mod.linkSystemLibrary("c++", .{});
         app_mod.linkSystemLibrary("user32", .{});
         app_mod.linkSystemLibrary("gdi32", .{});
         // Retained gpu_surface packets are composited into a hardware
