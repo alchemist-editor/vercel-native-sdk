@@ -524,6 +524,7 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 @property(nonatomic, assign) BOOL canUndo;
 @property(nonatomic, assign) BOOL canRedo;
 @property(nonatomic, assign) NSRect surfaceFrame;
+- (void)publishAccessibilityFocused:(BOOL)focused;
 - (BOOL)emitSetTextAccessibilityValue:(id)value;
 - (BOOL)emitSetSelectionAccessibilityValue:(id)value;
 @end
@@ -1749,6 +1750,13 @@ static const uint32_t NativeSdkWidgetPressActionFlags =
  * success-without-actuation dishonesty the press path had. Route the
  * write to the runtime's focus dispatch; the next semantics publish
  * reports the app's actual focus back. */
+// Semantics publication is a snapshot, not an assistive-client action.
+// Calling the public setter here re-enters runtime focus dispatch and
+// republishes the same focused tree until the stack overflows.
+- (void)publishAccessibilityFocused:(BOOL)focused {
+    [super setAccessibilityFocused:focused];
+}
+
 - (void)setAccessibilityFocused:(BOOL)focused {
     [super setAccessibilityFocused:focused];
     if (!focused || !self.accessibilityEnabled) return;
@@ -7290,7 +7298,7 @@ static int NativeSdkRasterCacheAgeCompare(const void *a, const void *b) {
             }
         }
         element.accessibilityEnabled = (node.state_flags & NATIVE_SDK_APPKIT_WIDGET_STATE_ENABLED) != 0;
-        element.accessibilityFocused = (node.state_flags & NATIVE_SDK_APPKIT_WIDGET_STATE_FOCUSED) != 0;
+        [element publishAccessibilityFocused:(node.state_flags & NATIVE_SDK_APPKIT_WIDGET_STATE_FOCUSED) != 0];
         element.accessibilitySelected = (node.state_flags & NATIVE_SDK_APPKIT_WIDGET_STATE_SELECTED) != 0;
         element.canUndo = (node.state_flags & NATIVE_SDK_APPKIT_WIDGET_STATE_CAN_UNDO) != 0;
         element.canRedo = (node.state_flags & NATIVE_SDK_APPKIT_WIDGET_STATE_CAN_REDO) != 0;
@@ -7595,13 +7603,15 @@ static int NativeSdkRasterCacheAgeCompare(const void *a, const void *b) {
     if (tracing) {
         const uint64_t dispatchNs = NativeSdkTimestampNanoseconds() - dispatchBeginNs;
         const uint64_t queueLateNs = blockStartNs > deadlineNs ? blockStartNs - deadlineNs : 0;
-        fprintf(stderr, "native-sdk: gpu scheduler-trace frame=%lu deadline_ns=%llu block_start_ns=%llu queue_late_us=%llu producer=%s dispatch_us=%llu\n",
+        fprintf(stderr, "native-sdk: gpu scheduler-trace frame=%lu deadline_ns=%llu block_start_ns=%llu queue_late_us=%llu producer=%s dispatch_us=%llu label=%s window=%llu\n",
                 (unsigned long)requestedFrameIndex,
                 (unsigned long long)deadlineNs,
                 (unsigned long long)blockStartNs,
                 (unsigned long long)(queueLateNs / 1000),
                 NativeSdkFrameEventProducerName(producer),
-                (unsigned long long)(dispatchNs / 1000));
+                (unsigned long long)(dispatchNs / 1000),
+                self.surfaceLabel.UTF8String ?: "",
+                (unsigned long long)self.windowId);
     }
 }
 
