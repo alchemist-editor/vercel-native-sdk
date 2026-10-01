@@ -526,6 +526,39 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 - (BOOL)emitSetSelectionAccessibilityValue:(id)value;
 @end
 
+/* GPU scenes: meshes live host-wide in shared-storage buffers; a render
+ * request is the latest frame + draw list an app queued for an image id;
+ * a target is one view's multisampled render of that image. */
+@interface NativeSdkSceneMesh : NSObject
+@property(nonatomic, strong) id<MTLBuffer> vertices;
+@property(nonatomic, strong) id<MTLBuffer> indices;
+@property(nonatomic, assign) NSUInteger indexCount;
+@end
+@implementation NativeSdkSceneMesh
+@end
+
+@interface NativeSdkSceneRequest : NSObject {
+@public
+    native_sdk_scene_frame_t frame;
+}
+@property(nonatomic, strong) NSData *draws;
+@property(nonatomic, assign) uint64_t generation;
+@end
+@implementation NativeSdkSceneRequest
+@end
+
+@interface NativeSdkSceneTarget : NSObject
+@property(nonatomic, strong) id<MTLTexture> color;
+@property(nonatomic, strong) id<MTLTexture> depth;
+@property(nonatomic, strong) id<MTLTexture> resolve;
+@property(nonatomic, strong) id<MTLTexture> shadow;
+@property(nonatomic, assign) uint64_t generation;
+@property(nonatomic, assign) uint64_t shadowVersion;
+@property(nonatomic, assign) BOOL shadowValid;
+@end
+@implementation NativeSdkSceneTarget
+@end
+
 @interface NativeSdkMetalSurfaceView : NSView <NSTextInputClient, NSDraggingDestination>
 @property(nonatomic, strong) id<MTLDevice> device;
 @property(nonatomic, strong) id<MTLCommandQueue> commandQueue;
@@ -695,6 +728,21 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 @property(nonatomic, strong) id<MTLSamplerState> canvasCompositeImageSampler;
 @property(nonatomic, strong) id<MTLSamplerState> canvasCompositeNearestImageSampler;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSArray *> *canvasCompositeImageTextures;
+/* GPU scene pipelines (built on first use) and this view's render of
+ * each scene image, keyed like the image cache. */
+@property(nonatomic, strong) id<MTLRenderPipelineState> scenePipeline;
+@property(nonatomic, strong) id<MTLRenderPipelineState> sceneShadowPipeline;
+@property(nonatomic, strong) id<MTLRenderPipelineState> sceneBlendPipeline;
+@property(nonatomic, strong) id<MTLRenderPipelineState> sceneAdditivePipeline;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSArray *> *sceneCustomPipelines;
+@property(nonatomic, strong) id<MTLDepthStencilState> sceneTransparentDepthState;
+@property(nonatomic, strong) id<MTLDepthStencilState> sceneOverlayDepthState;
+@property(nonatomic, strong) id<MTLSamplerState> sceneTextureSampler;
+@property(nonatomic, strong) id<MTLTexture> sceneWhiteTexture;
+@property(nonatomic, strong) id<MTLDepthStencilState> sceneDepthState;
+@property(nonatomic, strong) id<MTLSamplerState> sceneShadowSampler;
+@property(nonatomic, assign) BOOL scenePipelinesFailed;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NativeSdkSceneTarget *> *sceneTargets;
 @property(nonatomic, assign) BOOL canvasTextureRenderable;
 @property(nonatomic, assign) BOOL canvasCompositeContentValid;
 @property(nonatomic, strong) id<MTLCommandBuffer> canvasCompositeLastCommandBuffer;
@@ -920,6 +968,13 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 /// NSImage. Uploaded out-of-band before packets reference the id, shared
 /// by every gpu-surface view, dropped on the unregister path.
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSImage *> *canvasImageStore;
+/// GPU scene meshes by app id, and the latest render request per image
+/// key (the image cache key namespace).
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, NativeSdkSceneMesh *> *sceneMeshes;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NativeSdkSceneRequest *> *sceneRequests;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, id<MTLTexture>> *sceneTextures;
+@property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> *sceneShaders;
+@property(nonatomic, assign) uint64_t sceneGeneration;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *nativeViewCommands;
 @property(nonatomic, strong) NSMutableSet<NSString *> *nativeViewExplicitTextKeys;
 @property(nonatomic, strong) NSMutableSet<NSString *> *bridgeEnabledChildWebViewKeys;
@@ -1155,6 +1210,13 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 - (BOOL)setGpuSurfaceScrollDriversInWindow:(uint64_t)windowId label:(NSString *)label drivers:(const native_sdk_appkit_scroll_driver_t *)drivers count:(NSUInteger)count occluders:(const native_sdk_appkit_scroll_occluder_t *)occluders occluderCount:(NSUInteger)occluderCount;
 - (BOOL)showContextMenuInWindow:(uint64_t)windowId label:(NSString *)label x:(double)x y:(double)y token:(uint64_t)token items:(const native_sdk_appkit_context_menu_item_t *)items count:(NSUInteger)count;
 - (BOOL)uploadGpuSurfaceImageWithId:(uint64_t)imageId width:(NSUInteger)width height:(NSUInteger)height rgba8:(const uint8_t *)rgba8 byteLength:(NSUInteger)byteLength;
+- (BOOL)uploadSceneMeshWithId:(uint64_t)meshId vertices:(const native_sdk_scene_vertex_t *)vertices count:(size_t)vertexCount indices:(const uint32_t *)indices count:(size_t)indexCount;
+- (BOOL)renderSceneForImageId:(uint64_t)imageId frame:(const native_sdk_scene_frame_t *)frame draws:(const native_sdk_scene_draw_t *)draws count:(size_t)drawCount;
+- (NativeSdkSceneRequest *)sceneRequestForKey:(NSString *)key;
+- (NativeSdkSceneMesh *)sceneMeshForId:(uint64_t)meshId;
+- (BOOL)uploadSceneTextureWithId:(uint64_t)textureId width:(size_t)width height:(size_t)height rgba8:(const uint8_t *)rgba8 length:(size_t)length;
+- (id<MTLTexture>)sceneTextureForId:(uint64_t)textureId;
+- (NSString *)sceneShaderForId:(uint32_t)shaderId;
 - (BOOL)removeGpuSurfaceImageWithId:(uint64_t)imageId;
 - (BOOL)updateWidgetAccessibilityInWindow:(uint64_t)windowId label:(NSString *)label nodes:(const native_sdk_appkit_widget_accessibility_node_t *)nodes count:(NSUInteger)count;
 - (BOOL)nativeView:(NSView *)candidate isInSubtreeRootedAt:(NSView *)root;
@@ -4979,6 +5041,401 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     return texture;
 }
 
+/* GPU scenes -------------------------------------------------------------
+ * The shading matches the platform `SceneFrame` contract: Lambert over pi
+ * plus hemisphere ambient, Blinn-Phong specular with a Schlick-style F0,
+ * emissive, ACES filmic tone mapping, sRGB encoding, then sRGB fog, with a
+ * bilinear-compared sun shadow map. Outputs are already display-encoded,
+ * so the target is a plain unorm texture the image quad samples as is. */
+/* Shared by the standard shader and apps' custom ones: the uniforms, the
+ * vertex stages, and the finishing helpers. */
+static NSString *const NativeSdkScenePrelude =
+    @"#include <metal_stdlib>\n"
+    @"using namespace metal;\n"
+    @"struct SceneFrame {\n"
+    @"  float4x4 view_projection; float4x4 view; float4x4 shadow_matrix;\n"
+    @"  float4 eye; float4 sun_direction; float4 sun_color; float4 sky; float4 ground;\n"
+    @"  float4 fog; float4 fog_range; float4 background; float4 grid_color;\n"
+    @"  uint2 shadow_version; uint flags; uint shadow_size;\n"
+    @"};\n"
+    @"struct SceneDraw {\n"
+    @"  float4x4 model; float4x4 normal_matrix; float4 color; float4 emissive; float4 material;\n"
+    @"  uint2 mesh; uint2 texture; uint flags; uint shader; uint reserved0; uint reserved1;\n"
+    @"};\n"
+    @"struct SceneVertex { packed_float3 position; packed_float3 normal; packed_float2 uv; };\n"
+    @"struct SceneOut { float4 position [[position]]; float3 world; float3 local; float3 normal; float2 uv; float view_depth; float point_size [[point_size]]; };\n"
+    @"struct ShadowOut { float4 position [[position]]; };\n"
+    @"vertex SceneOut native_sdk_scene_vertex(uint vid [[vertex_id]], const device SceneVertex *vertices [[buffer(0)]],\n"
+    @"    constant SceneFrame &frame [[buffer(1)]], constant SceneDraw &draw [[buffer(2)]]) {\n"
+    @"  SceneVertex v = vertices[vid];\n"
+    @"  float4 world = draw.model * float4(float3(v.position), 1.0);\n"
+    @"  float4 clip = frame.view_projection * world;\n"
+    @"  clip.z = (clip.z + clip.w) * 0.5;\n"
+    @"  SceneOut out;\n"
+    @"  out.position = clip;\n"
+    @"  out.world = world.xyz;\n"
+    @"  out.normal = (draw.flags & 8u) != 0u ? float3(v.normal) : (draw.normal_matrix * float4(float3(v.normal), 0.0)).xyz;\n"
+    @"  out.uv = float2(v.uv);\n"
+    @"  out.local = float3(v.position);\n"
+    @"  out.point_size = max(draw.material.x, 1.0);\n"
+    @"  out.view_depth = -(frame.view * world).z;\n"
+    @"  return out;\n"
+    @"}\n"
+    @"vertex ShadowOut native_sdk_scene_shadow_vertex(uint vid [[vertex_id]], const device SceneVertex *vertices [[buffer(0)]],\n"
+    @"    constant SceneFrame &frame [[buffer(1)]], constant SceneDraw &draw [[buffer(2)]]) {\n"
+    @"  float4 clip = frame.shadow_matrix * (draw.model * float4(float3(vertices[vid].position), 1.0));\n"
+    @"  clip.z = (clip.z + clip.w) * 0.5;\n"
+    @"  ShadowOut out;\n"
+    @"  out.position = clip;\n"
+    @"  return out;\n"
+    @"}\n"
+    @"static float native_sdk_scene_encode(float c) {\n"
+    @"  c = clamp(c, 0.0, 1.0);\n"
+    @"  return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;\n"
+    @"}\n"
+    @"static float3 native_sdk_scene_encode3(float3 c) {\n"
+    @"  return float3(native_sdk_scene_encode(c.r), native_sdk_scene_encode(c.g), native_sdk_scene_encode(c.b));\n"
+    @"}\n"
+    @"static float3 native_sdk_scene_aces(float3 color, float exposure) {\n"
+    @"  float3 c = color * (exposure / 0.6);\n"
+    @"  float3 v = float3(0.59719 * c.x + 0.35458 * c.y + 0.04823 * c.z,\n"
+    @"                    0.07600 * c.x + 0.90834 * c.y + 0.01566 * c.z,\n"
+    @"                    0.02840 * c.x + 0.13383 * c.y + 0.83777 * c.z);\n"
+    @"  float3 rrt = (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081);\n"
+    @"  return clamp(float3(1.60475 * rrt.x - 0.53108 * rrt.y - 0.07367 * rrt.z,\n"
+    @"                      -0.10208 * rrt.x + 1.10813 * rrt.y - 0.00605 * rrt.z,\n"
+    @"                      -0.00327 * rrt.x - 0.07276 * rrt.y + 1.07602 * rrt.z), 0.0, 1.0);\n"
+    @"}\n"
+    @"static float3 native_sdk_scene_linear(float3 c) {\n"
+    @"  return select(pow((c + 0.055) / 1.055, float3(2.4)), c / 12.92, c <= 0.04045);\n"
+    @"}\n"
+    @"/* Tone mapped, encoded, and fogged, as the standard shading finishes. */\n"
+    @"static float4 native_sdk_scene_finish(float3 rgb, float alpha, float view_depth, constant SceneFrame &frame) {\n"
+    @"  float3 encoded = native_sdk_scene_encode3(native_sdk_scene_aces(rgb, frame.eye.w));\n"
+    @"  if (frame.fog.w > 0.0) encoded = mix(encoded, frame.fog.rgb, smoothstep(frame.fog_range.x, frame.fog_range.y, view_depth));\n"
+    @"  return float4(encoded, alpha);\n"
+    @"}\n";
+
+static NSString *const NativeSdkSceneStandardFragment =
+    @"fragment float4 native_sdk_scene_fragment(SceneOut in [[stage_in]], constant SceneFrame &frame [[buffer(1)]],\n"
+    @"    constant SceneDraw &draw [[buffer(2)]], depth2d<float> shadow_map [[texture(0)]], sampler shadow_sampler [[sampler(0)]],\n"
+    @"    texture2d<float> base_map [[texture(1)]], sampler map_sampler [[sampler(1)]]) {\n"
+    @"  float opacity = draw.color.w;\n"
+    @"  if ((draw.flags & 8u) != 0u) return float4(native_sdk_scene_encode3(in.normal * draw.color.rgb), opacity * ((draw.flags & 32u) != 0u ? in.uv.x : 1.0));\n"
+    @"  float4 texel = base_map.sample(map_sampler, in.uv);\n"
+    @"  float3 base = draw.color.rgb * texel.rgb;\n"
+    @"  opacity *= texel.a;\n"
+    @"  bool basic = draw.material.z > 0.5;\n"
+    @"  if (basic) return float4(native_sdk_scene_encode3(base), opacity);\n"
+    @"  float3 n = normalize(in.normal);\n"
+    @"  float3 eye = normalize(frame.eye.xyz - in.world);\n"
+    @"  if (draw.material.w > 0.5 && dot(n, eye) < 0.0) n = -n;\n"
+    @"  if (draw.emissive.w > 0.0) {\n"
+    @"    float2 g = abs(in.world.xz - round(in.world.xz));\n"
+    @"    float line = max(max(0.0, 1.0 - g.x / 0.035), max(0.0, 1.0 - g.y / 0.035));\n"
+    @"    base = mix(base, frame.grid_color.rgb, line * draw.emissive.w);\n"
+    @"  }\n"
+    @"  float3 light = frame.sun_direction.xyz;\n"
+    @"  float n_dot_l = dot(n, light);\n"
+    @"  float shadow = 1.0;\n"
+    @"  if (frame.shadow_size > 0u) {\n"
+    @"    if (n_dot_l <= 0.0) {\n"
+    @"      shadow = 0.0;\n"
+    @"    } else {\n"
+    @"      float4 p = frame.shadow_matrix * float4(in.world + n * 0.025, 1.0);\n"
+    @"      float3 ndc = p.xyz / p.w;\n"
+    @"      float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);\n"
+    @"      if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) {\n"
+    @"        shadow = shadow_map.sample_compare(shadow_sampler, uv, (ndc.z + 1.0) * 0.5 - 0.0007);\n"
+    @"      }\n"
+    @"    }\n"
+    @"  }\n"
+    @"  float roughness = draw.material.x;\n"
+    @"  float metalness = draw.material.y;\n"
+    @"  float3 diffuse = base * ((1.0 - metalness) / M_PI_F);\n"
+    @"  float3 hemi = mix(frame.ground.rgb, frame.sky.rgb, n.y * 0.5 + 0.5) * frame.sky.w;\n"
+    @"  float3 f0 = mix(float3(0.04), base, metalness);\n"
+    @"  float3 half_vector = normalize(light + eye);\n"
+    @"  float r2 = max(roughness * roughness, 0.02);\n"
+    @"  float shininess = max(2.0 / (r2 * r2) - 2.0, 1.0);\n"
+    @"  float spec = pow(max(dot(n, half_vector), 0.0), shininess) * (shininess + 8.0) / (8.0 * M_PI_F);\n"
+    @"  float3 direct = frame.sun_color.rgb * (frame.sun_direction.w * max(n_dot_l, 0.0) * shadow);\n"
+    @"  float3 rgb = diffuse * (direct + hemi) + f0 * direct * spec + f0 * hemi * (0.15 * (1.0 - roughness));\n"
+    @"  rgb = native_sdk_scene_aces(rgb + draw.emissive.rgb, frame.eye.w);\n"
+    @"  float3 encoded = native_sdk_scene_encode3(rgb);\n"
+    @"  if (frame.fog.w > 0.0) encoded = mix(encoded, frame.fog.rgb, smoothstep(frame.fog_range.x, frame.fog_range.y, in.view_depth));\n"
+    @"  return float4(encoded, opacity);\n"
+    @"}\n";
+
+static const NSUInteger NativeSdkSceneSamples = 4;
+
+/* Opaque, alpha-blended, and additive pipelines over one fragment. */
+- (NSArray *)scenePipelinesWithLibrary:(id<MTLLibrary>)library fragment:(NSString *)fragment error:(NSError **)error {
+    MTLRenderPipelineDescriptor *main = [[MTLRenderPipelineDescriptor alloc] init];
+    main.vertexFunction = [library newFunctionWithName:@"native_sdk_scene_vertex"];
+    main.fragmentFunction = [library newFunctionWithName:fragment];
+    if (!main.vertexFunction || !main.fragmentFunction) return nil;
+    main.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA8Unorm;
+    main.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    main.rasterSampleCount = NativeSdkSceneSamples;
+    id<MTLRenderPipelineState> opaque = [self.device newRenderPipelineStateWithDescriptor:main error:error];
+    main.colorAttachments[0].blendingEnabled = YES;
+    main.colorAttachments[0].rgbBlendOperation = MTLBlendOperationAdd;
+    main.colorAttachments[0].alphaBlendOperation = MTLBlendOperationAdd;
+    main.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+    main.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+    main.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+    main.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+    id<MTLRenderPipelineState> blend = [self.device newRenderPipelineStateWithDescriptor:main error:error];
+    main.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOne;
+    main.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+    id<MTLRenderPipelineState> additive = [self.device newRenderPipelineStateWithDescriptor:main error:error];
+    if (!opaque || !blend || !additive) return nil;
+    return @[ opaque, blend, additive ];
+}
+
+/* The pipelines for an app's shader, compiled once per view; nil (the
+ * standard shading) when it is unknown or fails to compile. */
+- (NSArray *)sceneCustomPipelinesForShader:(uint32_t)shaderId {
+    if (shaderId == 0) return nil;
+    if (!self.sceneCustomPipelines) self.sceneCustomPipelines = [NSMutableDictionary dictionary];
+    NSArray *cached = self.sceneCustomPipelines[@(shaderId)];
+    if (cached) return cached.count == 3 ? cached : nil;
+    NSString *custom = [self.host sceneShaderForId:shaderId];
+    if (!custom) return nil;
+    NSString *source = [NSString stringWithFormat:@"%@\n%@\n"
+        "fragment float4 native_sdk_scene_custom_fragment(SceneOut in [[stage_in]], bool front [[front_facing]], constant SceneFrame &frame [[buffer(1)]],\n"
+        "    constant SceneDraw &draw [[buffer(2)]], texture2d<float> base_map [[texture(1)]], sampler map_sampler [[sampler(1)]]) {\n"
+        "  return custom_fragment(in, frame, draw, base_map, map_sampler, front);\n"
+        "}\n", NativeSdkScenePrelude, custom];
+    NSError *error = nil;
+    id<MTLLibrary> library = [self.device newLibraryWithSource:source options:nil error:&error];
+    NSArray *pipelines = library ? [self scenePipelinesWithLibrary:library fragment:@"native_sdk_scene_custom_fragment" error:&error] : nil;
+    if (!pipelines) {
+        NSLog(@"native-sdk scene shader %u failed: %@", shaderId, error);
+        self.sceneCustomPipelines[@(shaderId)] = @[];
+        return nil;
+    }
+    self.sceneCustomPipelines[@(shaderId)] = pipelines;
+    return pipelines;
+}
+
+- (BOOL)ensureScenePipelines {
+    if (self.scenePipeline && self.sceneBlendPipeline && self.sceneAdditivePipeline && self.sceneShadowPipeline) return YES;
+    if (self.scenePipelinesFailed || !self.device) return NO;
+    NSError *error = nil;
+    NSString *source = [NativeSdkScenePrelude stringByAppendingString:NativeSdkSceneStandardFragment];
+    id<MTLLibrary> library = [self.device newLibraryWithSource:source options:nil error:&error];
+    if (!library) {
+        NSLog(@"native-sdk scene shaders failed to compile: %@", error);
+        self.scenePipelinesFailed = YES;
+        return NO;
+    }
+    NSArray *pipelines = [self scenePipelinesWithLibrary:library fragment:@"native_sdk_scene_fragment" error:&error];
+    self.scenePipeline = pipelines[0];
+    self.sceneBlendPipeline = pipelines[1];
+    self.sceneAdditivePipeline = pipelines[2];
+    MTLRenderPipelineDescriptor *shadow = [[MTLRenderPipelineDescriptor alloc] init];
+    shadow.vertexFunction = [library newFunctionWithName:@"native_sdk_scene_shadow_vertex"];
+    shadow.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    self.sceneShadowPipeline = [self.device newRenderPipelineStateWithDescriptor:shadow error:&error];
+    MTLDepthStencilDescriptor *depth = [[MTLDepthStencilDescriptor alloc] init];
+    depth.depthCompareFunction = MTLCompareFunctionLess;
+    depth.depthWriteEnabled = YES;
+    self.sceneDepthState = [self.device newDepthStencilStateWithDescriptor:depth];
+    depth.depthWriteEnabled = NO;
+    self.sceneTransparentDepthState = [self.device newDepthStencilStateWithDescriptor:depth];
+    depth.depthCompareFunction = MTLCompareFunctionAlways;
+    self.sceneOverlayDepthState = [self.device newDepthStencilStateWithDescriptor:depth];
+    MTLSamplerDescriptor *sampler = [[MTLSamplerDescriptor alloc] init];
+    sampler.minFilter = MTLSamplerMinMagFilterLinear;
+    sampler.magFilter = MTLSamplerMinMagFilterLinear;
+    sampler.sAddressMode = MTLSamplerAddressModeClampToEdge;
+    sampler.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    sampler.compareFunction = MTLCompareFunctionLessEqual;
+    self.sceneShadowSampler = [self.device newSamplerStateWithDescriptor:sampler];
+    MTLSamplerDescriptor *map = [[MTLSamplerDescriptor alloc] init];
+    map.minFilter = MTLSamplerMinMagFilterLinear;
+    map.magFilter = MTLSamplerMinMagFilterLinear;
+    map.mipFilter = MTLSamplerMipFilterLinear;
+    map.maxAnisotropy = 8;
+    map.sAddressMode = MTLSamplerAddressModeRepeat;
+    map.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    self.sceneTextureSampler = [self.device newSamplerStateWithDescriptor:map];
+    MTLTextureDescriptor *whiteDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:1 height:1 mipmapped:NO];
+    whiteDescriptor.usage = MTLTextureUsageShaderRead;
+    whiteDescriptor.storageMode = MTLStorageModeShared;
+    self.sceneWhiteTexture = [self.device newTextureWithDescriptor:whiteDescriptor];
+    const uint8_t white[4] = { 255, 255, 255, 255 };
+    [self.sceneWhiteTexture replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:white bytesPerRow:4];
+    if (!self.scenePipeline || !self.sceneBlendPipeline || !self.sceneAdditivePipeline || !self.sceneShadowPipeline || !self.sceneDepthState ||
+        !self.sceneTransparentDepthState || !self.sceneOverlayDepthState || !self.sceneShadowSampler || !self.sceneTextureSampler || !self.sceneWhiteTexture) {
+        NSLog(@"native-sdk scene pipelines failed: %@", error);
+        self.scenePipelinesFailed = YES;
+        return NO;
+    }
+    return YES;
+}
+
+static id<MTLTexture> NativeSdkSceneTexture(id<MTLDevice> device, MTLPixelFormat format, NSUInteger width, NSUInteger height, NSUInteger samples, MTLTextureUsage usage, BOOL transient) {
+    MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:width height:height mipmapped:NO];
+    if (samples > 1) {
+        descriptor.textureType = MTLTextureType2DMultisample;
+        descriptor.sampleCount = samples;
+    }
+    descriptor.usage = usage;
+    descriptor.storageMode = MTLStorageModePrivate;
+    if (transient) {
+        if (@available(macOS 11.0, *)) {
+            if ([device supportsFamily:MTLGPUFamilyApple1]) descriptor.storageMode = MTLStorageModeMemoryless;
+        }
+    }
+    return [device newTextureWithDescriptor:descriptor];
+}
+
+/* The draws in list order. The main pass switches between the opaque,
+ * transparent (blended, depth-tested, no depth writes), and overlay
+ * (blended, no depth test) states per draw; the shadow pass takes the
+ * opaque triangle casters only. */
+static void NativeSdkSceneEncodeDraws(id<MTLRenderCommandEncoder> encoder, NativeSdkMetalSurfaceView *view, NativeSdkSceneRequest *request, BOOL shadowPass) {
+    NativeSdkAppKitHost *host = view.host;
+    const native_sdk_scene_draw_t *draws = (const native_sdk_scene_draw_t *)request.draws.bytes;
+    const NSUInteger count = request.draws.length / sizeof(native_sdk_scene_draw_t);
+    [encoder setVertexBytes:&request->frame length:sizeof(native_sdk_scene_frame_t) atIndex:1];
+    if (!shadowPass) {
+        [encoder setFragmentBytes:&request->frame length:sizeof(native_sdk_scene_frame_t) atIndex:1];
+        [encoder setFragmentTexture:view.sceneWhiteTexture atIndex:1];
+        [encoder setFragmentSamplerState:view.sceneTextureSampler atIndex:1];
+    }
+    uint64_t boundMesh = 0;
+    uint64_t boundTexture = 0;
+    NativeSdkSceneMesh *mesh = nil;
+    int cull = -1;
+    int state = -1;
+    id<MTLRenderPipelineState> boundPipeline = nil;
+    for (NSUInteger index = 0; index < count; index += 1) {
+        const native_sdk_scene_draw_t *draw = &draws[index];
+        const BOOL lines = (draw->flags & 2u) != 0;
+        const BOOL points = (draw->flags & 256u) != 0;
+        const BOOL overlay = (draw->flags & 4u) != 0;
+        const BOOL layered = (draw->flags & 16u) != 0;
+        const BOOL additive = (draw->flags & 64u) != 0;
+        const BOOL blended = overlay || layered || additive || (draw->flags & 32u) != 0 || draw->color[3] < 0.999f;
+        if (shadowPass && ((draw->flags & 1u) == 0 || lines || points || blended || draw->material[2] > 0.5f)) continue;
+        if (draw->mesh != boundMesh) {
+            mesh = [host sceneMeshForId:draw->mesh];
+            boundMesh = draw->mesh;
+            if (mesh) [encoder setVertexBuffer:mesh.vertices offset:0 atIndex:0];
+        }
+        if (!mesh) continue;
+        if (!shadowPass) {
+            NSArray *custom = [view sceneCustomPipelinesForShader:draw->shader];
+            const int mode = additive ? 2 : (blended ? 1 : 0);
+            id<MTLRenderPipelineState> pipeline = custom ? custom[mode] : (mode == 0 ? view.scenePipeline : (mode == 1 ? view.sceneBlendPipeline : view.sceneAdditivePipeline));
+            if (pipeline != boundPipeline) {
+                [encoder setRenderPipelineState:pipeline];
+                boundPipeline = pipeline;
+            }
+            const int wanted_state = overlay ? 2 : (layered || !blended ? 0 : 1);
+            if (wanted_state != state) {
+                [encoder setDepthStencilState:wanted_state == 0 ? view.sceneDepthState : (wanted_state == 1 ? view.sceneTransparentDepthState : view.sceneOverlayDepthState)];
+                state = wanted_state;
+            }
+            const int wanted = (draw->flags & 128u) != 0 ? 2 : (lines || points || draw->material[3] > 0.5f ? 0 : 1);
+            if (wanted != cull) {
+                [encoder setCullMode:wanted == 2 ? MTLCullModeFront : (wanted == 1 ? MTLCullModeBack : MTLCullModeNone)];
+                cull = wanted;
+            }
+            if (draw->texture != boundTexture) {
+                id<MTLTexture> texture = [host sceneTextureForId:draw->texture];
+                [encoder setFragmentTexture:texture ?: view.sceneWhiteTexture atIndex:1];
+                boundTexture = draw->texture;
+            }
+            [encoder setFragmentBytes:draw length:sizeof(native_sdk_scene_draw_t) atIndex:2];
+        }
+        [encoder setVertexBytes:draw length:sizeof(native_sdk_scene_draw_t) atIndex:2];
+        const NSUInteger indexCount = points ? mesh.indexCount : (lines ? mesh.indexCount - mesh.indexCount % 2 : mesh.indexCount - mesh.indexCount % 3);
+        if (indexCount == 0) continue;
+        [encoder drawIndexedPrimitives:points ? MTLPrimitiveTypePoint : (lines ? MTLPrimitiveTypeLine : MTLPrimitiveTypeTriangle) indexCount:indexCount indexType:MTLIndexTypeUInt32 indexBuffer:mesh.indices indexBufferOffset:0];
+    }
+}
+
+/* This view's render of a scene image at `width` x `height` pixels,
+ * redrawn when the app queued a newer request or the on-screen size
+ * changed. The render commits on the composite's queue ahead of the
+ * composite itself, so the quad samples the finished frame. */
+- (id<MTLTexture>)sceneTextureForRequest:(NativeSdkSceneRequest *)request key:(NSString *)key width:(NSUInteger)width height:(NSUInteger)height {
+    if (!request || width == 0 || height == 0 || width > 16384 || height > 16384) return nil;
+    if (![self ensureScenePipelines]) return nil;
+    if (!self.sceneTargets) self.sceneTargets = [NSMutableDictionary dictionary];
+    NativeSdkSceneTarget *target = self.sceneTargets[key];
+    if (!target) {
+        target = [[NativeSdkSceneTarget alloc] init];
+        self.sceneTargets[key] = target;
+    }
+    const BOOL sized = target.resolve && target.resolve.width == width && target.resolve.height == height;
+    if (sized && target.generation == request.generation) return target.resolve;
+    if (!sized) {
+        target.resolve = NativeSdkSceneTexture(self.device, MTLPixelFormatRGBA8Unorm, width, height, 1, MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead, NO);
+        target.color = NativeSdkSceneTexture(self.device, MTLPixelFormatRGBA8Unorm, width, height, NativeSdkSceneSamples, MTLTextureUsageRenderTarget, YES);
+        target.depth = NativeSdkSceneTexture(self.device, MTLPixelFormatDepth32Float, width, height, NativeSdkSceneSamples, MTLTextureUsageRenderTarget, YES);
+        if (!target.resolve || !target.color || !target.depth) {
+            [self.sceneTargets removeObjectForKey:key];
+            return nil;
+        }
+    }
+    const native_sdk_scene_frame_t *frame = &request->frame;
+    const NSUInteger shadowSize = MIN((NSUInteger)frame->shadow_size, (NSUInteger)8192);
+    if (shadowSize > 0 && (!target.shadow || target.shadow.width != shadowSize)) {
+        target.shadow = NativeSdkSceneTexture(self.device, MTLPixelFormatDepth32Float, shadowSize, shadowSize, 1, MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead, NO);
+        target.shadowValid = NO;
+    }
+    if (!target.shadow) {
+        target.shadow = NativeSdkSceneTexture(self.device, MTLPixelFormatDepth32Float, 1, 1, 1, MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead, NO);
+        target.shadowValid = NO;
+    }
+    id<MTLCommandBuffer> commandBuffer = [self.commandQueue commandBuffer];
+    if (!commandBuffer || !target.shadow) return nil;
+    commandBuffer.label = @"native-sdk scene";
+    if (!target.shadowValid || target.shadowVersion != frame->shadow_version) {
+        MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+        pass.depthAttachment.texture = target.shadow;
+        pass.depthAttachment.loadAction = MTLLoadActionClear;
+        pass.depthAttachment.storeAction = MTLStoreActionStore;
+        pass.depthAttachment.clearDepth = 1.0;
+        id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
+        if (shadowSize > 0) {
+            [encoder setRenderPipelineState:self.sceneShadowPipeline];
+            [encoder setDepthStencilState:self.sceneDepthState];
+            [encoder setCullMode:MTLCullModeNone];
+            NativeSdkSceneEncodeDraws(encoder, self, request, YES);
+        }
+        [encoder endEncoding];
+        target.shadowVersion = frame->shadow_version;
+        target.shadowValid = YES;
+    }
+    MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+    pass.colorAttachments[0].texture = target.color;
+    pass.colorAttachments[0].resolveTexture = target.resolve;
+    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+    pass.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+    pass.colorAttachments[0].clearColor = MTLClearColorMake(frame->background[0], frame->background[1], frame->background[2], frame->background[3]);
+    pass.depthAttachment.texture = target.depth;
+    pass.depthAttachment.loadAction = MTLLoadActionClear;
+    pass.depthAttachment.storeAction = MTLStoreActionDontCare;
+    pass.depthAttachment.clearDepth = 1.0;
+    id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
+    [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
+    if (frame->flags & 1u) [encoder setTriangleFillMode:MTLTriangleFillModeLines];
+    [encoder setFragmentTexture:target.shadow atIndex:0];
+    [encoder setFragmentSamplerState:self.sceneShadowSampler atIndex:0];
+    NativeSdkSceneEncodeDraws(encoder, self, request, NO);
+    [encoder endEncoding];
+    [commandBuffer commit];
+    target.generation = request.generation;
+    return target.resolve;
+}
+
 /* Rasterize one command per frame through the direct CG path (its own
  * clip + transform + opacity) into a transient texture over the padded,
  * pixel-aligned intersection of its bounds and the repaint region. Used
@@ -5364,15 +5821,23 @@ static BOOL NativeSdkCompositeShapeQuad(NSDictionary *command, NSString *kind, C
                     self.canvasTraceDrawnCount -= 1;
                     continue;
                 }
-                NSRect src = NativeSdkPacketImageSourceRect(packetImage, image);
-                NSString *fit = [packetImage[@"fit"] isKindOfClass:[NSString class]] ? packetImage[@"fit"] : @"stretch";
+                /* A GPU scene image renders at its exact on-screen pixel
+                 * size and stretches over its destination; the registered
+                 * pixels are only its placeholder. */
+                NativeSdkSceneRequest *sceneRequest = [self.host sceneRequestForKey:imageKey];
+                NSRect src = sceneRequest ? NSMakeRect(0, 0, image.size.width, image.size.height) : NativeSdkPacketImageSourceRect(packetImage, image);
+                NSString *fit = sceneRequest ? @"stretch" : ([packetImage[@"fit"] isKindOfClass:[NSString class]] ? packetImage[@"fit"] : @"stretch");
                 NSRect dst = NativeSdkPacketImageDestinationRect(NativeSdkPacketRect(packetImage[@"dst"]), src, fit);
                 if (flatTransform) {
                     const CGFloat sx = NativeSdkPacketNumber(flatTransform[0], 1);
                     const CGFloat sy = NativeSdkPacketNumber(flatTransform[3], 1);
                     dst = NSMakeRect(NSMinX(dst) * sx + NativeSdkPacketNumber(flatTransform[4], 0), NSMinY(dst) * sy + NativeSdkPacketNumber(flatTransform[5], 0), NSWidth(dst) * sx, NSHeight(dst) * sy);
                 }
-                id<MTLTexture> texture = [self compositeTextureForImage:image key:imageKey];
+                id<MTLTexture> texture = nil;
+                if (sceneRequest) {
+                    texture = [self sceneTextureForRequest:sceneRequest key:imageKey width:(NSUInteger)llround(NSWidth(dst) * scale) height:(NSUInteger)llround(NSHeight(dst) * scale)];
+                }
+                if (!texture) texture = [self compositeTextureForImage:image key:imageKey];
                 if (texture) {
                     /* The command clip is already in surface space. */
                     NSRect visible = dst;
@@ -9968,10 +10433,109 @@ static float NativeSdkCaptureReadRemixedSample(const AudioBufferList *buffers, c
     return YES;
 }
 
+static id<MTLDevice> NativeSdkSceneDevice(void) {
+    static id<MTLDevice> device = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        device = MTLCreateSystemDefaultDevice();
+    });
+    return device;
+}
+
+- (BOOL)uploadSceneMeshWithId:(uint64_t)meshId vertices:(const native_sdk_scene_vertex_t *)vertices count:(size_t)vertexCount indices:(const uint32_t *)indices count:(size_t)indexCount {
+    if (meshId == 0 || !vertices || vertexCount == 0 || !indices || indexCount == 0) return NO;
+    id<MTLDevice> device = NativeSdkSceneDevice();
+    if (!device) return NO;
+    NativeSdkSceneMesh *mesh = [[NativeSdkSceneMesh alloc] init];
+    mesh.vertices = [device newBufferWithBytes:vertices length:vertexCount * sizeof(native_sdk_scene_vertex_t) options:MTLResourceStorageModeShared];
+    mesh.indices = [device newBufferWithBytes:indices length:indexCount * sizeof(uint32_t) options:MTLResourceStorageModeShared];
+    mesh.indexCount = indexCount;
+    if (!mesh.vertices || !mesh.indices) return NO;
+    @synchronized(self) {
+        if (!self.sceneMeshes) self.sceneMeshes = [NSMutableDictionary dictionary];
+        self.sceneMeshes[@(meshId)] = mesh;
+    }
+    return YES;
+}
+
+- (BOOL)renderSceneForImageId:(uint64_t)imageId frame:(const native_sdk_scene_frame_t *)frame draws:(const native_sdk_scene_draw_t *)draws count:(size_t)drawCount {
+    if (imageId == 0 || !frame || (drawCount > 0 && !draws)) return NO;
+    NativeSdkSceneRequest *request = [[NativeSdkSceneRequest alloc] init];
+    request->frame = *frame;
+    request.draws = drawCount > 0 ? [NSData dataWithBytes:draws length:drawCount * sizeof(native_sdk_scene_draw_t)] : [NSData data];
+    NSString *key = [NSString stringWithFormat:@"%llu", (unsigned long long)imageId];
+    @synchronized(self) {
+        if (!self.sceneRequests) self.sceneRequests = [NSMutableDictionary dictionary];
+        self.sceneGeneration += 1;
+        request.generation = self.sceneGeneration;
+        self.sceneRequests[key] = request;
+    }
+    return YES;
+}
+
+- (BOOL)uploadSceneTextureWithId:(uint64_t)textureId width:(size_t)width height:(size_t)height rgba8:(const uint8_t *)rgba8 length:(size_t)length {
+    if (textureId == 0 || !rgba8 || width == 0 || height == 0 || width > 8192 || height > 8192 || length != width * height * 4) return NO;
+    id<MTLDevice> device = NativeSdkSceneDevice();
+    if (!device) return NO;
+    static id<MTLCommandQueue> queue = nil;
+    if (!queue) queue = [device newCommandQueue];
+    // sRGB-encoded texels sample as linear light, as three.js decodes a map
+    // in the sRGB color space; mipmaps average in linear light too.
+    MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm_sRGB width:width height:height mipmapped:YES];
+    descriptor.usage = MTLTextureUsageShaderRead;
+    descriptor.storageMode = MTLStorageModeShared;
+    id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
+    if (!texture) return NO;
+    [texture replaceRegion:MTLRegionMake2D(0, 0, width, height) mipmapLevel:0 withBytes:rgba8 bytesPerRow:width * 4];
+    if (texture.mipmapLevelCount > 1 && queue) {
+        id<MTLCommandBuffer> buffer = [queue commandBuffer];
+        id<MTLBlitCommandEncoder> blit = [buffer blitCommandEncoder];
+        [blit generateMipmapsForTexture:texture];
+        [blit endEncoding];
+        [buffer commit];
+        [buffer waitUntilCompleted];
+    }
+    @synchronized(self) {
+        if (!self.sceneTextures) self.sceneTextures = [NSMutableDictionary dictionary];
+        self.sceneTextures[@(textureId)] = texture;
+    }
+    return YES;
+}
+
+- (NSString *)sceneShaderForId:(uint32_t)shaderId {
+    if (shaderId == 0) return nil;
+    @synchronized(self) {
+        return self.sceneShaders[@(shaderId)];
+    }
+}
+
+- (id<MTLTexture>)sceneTextureForId:(uint64_t)textureId {
+    if (textureId == 0) return nil;
+    @synchronized(self) {
+        return self.sceneTextures[@(textureId)];
+    }
+}
+
+- (NativeSdkSceneRequest *)sceneRequestForKey:(NSString *)key {
+    if (!key) return nil;
+    @synchronized(self) {
+        return self.sceneRequests[key];
+    }
+}
+
+- (NativeSdkSceneMesh *)sceneMeshForId:(uint64_t)meshId {
+    @synchronized(self) {
+        return self.sceneMeshes[@(meshId)];
+    }
+}
+
 - (BOOL)removeGpuSurfaceImageWithId:(uint64_t)imageId {
     if (imageId == 0) return NO;
     NSString *key = [NSString stringWithFormat:@"%llu", (unsigned long long)imageId];
     [self.canvasImageStore removeObjectForKey:key];
+    @synchronized(self) {
+        [self.sceneRequests removeObjectForKey:key];
+    }
     return YES;
 }
 
@@ -14608,6 +15172,95 @@ int native_sdk_appkit_upload_gpu_surface_image(native_sdk_appkit_host_t *host, u
 int native_sdk_appkit_remove_gpu_surface_image(native_sdk_appkit_host_t *host, uint64_t image_id) {
     NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
     return [object removeGpuSurfaceImageWithId:image_id] ? 1 : 0;
+}
+
+int native_sdk_appkit_upload_scene_mesh(native_sdk_appkit_host_t *host, uint64_t mesh_id, const native_sdk_scene_vertex_t *vertices, size_t vertex_count, const uint32_t *indices, size_t index_count) {
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
+    return [object uploadSceneMeshWithId:mesh_id vertices:vertices count:vertex_count indices:indices count:index_count] ? 1 : 0;
+}
+
+/* An app's fragment shading for scene draws: MSL defining
+ * `custom_fragment(SceneOut in, constant SceneFrame &frame, constant
+ * SceneDraw &draw, texture2d<float> map, sampler map_sampler, bool front)`
+ * over the standard prelude. Views compile it on first use. */
+int native_sdk_appkit_register_scene_shader(native_sdk_appkit_host_t *host, uint32_t shader_id, const char *source, size_t source_len) {
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
+    if (!object || shader_id == 0 || !source || source_len == 0) return 0;
+    NSString *text = [[NSString alloc] initWithBytes:source length:source_len encoding:NSUTF8StringEncoding];
+    if (!text) return 0;
+    @synchronized(object) {
+        if (!object.sceneShaders) object.sceneShaders = [NSMutableDictionary dictionary];
+        object.sceneShaders[@(shader_id)] = text;
+    }
+    return 1;
+}
+
+int native_sdk_appkit_upload_scene_texture(native_sdk_appkit_host_t *host, uint64_t texture_id, size_t width, size_t height, const uint8_t *rgba8, size_t rgba8_len) {
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
+    return [object uploadSceneTextureWithId:texture_id width:width height:height rgba8:rgba8 length:rgba8_len] ? 1 : 0;
+}
+
+/* A line of text rasterized with CoreText into a scene texture: white
+ * glyphs with straight alpha, so a scene draw's material color tints
+ * them. Answers the texture's pixel size and the baseline from its top. */
+int native_sdk_appkit_upload_scene_text(native_sdk_appkit_host_t *host, uint64_t texture_id, uint64_t font_id, double size, double tracking, const char *text, size_t text_len, double *width, double *height, double *baseline) {
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
+    if (!object || texture_id == 0 || !text || text_len == 0 || !(size > 0)) return 0;
+    @autoreleasepool {
+        NSString *value = [[NSString alloc] initWithBytes:text length:text_len encoding:NSUTF8StringEncoding];
+        if (!value) return 0;
+        NSFont *font = NativeSdkFontForFontId(font_id, (CGFloat)size);
+        if (!font) return 0;
+        NSDictionary *attributes = @{
+            NSFontAttributeName : font,
+            NSKernAttributeName : @(tracking),
+            (__bridge NSString *)kCTForegroundColorFromContextAttributeName : @YES,
+        };
+        NSAttributedString *string = [[NSAttributedString alloc] initWithString:value attributes:attributes];
+        CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)string);
+        if (!line) return 0;
+        CGFloat ascent = 0, descent = 0, leading = 0;
+        const double advance = CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
+        const CGFloat pad = ceil(size * 0.15) + 1;
+        const size_t w = (size_t)ceil(advance + pad * 2);
+        const size_t h = (size_t)ceil(ascent + descent + pad * 2);
+        if (w == 0 || h == 0 || w > 8192 || h > 8192) {
+            CFRelease(line);
+            return 0;
+        }
+        NSMutableData *pixels = [NSMutableData dataWithLength:w * h * 4];
+        CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+        CGContextRef context = CGBitmapContextCreate(pixels.mutableBytes, w, h, 8, w * 4, space, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+        CGColorSpaceRelease(space);
+        if (!context) {
+            CFRelease(line);
+            return 0;
+        }
+        CGContextSetRGBFillColor(context, 1, 1, 1, 1);
+        CGContextSetShouldAntialias(context, true);
+        CGContextSetShouldSmoothFonts(context, false);
+        CGContextSetTextPosition(context, pad, pad + descent);
+        CTLineDraw(line, context);
+        CGContextRelease(context);
+        CFRelease(line);
+        /* White glyphs: straight alpha is white wherever there is ink. */
+        uint8_t *bytes = pixels.mutableBytes;
+        for (size_t i = 0; i < w * h; i += 1) {
+            bytes[i * 4] = 255;
+            bytes[i * 4 + 1] = 255;
+            bytes[i * 4 + 2] = 255;
+        }
+        if (![object uploadSceneTextureWithId:texture_id width:w height:h rgba8:bytes length:w * h * 4]) return 0;
+        if (width) *width = (double)w;
+        if (height) *height = (double)h;
+        if (baseline) *baseline = pad + ascent;
+        return 1;
+    }
+}
+
+int native_sdk_appkit_render_scene(native_sdk_appkit_host_t *host, uint64_t image_id, const native_sdk_scene_frame_t *frame, const native_sdk_scene_draw_t *draws, size_t draw_count) {
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
+    return [object renderSceneForImageId:image_id frame:frame draws:draws count:draw_count] ? 1 : 0;
 }
 
 int native_sdk_appkit_update_widget_accessibility(native_sdk_appkit_host_t *host, uint64_t window_id, const char *label, size_t label_len, const native_sdk_appkit_widget_accessibility_node_t *nodes, size_t node_count) {
