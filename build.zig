@@ -1153,7 +1153,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "#error \"WebView2.h not found" },
         .{ .path = "src/platform/windows/webview2_host.cpp", .pattern = "LoadLibraryW(L\"WebView2Loader.dll\")" },
         .{ .path = "build/app.zig", .pattern = ".system => if (web_layer) {" },
-        .{ .path = "build/app.zig", .pattern = "app_mod.addIncludePath(dep.path(\"third_party/webview2/include\"));" },
+        .{ .path = "build/app.zig", .pattern = "app_mod.addIncludePath(b.path(\"../../vendor/webview2/sdk/include\"));" },
         .{ .path = "build/app.zig", .pattern = "third_party/webview2/x64/WebView2Loader.dll" },
         .{ .path = "build/app.zig", .pattern = "\"-DNATIVE_SDK_ALLOW_WEBVIEW2_STUB\"" },
         .{ .path = "src/tooling/templates.zig", .pattern = "third_party/webview2/include" },

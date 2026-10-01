@@ -429,6 +429,8 @@ pub fn App(comptime Runtime: type) type {
         context: *anyopaque,
         name: []const u8,
         source: platform.WebViewSource = platform.WebViewSource.html(""),
+        /// Route declared menus to the app canvas even when a native presenter exists.
+        prefer_canvas_context_menus: bool = false,
         source_fn: ?SourceFn = null,
         scene_fn: ?SceneFn = null,
         start_fn: ?StartFn = null,
