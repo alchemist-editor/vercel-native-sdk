@@ -4343,6 +4343,20 @@ static void NativeSdkPremultiplyStraightRgba8(const uint8_t *source, uint8_t *de
     [self updateDrawableSize];
 }
 
+- (void)viewWillStartLiveResize {
+    [super viewWillStartLiveResize];
+    self.liveResizeActive = YES;
+    self.metalLayer.presentsWithTransaction = YES;
+}
+
+- (void)viewDidEndLiveResize {
+    [super viewDidEndLiveResize];
+    [self updateDrawableSize];
+    [self renderFrame];
+    self.liveResizeActive = NO;
+    self.metalLayer.presentsWithTransaction = NO;
+}
+
 - (void)setFrame:(NSRect)frame {
     [super setFrame:frame];
     [self updateDrawableSize];
