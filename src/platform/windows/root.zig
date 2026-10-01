@@ -161,6 +161,9 @@ extern fn native_sdk_windows_cancel_timer(host: *WindowsHost, timer_id: u64) voi
 extern fn native_sdk_windows_focus_window(host: *WindowsHost, window_id: u64) c_int;
 extern fn native_sdk_windows_close_window(host: *WindowsHost, window_id: u64) c_int;
 extern fn native_sdk_windows_minimize_window(host: *WindowsHost, window_id: u64) c_int;
+extern fn native_sdk_windows_toggle_window_zoom(host: *WindowsHost, window_id: u64) c_int;
+extern fn native_sdk_windows_window_zoomed(host: *WindowsHost, window_id: u64) c_int;
+extern fn native_sdk_windows_set_window_zoom_button(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, width: f64, height: f64, enabled: c_int) c_int;
 extern fn native_sdk_windows_hide_window(host: *WindowsHost, window_id: u64) c_int;
 extern fn native_sdk_windows_show_window(host: *WindowsHost, window_id: u64) c_int;
 extern fn native_sdk_windows_set_window_close_policy(host: *WindowsHost, window_id: u64, close_policy: c_int) c_int;
@@ -170,6 +173,8 @@ extern fn native_sdk_windows_set_view_frame(host: *WindowsHost, window_id: u64, 
 extern fn native_sdk_windows_set_view_visible(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, visible: c_int) c_int;
 extern fn native_sdk_windows_focus_view(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
 extern fn native_sdk_windows_close_view(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+extern fn native_sdk_windows_adopt_view_surface(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, surface_handle: *anyopaque) c_int;
+extern fn native_sdk_windows_release_view_surface(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
 extern fn native_sdk_windows_request_gpu_surface_frame(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
 extern fn native_sdk_windows_note_gpu_surface_input(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
 extern fn native_sdk_windows_present_gpu_surface_pixels(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, width: usize, height: usize, scale: f64, has_dirty_rect: c_int, dirty_x: f64, dirty_y: f64, dirty_width: f64, dirty_height: f64, rgba8: [*]const u8, rgba8_len: usize) c_int;
@@ -436,6 +441,9 @@ pub const WindowsPlatform = struct {
                 .focus_window_fn = focusWindow,
                 .close_window_fn = closeWindow,
                 .minimize_window_fn = minimizeWindow,
+                .toggle_window_zoom_fn = toggleWindowZoom,
+                .window_zoomed_fn = windowZoomed,
+                .set_window_zoom_button_fn = setWindowZoomButton,
                 .hide_window_fn = hideWindow,
                 .show_window_fn = showWindow,
                 .quit_app_fn = quitApp,
@@ -448,6 +456,8 @@ pub const WindowsPlatform = struct {
                 .set_view_visible_fn = setViewVisible,
                 .focus_view_fn = focusView,
                 .close_view_fn = closeView,
+                .adopt_view_surface_fn = adoptViewSurface,
+                .release_view_surface_fn = releaseViewSurface,
                 .request_gpu_surface_frame_fn = requestGpuSurfaceFrame,
                 .note_gpu_surface_input_fn = noteGpuSurfaceInput,
                 .present_gpu_surface_pixels_fn = presentGpuSurfacePixels,
@@ -553,10 +563,8 @@ pub const WindowsPlatform = struct {
             // same popup path the tray menu uses), so the answer rides
             // the same system-engine gate as the tray.
             .context_menus => self.web_engine == .system,
-            // Native scroll drivers and app-owned view-surface adoption
-            // are macOS-only today; Win32 keeps the engine's wheel
-            // physics.
-            .gpu_surface_scroll_drivers, .view_surface_adoption => false,
+            .gpu_surface_scroll_drivers => false,
+            .view_surface_adoption => self.web_engine == .system,
             // Video decode (a Media Foundation session feeding the
             // media-surface texture channel) is not implemented yet:
             // an honest false rather than a half-implemented player.
@@ -1032,6 +1040,25 @@ fn minimizeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerr
     if (native_sdk_windows_minimize_window(self.host, window_id) == 0) return error.WindowNotFound;
 }
 
+fn toggleWindowZoom(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!void {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (native_sdk_windows_toggle_window_zoom(self.host, window_id) == 0) return error.WindowNotFound;
+}
+
+fn windowZoomed(context: ?*anyopaque, window_id: platform_mod.WindowId) bool {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    return native_sdk_windows_window_zoomed(self.host, window_id) != 0;
+}
+
+/// A null frame clears the view's zoom button; the host stops answering
+/// `HTMAXBUTTON` there and the band goes back to plain caption.
+fn setWindowZoomButton(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, frame: ?geometry.RectF) anyerror!void {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    const rect = frame orelse geometry.RectF.init(0, 0, 0, 0);
+    const enabled: c_int = if (frame == null) 0 else 1;
+    if (native_sdk_windows_set_window_zoom_button(self.host, window_id, label.ptr, label.len, rect.x, rect.y, rect.width, rect.height, enabled) == 0) return error.ViewNotFound;
+}
+
 fn hideWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!void {
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
     if (native_sdk_windows_hide_window(self.host, window_id) == 0) return error.WindowNotFound;
@@ -1213,6 +1240,18 @@ fn closeView(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []co
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
     if (self.web_engine != .system) return error.UnsupportedViewKind;
     if (native_sdk_windows_close_view(self.host, window_id, label.ptr, label.len) == 0) return error.ViewNotFound;
+}
+
+fn adoptViewSurface(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8, surface_handle: *anyopaque) anyerror!void {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (native_sdk_windows_adopt_view_surface(self.host, window_id, label.ptr, label.len, surface_handle) == 0) return error.ViewNotFound;
+}
+
+fn releaseViewSurface(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8) anyerror!void {
+    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+    if (self.web_engine != .system) return error.UnsupportedService;
+    if (native_sdk_windows_release_view_surface(self.host, window_id, label.ptr, label.len) == 0) return error.ViewNotFound;
 }
 
 fn requestGpuSurfaceFrame(context: ?*anyopaque, window_id: platform_mod.WindowId, label: []const u8) anyerror!void {

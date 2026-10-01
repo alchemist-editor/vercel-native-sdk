@@ -146,6 +146,15 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
             try self.options.platform.services.minimizeWindow(window_id);
         }
 
+        /// Maximize, or restore an already-maximized window: the verb behind
+        /// an app-drawn maximize button. Same liveness gate as minimize — a
+        /// retained closed slot must not reach the platform.
+        pub fn toggleWindowZoom(self: *Runtime, window_id: platform.WindowId) anyerror!void {
+            const index = Self.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
+            if (!self.windows[index].info.open) return error.WindowNotFound;
+            try self.options.platform.services.toggleWindowZoom(window_id);
+        }
+
         /// Keep a live window and its views, but order it offscreen until
         /// `showWindow` brings it back. This is an app-driven hide, not a
         /// close, so identity and rendered state are retained.
@@ -281,6 +290,8 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
 
         pub fn relayoutShellViews(self: *Runtime, window_id: platform.WindowId) anyerror!void {
             const binding = Self.shellLayoutForWindow(self, window_id) orelse return;
+            self.shell_relayout_in_progress = true;
+            defer self.shell_relayout_in_progress = false;
             try Self.applyShellViews(self, window_id, binding.viewSlice(), Self.shellBoundsForWindow(self, window_id), .update, null, null);
         }
 

@@ -35,7 +35,7 @@
 @class NativeSdkScreenAudioCapture;
 
 static const NSUInteger NativeSdkMaxChildWebViews = 16;
-static const NSUInteger NativeSdkMaxNativeViews = 32;
+static const NSUInteger NativeSdkMaxNativeViews = 96;
 static const NSInteger NativeSdkBridgeFrameKeepaliveFrames = 600;
 static const uint64_t NativeSdkNanosecondsPerSecond = 1000000000ull;
 static const uint32_t NativeSdkShortcutModifierPrimary = 1u << 0;
@@ -195,7 +195,7 @@ static uint64_t NativeSdkTimestampNanoseconds(void) {
 static uint64_t NativeSdkRetainedFrameIntervalNanoseconds(NSScreen *screen) {
     NSInteger framesPerSecond = screen ? screen.maximumFramesPerSecond : 0;
     if (framesPerSecond <= 0) framesPerSecond = 60;
-    framesPerSecond = MAX(30, MIN(120, framesPerSecond));
+    framesPerSecond = MAX(30, framesPerSecond);
     return NativeSdkNanosecondsPerSecond / (uint64_t)framesPerSecond;
 }
 
@@ -582,6 +582,15 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
  * so an IDLE app holds nothing and keeps full app-nap batching. */
 @property(nonatomic, strong) id<NSObject> frameChannelActivity;
 @property(nonatomic, assign) BOOL glassFlushPending;
+/* Live window resize needs presents that land in the SAME CATransaction
+ * as the layout pass that resized the layer: the async steady-state path
+ * (presentDrawable + commit) lets AppKit commit the new bounds while the
+ * glass still holds the old-size drawable, which reads as stale strips
+ * at the growing edges and per-surface shimmer across the window's
+ * surface mosaic. While this flag is up (viewWillStartLiveResize ->
+ * viewDidEndLiveResize) renderFrame presents synchronously
+ * (commit / waitUntilScheduled / present) under presentsWithTransaction. */
+@property(nonatomic, assign) BOOL liveResizeActive;
 @property(nonatomic, assign) BOOL pointerMotionInputPending;
 @property(nonatomic, assign) NSInteger pendingPointerMotionKind;
 @property(nonatomic, assign) NSPoint pendingPointerMotionPoint;
@@ -4055,6 +4064,12 @@ static void NativeSdkPremultiplyStraightRgba8(const uint8_t *source, uint8_t *de
     if (changed) {
         [self emitResizeEvent];
         [self requestRetainedCanvasFrame];
+        // Mid-live-resize the size change arrives inside AppKit's layout
+        // pass: render RIGHT NOW so the transacted present (see
+        // renderFrame) rides the same commit as the new bounds. The
+        // nested updateDrawableSize at renderFrame's top sees no further
+        // change, so this cannot recurse.
+        if (self.liveResizeActive) [self renderFrame];
     }
 }
 
@@ -6271,9 +6286,12 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     id<MTLCommandBuffer> commandBuffer = [self.commandQueue commandBuffer];
     if (!commandBuffer) return;
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:descriptor];
-    const BOOL canvasTextureMatchesDrawable = self.canvasTextureWidth == drawable.texture.width &&
-        self.canvasTextureHeight == drawable.texture.height;
-    if (self.hasCanvasTexture && canvasTextureMatchesDrawable && self.canvasTexture && self.canvasRenderPipeline && self.canvasSampler) {
+    // During a live resize or backing-scale transition, keep drawing the last
+    // committed canvas texture across the new drawable. The normalized quad
+    // safely scales it until the app's replacement packet lands; refusing the
+    // size mismatch exposes the host's near-white placeholder and alternates
+    // blank/old/new frames while the window is moving.
+    if (self.hasCanvasTexture && self.canvasTexture && self.canvasRenderPipeline && self.canvasSampler) {
         [encoder setRenderPipelineState:self.canvasRenderPipeline];
         [encoder setFragmentTexture:self.canvasTexture atIndex:0];
         [encoder setFragmentSamplerState:self.canvasSampler atIndex:0];
@@ -6340,8 +6358,18 @@ static BOOL NativeSdkCompositeBlurWriteRegion(NSDictionary *command, CGFloat sca
     }];
 
     self.glassFlushPending = NO;
-    [commandBuffer presentDrawable:drawable];
-    [commandBuffer commit];
+    if (self.liveResizeActive) {
+        // Transacted present: schedule, then hand the drawable to the
+        // CATransaction that carries this layout pass's new bounds.
+        // waitUntilScheduled blocks only on command-buffer scheduling
+        // (not GPU completion), the price of tear-free live resize.
+        [commandBuffer commit];
+        [commandBuffer waitUntilScheduled];
+        [drawable present];
+    } else {
+        [commandBuffer presentDrawable:drawable];
+        [commandBuffer commit];
+    }
     self.hasEverPresented = YES;
 
     self.frameIndex += 1;
@@ -8803,7 +8831,13 @@ static float NativeSdkCaptureReadRemixedSample(const AudioBufferList *buffers, c
         if (x < 0 || y < 0 || width < 0 || height < 0) return NO;
         NSView *parent = view.superview;
         if (!parent) return NO;
-        view.frame = [self viewFrameForContainer:parent x:x y:y width:width height:height];
+        const NSRect nextFrame = [self viewFrameForContainer:parent x:x y:y width:width height:height];
+        // Repeated app-side reconciliation is intentional: it repairs frames
+        // after shell relayouts. Do not turn an identical repair request into
+        // another AppKit frame mutation, though — setFrame invalidates the
+        // nested layer tree even when no geometry changed, multiplying panel
+        // work and exposing intermediate states during window move/resize.
+        if (!NSEqualRects(view.frame, nextFrame)) view.frame = nextFrame;
     }
     if (hasLayer) {
         view.wantsLayer = YES;
@@ -9092,6 +9126,12 @@ static float NativeSdkCaptureReadRemixedSample(const AudioBufferList *buffers, c
     NSView *container = self.nativeViews[key];
     if (!container) return NO;
     [self dropAdoptedViewSurfaceForKey:key];
+    // AppKit does not clip subviews to their parent's bounds by default. An
+    // adopted Metal view can therefore expose an oversized/stale drawable
+    // across sibling panels and custom titlebar chrome during relayout. Make
+    // the declared shell slot the hard visual boundary for its native surface.
+    container.wantsLayer = YES;
+    container.layer.masksToBounds = YES;
     surface.frame = container.bounds;
     surface.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [container addSubview:surface positioned:NSWindowAbove relativeTo:nil];

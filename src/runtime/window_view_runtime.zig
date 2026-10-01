@@ -91,17 +91,28 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
             }
 
             const index = Self.findViewIndex(self, window_id, label) orelse return error.ViewNotFound;
-            try self.options.platform.services.updateView(window_id, label, patch);
-            if (patch.frame) |view_frame| self.views[index].frame = view_frame;
-            if (patch.layer) |layer| self.views[index].layer = layer;
+            var effective_patch = patch;
+            if (patch.frame != null) {
+                if (self.shell_relayout_in_progress) {
+                    // Shell relayout never overrides an app-owned frame:
+                    // the app's explicit geometry is durable state, not a
+                    // hint for the manifest layout to reset.
+                    if (self.views[index].frame_app_patched) effective_patch.frame = null;
+                } else {
+                    self.views[index].frame_app_patched = true;
+                }
+            }
+            try self.options.platform.services.updateView(window_id, label, effective_patch);
+            if (effective_patch.frame) |view_frame| self.views[index].frame = view_frame;
+            if (effective_patch.layer) |layer| self.views[index].layer = layer;
             if (patch.visible) |visible| self.views[index].visible = visible;
             if (patch.enabled) |enabled| self.views[index].enabled = enabled;
             if (patch.role) |role| self.views[index].role = try copyInto(&self.views[index].role_storage, role);
             if (patch.accessibility_label) |accessibility_label| self.views[index].accessibility_label = try copyInto(&self.views[index].accessibility_label_storage, accessibility_label);
             if (patch.text) |text| self.views[index].text = try copyInto(&self.views[index].text_storage, text);
             if (patch.command) |command| self.views[index].command = try copyInto(&self.views[index].command_storage, command);
-            if (patch.frame != null) try Self.relayoutDescendantWebViewBackends(self, window_id, label);
-            self.invalidateFor(.command, patch.frame);
+            if (effective_patch.frame != null) try Self.relayoutDescendantWebViewBackends(self, window_id, label);
+            self.invalidateFor(.command, effective_patch.frame);
             if (self.views[index].focused and !isFocusableViewInfo(self.views[index].info())) {
                 Self.ensureFocusableViewFocused(self, window_id);
             }

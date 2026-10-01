@@ -277,7 +277,7 @@ pub const max_drop_paths_bytes: usize = 8192;
 pub const max_drop_paths: usize = max_drop_paths_bytes / 2 + 1;
 pub const max_window_event_name_bytes: usize = 64;
 pub const max_window_event_detail_bytes: usize = 8192;
-pub const max_views: usize = 32;
+pub const max_views: usize = 96;
 pub const max_view_label_bytes: usize = 64;
 pub const max_view_role_bytes: usize = 64;
 pub const max_view_accessibility_label_bytes: usize = 256;
@@ -2687,6 +2687,19 @@ pub const PlatformServices = struct {
     /// controls — chromeless windows have no system button to click.
     /// Platforms without the concept leave this null.
     minimize_window_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId) anyerror!void = null,
+    /// The real OS maximize/restore TOGGLE (Windows `SW_MAXIMIZE` /
+    /// `SW_RESTORE`, macOS zoom), the third app-drawn window control
+    /// beside close and minimize. Toggle rather than set: the caption
+    /// button is itself a toggle, and the platform already owns the
+    /// restore bounds. Platforms without the concept leave this null.
+    toggle_window_zoom_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId) anyerror!void = null,
+    /// Whether the window is maximized right now (Windows `IsZoomed`).
+    /// PULL-shaped like `window_chrome_fn` on purpose: an app-drawn
+    /// maximize button must show the restore glyph after ANY zoom — its own
+    /// click, a caption double-click, Win+Up, a snap gesture — and only the
+    /// window knows. Asking at paint time leaves no mirrored bool to drift
+    /// out of sync. Platforms without the concept report false.
+    window_zoomed_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId) bool = null,
     /// Keep a live window and all of its views, but order it off the
     /// glass. The runtime marks `WindowInfo.hidden` while it is out;
     /// `show_window_fn` is the inverse. Platforms without a reliable
@@ -2750,6 +2763,14 @@ pub const PlatformServices = struct {
     /// clears the mirror. Platforms that resolve drags from the live
     /// pointer gesture (macOS) leave this null.
     set_window_drag_regions_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8, regions: []const WindowDragRegion) anyerror!void = null,
+    /// Where a canvas view draws its own maximize button, in that view's
+    /// local logical coordinates — the drag mirror's sibling, and the same
+    /// push-after-layout contract. Windows 11 pops the snap-layout flyout
+    /// only for the window whose `WM_NCHITTEST` answers `HTMAXBUTTON`, so a
+    /// fully app-drawn caption has to name its zoom button for the OS to
+    /// recognize one at all. A null frame clears it. Platforms whose window
+    /// controls stay native leave this null.
+    set_window_zoom_button_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8, frame: ?geometry.RectF) anyerror!void = null,
     create_view_fn: ?*const fn (context: ?*anyopaque, options: ViewOptions) anyerror!void = null,
     update_view_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8, patch: ViewPatch) anyerror!void = null,
     set_view_frame_fn: ?*const fn (context: ?*anyopaque, window_id: WindowId, label: []const u8, frame: geometry.RectF) anyerror!void = null,
@@ -3146,6 +3167,11 @@ pub const PlatformServices = struct {
         return minimize_fn(self.context, window_id);
     }
 
+    pub fn toggleWindowZoom(self: PlatformServices, window_id: WindowId) anyerror!void {
+        const zoom_fn = self.toggle_window_zoom_fn orelse return error.UnsupportedService;
+        return zoom_fn(self.context, window_id);
+    }
+
     pub fn hideWindow(self: PlatformServices, window_id: WindowId) anyerror!void {
         const hide_fn = self.hide_window_fn orelse return error.UnsupportedService;
         return hide_fn(self.context, window_id);
@@ -3195,6 +3221,20 @@ pub const PlatformServices = struct {
     pub fn setWindowDragRegions(self: PlatformServices, window_id: WindowId, label: []const u8, regions: []const WindowDragRegion) anyerror!void {
         const set_fn = self.set_window_drag_regions_fn orelse return;
         return set_fn(self.context, window_id, label, regions);
+    }
+
+    /// False wherever the query is unavailable, so a caller can treat this
+    /// as "definitely not maximized" and keep its own fallback.
+    pub fn windowZoomed(self: PlatformServices, window_id: WindowId) bool {
+        const zoomed_fn = self.window_zoomed_fn orelse return false;
+        return zoomed_fn(self.context, window_id);
+    }
+
+    /// No-op where window controls stay native — there is no app-drawn
+    /// button for the OS to hit-test.
+    pub fn setWindowZoomButton(self: PlatformServices, window_id: WindowId, label: []const u8, frame: ?geometry.RectF) anyerror!void {
+        const set_fn = self.set_window_zoom_button_fn orelse return;
+        return set_fn(self.context, window_id, label, frame);
     }
 
     pub fn createView(self: PlatformServices, options: ViewOptions) anyerror!void {
