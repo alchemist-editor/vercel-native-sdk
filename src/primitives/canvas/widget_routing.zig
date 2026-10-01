@@ -343,6 +343,10 @@ fn widgetDragSourceIndex(layout: anytype, id: ObjectId) ?usize {
     var current = widgetIndexById(layout, id);
     while (current) |index| {
         const node = layout.nodes[index];
+        // Slider pointer capture adjusts a value. Never lift its widget or
+        // a draggable ancestor into an object-drag preview, even when generic
+        // semantics accidentally mark the control as a drag source.
+        if (node.widget.kind == .slider) return null;
         if (widget_access.isDragSource(node.widget)) {
             if (isWidgetHiddenInAncestors(layout, index)) return null;
             if (widget_tree.isWidgetConcealedByDisclosure(layout, index)) return null;

@@ -710,6 +710,13 @@ fn emitButtonGroupWidget(builder: *Builder, widget: Widget, tokens: DesignTokens
     if (widget.layout.clip_content) try builder.popClip();
 }
 
+fn widgetLayoutSameParent(left: ?usize, right: ?usize) bool {
+    return if (left) |left_index|
+        if (right) |right_index| left_index == right_index else false
+    else
+        right == null;
+}
+
 fn emitWidgetLayoutChildren(
     builder: *Builder,
     layout: anytype,
@@ -717,7 +724,30 @@ fn emitWidgetLayoutChildren(
     tokens: DesignTokens,
     state: WidgetRenderState,
 ) Error!void {
-    const child_count = widgetLayoutDirectChildCount(layout, parent_index);
+    // Layout nodes are depth-first/pre-order: when a node has children, its
+    // first direct child is the very next record. Most inspector controls are
+    // leaves, so this turns their child walk from a full-tree scan into O(1).
+    if (parent_index) |index| {
+        const first_child = index + 1;
+        if (first_child >= layout.nodes.len or
+            !widgetLayoutSameParent(layout.nodes[first_child].parent_index, index)) return;
+    }
+
+    // Builder-authored inspectors normally already arrive in paint order
+    // (base-layer rows in declaration order). Emit that common case in one
+    // linear pass. Explicit/mixed z layers retain the general stable-sort
+    // fallback below.
+    var ordered = true;
+    var previous_layer: ?i32 = null;
+    for (layout.nodes) |candidate| {
+        if (!widgetLayoutSameParent(candidate.parent_index, parent_index)) continue;
+        const layer = widgetPaintLayer(candidate.widget, tokens);
+        if (previous_layer) |previous_value| if (layer < previous_value) {
+            ordered = false;
+            break;
+        };
+        previous_layer = layer;
+    }
     // The layout walk's flush button-group stamp (the tree walk's twin
     // lives in `emitButtonGroupWidget`): children of a gap-0 group get
     // their segment position on the way down.
@@ -725,6 +755,25 @@ fn emitWidgetLayoutChildren(
         const parent = layout.nodes[index].widget;
         break :blk if (parent.kind == .button_group and buttonGroupStampsSegments(parent, tokens)) index else null;
     } else null;
+    if (ordered) {
+        for (layout.nodes, 0..) |candidate, child_index| {
+            if (!widgetLayoutSameParent(candidate.parent_index, parent_index)) continue;
+            // Window-level surfaces paint in the late z-pass
+            // (emitWidgetLayoutWindowSurfaces), never in tree position.
+            if (!widget_tree.widgetEscapesAncestorClips(candidate.widget) and
+                !state.layoutMotionEscapesAncestorClips(candidate.widget.id))
+            {
+                const segment = if (group_index) |index|
+                    layoutButtonGroupSegment(layout, index, child_index)
+                else
+                    widget_model.WidgetGroupSegment.none;
+                try emitWidgetLayoutNode(builder, layout, child_index, tokens, state, segment);
+            }
+        }
+        return;
+    }
+
+    const child_count = widgetLayoutDirectChildCount(layout, parent_index);
     var emitted: usize = 0;
     var previous: ?WidgetPaintOrder = null;
     while (emitted < child_count) : (emitted += 1) {
@@ -771,6 +820,23 @@ fn emitWidgetLayoutNode(
 ) Error!void {
     const node = layout.nodes[node_index];
     if (node.widget.semantics.hidden) return;
+    // A clipped inspector can retain hundreds of controls, but only a small
+    // viewport-sized slice can reach the surface. Cull fully offscreen LEAVES
+    // before their sliders/text/buttons allocate commands. Keep a small paint
+    // overflow margin for focus rings and shadows at the viewport edge.
+    const possible_child = node_index + 1;
+    const has_direct_child = possible_child < layout.nodes.len and
+        widgetLayoutSameParent(layout.nodes[possible_child].parent_index, node_index);
+    if (!has_direct_child) {
+        const paint_overflow: f32 = 32;
+        const paint_bounds = geometry.RectF.init(
+            node.frame.x - paint_overflow,
+            node.frame.y - paint_overflow,
+            node.frame.width + paint_overflow * 2,
+            node.frame.height + paint_overflow * 2,
+        );
+        if (widgetLayoutNodeVisibleBounds(layout, node_index, paint_bounds, state) == null) return;
+    }
     // During a drag the retained source remains in flow as the exact blank
     // source slot. Its one visible rendering happens in the late floating
     // pass above, fully opaque under the pointer.

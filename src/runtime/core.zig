@@ -938,7 +938,7 @@ pub const Runtime = struct {
     pub const gpuSurfaceFrame = CanvasFrameMethods.gpuSurfaceFrame;
     pub const setCanvasFrameBudget = CanvasFrameMethods.setCanvasFrameBudget;
     pub const setGpuSurfaceInputLatencyBudget = CanvasFrameMethods.setGpuSurfaceInputLatencyBudget;
-    const requestCanvasFrameForView = CanvasFrameMethods.requestCanvasFrameForView;
+    pub const requestCanvasFrameForView = CanvasFrameMethods.requestCanvasFrameForView;
     const invalidateForCanvasChanges = CanvasFrameMethods.invalidateForCanvasChanges;
 
     const CanvasImageMethods = runtime_canvas_images.RuntimeCanvasImages(Runtime);

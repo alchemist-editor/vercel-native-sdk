@@ -291,6 +291,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
                     .zoom = next.zoom,
                     .transparent = next.transparent,
                     .bridge_enabled = next.bridge_enabled,
+                    .visible = next.visible, // Preserve parked tabs during compaction.
                     .focused = next.focused,
                     .open = next.open,
                 };
@@ -359,7 +360,9 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
         }
 
         pub fn updateWebViewView(self: *Runtime, window_id: platform.WindowId, label: []const u8, patch: platform.ViewPatch) !platform.ViewInfo {
-            if (patch.visible != null or patch.enabled != null or patch.role != null or patch.accessibility_label != null or patch.text != null or patch.command != null) return error.InvalidViewOptions;
+            // Child WebView visibility is host-owned dock state.
+            if (patch.enabled != null or patch.role != null or patch.accessibility_label != null or patch.text != null or patch.command != null) return error.InvalidViewOptions;
+            if (patch.visible != null and isMainWebViewLabel(label)) return error.InvalidViewOptions;
             if (isMainWebViewLabel(label)) {
                 const window_index = WindowStorageMethods.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
                 if (patch.url != null) return error.InvalidViewOptions;
@@ -383,6 +386,11 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
             }
 
             const webview_index = Self.findWebViewIndex(self, window_id, label) orelse return error.WebViewNotFound;
+            if (patch.visible) |visible| {
+                try self.options.platform.services.updateView(window_id, label, .{ .visible = visible });
+                self.webviews[webview_index].visible = visible;
+                if (!visible and self.webviews[webview_index].focused) _ = Self.focusNextView(self, window_id) catch {};
+            }
             if (patch.frame) |view_frame| {
                 if (!isValidWebViewFrame(view_frame)) return error.InvalidWebViewOptions;
                 const platform_frame = try Self.platformFrameForView(self, window_id, self.webviews[webview_index].parent, view_frame);

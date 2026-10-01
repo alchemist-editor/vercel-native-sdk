@@ -1422,6 +1422,8 @@ pub const NullPlatform = struct {
 
     fn updateView(context: ?*anyopaque, window_id: WindowId, label: []const u8, patch: ViewPatch) anyerror!void {
         const self: *NullPlatform = @ptrCast(@alignCast(context.?));
+        // WebView visibility is tracked by Runtime; null host has no renderer.
+        if (patch.visible != null and self.findWebViewIndex(window_id, label) != null) return;
         const index = self.findViewIndex(window_id, label) orelse return error.ViewNotFound;
         if (patch.frame) |frame| {
             if (!isValidViewFrame(frame)) return error.InvalidViewOptions;

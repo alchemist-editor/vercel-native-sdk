@@ -35,7 +35,7 @@
 @class NativeSdkScreenAudioCapture;
 
 static const NSUInteger NativeSdkMaxChildWebViews = 16;
-static const NSUInteger NativeSdkMaxNativeViews = 96;
+static const NSUInteger NativeSdkMaxNativeViews = 120;
 static const NSInteger NativeSdkBridgeFrameKeepaliveFrames = 600;
 static const uint64_t NativeSdkNanosecondsPerSecond = 1000000000ull;
 static const uint32_t NativeSdkShortcutModifierPrimary = 1u << 0;
@@ -349,6 +349,8 @@ static NSCursor *NativeSdkCursorForKind(NSInteger kind) {
         case NATIVE_SDK_APPKIT_CURSOR_TEXT: return [NSCursor IBeamCursor];
         case NATIVE_SDK_APPKIT_CURSOR_RESIZE_HORIZONTAL: return [NSCursor resizeLeftRightCursor];
         case NATIVE_SDK_APPKIT_CURSOR_RESIZE_VERTICAL: return [NSCursor resizeUpDownCursor];
+        case NATIVE_SDK_APPKIT_CURSOR_CROSSHAIR: return [NSCursor crosshairCursor];
+        case NATIVE_SDK_APPKIT_CURSOR_GRAB: return [NSCursor closedHandCursor];
         case NATIVE_SDK_APPKIT_CURSOR_ARROW:
         default:
             return [NSCursor arrowCursor];
@@ -1572,6 +1574,34 @@ static NSPoint NativeSdkViewLocalYDownPoint(NSView *view, NSPoint point) {
 }
 
 @end
+
+static native_sdk_appkit_url_open_handler_t g_url_open_handler = NULL;
+
+void native_sdk_appkit_set_url_open_handler(native_sdk_appkit_url_open_handler_t handler) {
+    g_url_open_handler = handler;
+}
+
+@interface NativeSdkUrlOpenHandler : NSObject
+@end
+@implementation NativeSdkUrlOpenHandler
+- (void)handleGetURLEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)reply {
+    (void)reply;
+    NSString *url = [[event paramDescriptorForKeyword:keyDirectObject] stringValue];
+    if (url.length > 0 && g_url_open_handler) g_url_open_handler(url.UTF8String);
+}
+@end
+
+static NativeSdkUrlOpenHandler *g_url_open_target = nil;
+
+void native_sdk_appkit_install_url_open_handler(void) {
+    if (g_url_open_target) return;
+    g_url_open_target = [NativeSdkUrlOpenHandler new];
+    [[NSAppleEventManager sharedAppleEventManager]
+        setEventHandler:g_url_open_target
+            andSelector:@selector(handleGetURLEvent:withReplyEvent:)
+          forEventClass:'GURL'
+             andEventID:'GURL'];
+}
 
 @implementation NativeSdkWebView
 
@@ -3281,7 +3311,13 @@ static BOOL NativeSdkPacketDrawImage(NSDictionary *packetImage, NSDictionary<NSS
         }
     }
     [NSGraphicsContext.currentContext setImageInterpolation:[sampling isEqualToString:@"nearest"] ? NSImageInterpolationNone : NSImageInterpolationHigh];
-    [image drawInRect:dst fromRect:src operation:NSCompositingOperationSourceOver fraction:(opacity * imageOpacity) respectFlipped:YES hints:nil];
+    /* The packet's src rect is top-left-origin; NSImage fromRect is
+     * bottom-left. Flip after source clipping so a cropped atlas tile
+     * samples the intended region instead of its vertical mirror.
+     * Identity for full-image draws. */
+    NSRect sampleSrc = src;
+    sampleSrc.origin.y = image.size.height - src.origin.y - src.size.height;
+    [image drawInRect:dst fromRect:sampleSrc operation:NSCompositingOperationSourceOver fraction:(opacity * imageOpacity) respectFlipped:YES hints:nil];
     [NSGraphicsContext restoreGraphicsState];
     return YES;
 }
@@ -10234,6 +10270,9 @@ static float NativeSdkCaptureReadRemixedSample(const AudioBufferList *buffers, c
 }
 
 - (BOOL)updateNativeViewInWindow:(uint64_t)windowId label:(NSString *)label hasFrame:(BOOL)hasFrame x:(double)x y:(double)y width:(double)width height:(double)height hasLayer:(BOOL)hasLayer layer:(NSInteger)layer hasVisible:(BOOL)hasVisible visible:(BOOL)visible hasEnabled:(BOOL)hasEnabled enabled:(BOOL)enabled hasRole:(BOOL)hasRole role:(NSString *)role hasAccessibilityLabel:(BOOL)hasAccessibilityLabel accessibilityLabel:(NSString *)accessibilityLabel hasText:(BOOL)hasText text:(NSString *)text hasCommand:(BOOL)hasCommand command:(NSString *)command {
+    // Child browsers have their own table; dock visibility preserves JS state.
+    WKWebView *browser = self.childWebViews[[self webViewKeyForWindow:windowId label:label]];
+    if (browser && hasVisible) { browser.hidden = !visible; return YES; }
     NSString *key = [self nativeViewKeyForWindow:windowId label:label];
     NSView *view = self.nativeViews[key];
     if (!view) return NO;
@@ -10738,7 +10777,9 @@ static id<MTLDevice> NativeSdkSceneDevice(void) {
     webview.navigationDelegate = self;
     webview.autoresizingMask = NSViewNotSizable;
     [window.contentView addSubview:webview positioned:NSWindowAbove relativeTo:nil];
-    [webview loadRequest:[NSURLRequest requestWithURL:targetURL]];
+    // A generated panel wrapper grants WKWebView access to that file only.
+    if (targetURL.isFileURL) [webview loadFileURL:targetURL allowingReadAccessToURL:targetURL];
+    else [webview loadRequest:[NSURLRequest requestWithURL:targetURL]];
     self.childWebViews[key] = webview;
     if (bridgeEnabled) [self.bridgeEnabledChildWebViewKeys addObject:key];
     [self reorderWebViewsInWindow:windowId];
@@ -11957,6 +11998,14 @@ static NSString *NativeSdkSigningTeamIdentifier(NSString *bundlePath) {
             // keys; app shortcuts resume when focus returns to app chrome.
             NSResponder *first = event.window.firstResponder;
             if ([first isKindOfClass:[NSView class]] && [strongSelf viewIsAdoptedSurfaceDescendant:(NSView *)first]) return event;
+            // Canvas text fields own printable shifted keys and editing chords.
+            // Deliver directly: the app's Edit menu can otherwise consume
+            // Cmd+C/V/A before the canvas editor receives the event.
+            if ([first isKindOfClass:[NativeSdkMetalSurfaceView class]] &&
+                [(NativeSdkMetalSurfaceView *)first focusedTextAccessibilityElement]) {
+                [(NativeSdkMetalSurfaceView *)first keyDown:event];
+                return nil;
+            }
             if ([strongSelf handleShortcutEvent:event]) return nil;
             return event;
         }];
@@ -12063,6 +12112,7 @@ static NSString *NativeSdkSigningTeamIdentifier(NSString *bundlePath) {
     }
 
     [self scheduleFrame];
+    native_sdk_appkit_install_url_open_handler();
     [NSApp run];
 }
 

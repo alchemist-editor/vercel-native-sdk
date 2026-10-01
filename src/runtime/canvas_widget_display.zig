@@ -515,6 +515,9 @@ pub fn RuntimeCanvasWidgetDisplay(comptime Runtime: type) type {
                             },
                         },
                         .skeleton => {
+                            // App-styled fill (explicit background): not a
+                            // placeholder, no pulse. See the downstream patch.
+                            if (node.widget.style.background != null) continue;
                             const command_id = canvas.skeletonWidgetFillCommandId(node.widget.id);
                             const start_ns = existingCanvasRenderAnimationStartNs(view, command_id) orelse canvasRenderAnimationStartNsForView(view);
                             view.replaceCanvasRenderAnimation(.{
