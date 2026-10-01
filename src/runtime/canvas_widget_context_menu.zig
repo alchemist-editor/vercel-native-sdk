@@ -134,10 +134,7 @@ pub fn RuntimeCanvasWidgetContextMenu(comptime Runtime: type) type {
                 const widget = self.views[index].widget_layout_nodes[node_index].widget;
                 const count = @min(widget.context_menu.len, items.len);
                 if (count == 0) return;
-                // Alchemist: app-declared menus are app-drawn on every
-                // platform; answer them with the request event below.
-                const alchemist_app_drawn_context_menus = true;
-                if (has_presenter and !alchemist_app_drawn_context_menus) {
+                if (has_presenter and !app.prefer_canvas_context_menus) {
                     for (widget.context_menu[0..count], 0..) |item, item_index| {
                         items[item_index] = .{
                             .id = @intCast(item_index + 1),
