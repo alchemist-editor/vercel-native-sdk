@@ -3124,6 +3124,7 @@ fn emitImageWidget(builder: *Builder, widget: Widget, tokens: DesignTokens) Erro
         // mode. Nearest sampling keeps an atlas crop from filtering
         // across its source boundary; whole-image draws stay linear.
         .sampling = if (widget.image_src != null) .nearest else widget.image_sampling,
+        .radius = Radius.all(widget.style.radius orelse 0),
     });
     if (clips_image) try builder.popClip();
 }
