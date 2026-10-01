@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "gpu_surface_renderer.h"
 
 #include <d2d1.h>

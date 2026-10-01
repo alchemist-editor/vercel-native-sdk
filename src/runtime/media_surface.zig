@@ -487,14 +487,14 @@ pub fn RuntimeMediaSurfaces(comptime Runtime: type) type {
                 if (program.action == 0) return;
                 self.media_surface_entries[program.selected.?] = .{ .surface_id = surface_id };
                 self.options.platform.services.removeGpuSurfaceImage(canvas.mediaSurfaceTextureImageId(surface_id)) catch {};
-                runtime_canvas_images.RuntimeCanvasImages(Runtime).noteCanvasImagesChanged(self);
+                runtime_canvas_images.RuntimeCanvasImages(Runtime).noteCanvasImagesChanged(self, null);
                 return;
             }
             for (self.media_surface_entries[0..self.media_surface_count]) |*entry| {
                 if (entry.surface_id != surface_id or entry.fingerprint == 0) continue;
                 entry.* = .{ .surface_id = surface_id };
                 self.options.platform.services.removeGpuSurfaceImage(canvas.mediaSurfaceTextureImageId(surface_id)) catch {};
-                runtime_canvas_images.RuntimeCanvasImages(Runtime).noteCanvasImagesChanged(self);
+                runtime_canvas_images.RuntimeCanvasImages(Runtime).noteCanvasImagesChanged(self, null);
                 return;
             }
         }
@@ -630,7 +630,7 @@ pub fn RuntimeMediaSurfaces(comptime Runtime: type) type {
                 // Same repaint contract as a registered-image swap: the
                 // content fingerprint changed, caches re-upload, views
                 // re-render their next frame.
-                runtime_canvas_images.RuntimeCanvasImages(Runtime).noteCanvasImagesChanged(self);
+                runtime_canvas_images.RuntimeCanvasImages(Runtime).noteCanvasImagesChanged(self, null);
             }
         }
 

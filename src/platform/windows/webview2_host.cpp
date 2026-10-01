@@ -1,3 +1,8 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+/* Alchemist: emit GUID definitions before every Windows declaring header. */
+#include <initguid.h>
 #include <windows.h>
 #include <timeapi.h>
 #include <shellapi.h>
@@ -69,7 +74,7 @@ using Microsoft::WRL::ComPtr;
  * instantiate here (selectany), so no separate GUID import library is
  * needed — the same self-containment the WIC decoder uses further down.
  * Included last so only the Media Foundation GUIDs are affected. */
-#include <initguid.h>
+/* GUID definitions are emitted before all Windows headers above. */
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mferror.h>
@@ -460,6 +465,9 @@ struct NativeView {
      * intentionally leave this unused and take the alpha-correct pixel
      * fallback because UpdateLayeredWindow cannot compose child HWNDs. */
     std::shared_ptr<WindowsGpuSurface> gpu_surface;
+    /* App-owned child HWND filling this declared native-view container.
+     * The host reparents/sizes it but never destroys it. */
+    HWND adopted_surface = nullptr;
     /* Software-pixel fallback state (unrepresentable packet commands,
      * transparent top-level windows, or Direct2D device loss/resync). */
     std::vector<uint8_t> gpu_bgra;
@@ -565,6 +573,21 @@ struct NativeView {
      * WM_NCHITTEST consults it so the markup's drag header behaves like
      * the system caption. */
     std::vector<DragRegionRect> drag_regions;
+    /* The runtime-pushed frame of this view's APP-DRAWN maximize button,
+     * in view-local logical coordinates (see set_window_zoom_button_fn).
+     * WM_NCHITTEST answers HTMAXBUTTON there, which is the only way to
+     * earn the Windows 11 snap-layout flyout on a window whose caption
+     * the app draws itself. */
+    bool has_zoom_button = false;
+    double zoom_button_x = 0;
+    double zoom_button_y = 0;
+    double zoom_button_width = 0;
+    double zoom_button_height = 0;
+    /* Hovering that button right now, with TrackMouseEvent(TME_NONCLIENT)
+     * armed for the leave edge. Scopes the non-client mouse projection to
+     * a real hover session, so leaving a RESIZE BORDER — non-client too —
+     * cannot cancel a pointer this view never received. */
+    bool zoom_button_nc_active = false;
 };
 
 struct Shortcut {
@@ -2008,11 +2031,17 @@ static void applyNativeViewFrame(Host *host, NativeView &view) {
     }
     g_frame_apply_moves++;
     MoveWindow(view.hwnd, frame.left, frame.top, frame.right - frame.left, frame.bottom - frame.top, TRUE);
+    if (view.adopted_surface) {
+        RECT client{};
+        GetClientRect(view.hwnd, &client);
+        MoveWindow(view.adopted_surface, 0, 0, client.right, client.bottom, TRUE);
+    }
 }
 
 static void applyNativeViewState(NativeView &view, bool update_text, const std::string &text) {
     if (!view.hwnd) return;
     ShowWindow(view.hwnd, view.visible ? SW_SHOW : SW_HIDE);
+    if (view.adopted_surface) ShowWindow(view.adopted_surface, view.visible ? SW_SHOW : SW_HIDE);
     /* The placeholder frame pump retires while a never-presented view is
      * hidden (see the kGpuFrameTimerId handler); a reveal must re-arm it or
      * a first-shown surface never establishes its frame channel. SetTimer
@@ -2100,6 +2129,11 @@ static void destroyNativeViewAndChildren(Host *host, const std::string &key) {
         if (entry.second.window_id == window_id && entry.second.parent == label) children.push_back(entry.first);
     }
     for (const std::string &child : children) destroyNativeViewAndChildren(host, child);
+    if (found->second.adopted_surface) {
+        ShowWindow(found->second.adopted_surface, SW_HIDE);
+        SetParent(found->second.adopted_surface, HWND_MESSAGE);
+        found->second.adopted_surface = nullptr;
+    }
     if (found->second.kind == kViewGpuSurface) cancelGpuSurfaceFrameEmission(found->second);
     if (found->second.hwnd) DestroyWindow(found->second.hwnd);
     host->native_views.erase(found);
@@ -2797,6 +2831,102 @@ static void emitQueuedGpuSurfaceScrollInput(Host *host, NativeView &view) {
     if (delta_x != 0 || delta_y != 0) {
         emitGpuSurfaceInput(host, view, kGpuInputScroll, x, y, 0, delta_x, delta_y, "", "", modifiers, timestamp);
     }
+}
+
+/* The canvas view carrying this window's app-drawn maximize button when
+ * a parent-client point lands inside it, with the point converted to that
+ * view's local logical coordinates. */
+static NativeView *zoomButtonViewForWindow(Host *host, const Window &window, POINT client, double *local_x, double *local_y) {
+    if (!host || !window.hwnd) return nullptr;
+    for (auto &entry : host->native_views) {
+        NativeView &view = entry.second;
+        if (view.window_id != window.id || view.kind != kViewGpuSurface || !view.hwnd) continue;
+        if (!view.has_zoom_button || view.zoom_button_width <= 0 || view.zoom_button_height <= 0) continue;
+        const POINT origin = childOriginInParentClient(view.hwnd, window.hwnd);
+        const double scale = gpuSurfaceScale(view.hwnd);
+        if (scale <= 0) continue;
+        const double x = (double)(client.x - origin.x) / scale;
+        const double y = (double)(client.y - origin.y) / scale;
+        if (x < view.zoom_button_x || x >= view.zoom_button_x + view.zoom_button_width) continue;
+        if (y < view.zoom_button_y || y >= view.zoom_button_y + view.zoom_button_height) continue;
+        if (local_x) *local_x = x;
+        if (local_y) *local_y = y;
+        return &view;
+    }
+    return nullptr;
+}
+
+/* HTMAXBUTTON is a NON-CLIENT hit code, so the moment a window earns the
+ * snap-layout flyout its app-drawn maximize button stops receiving the
+ * client pointer stream that gives the two buttons beside it their hover
+ * wash, press state, and command dispatch. Project the non-client mouse
+ * messages back onto the owning canvas view as ordinary pointer input:
+ * the app keeps one input path for all three controls, and Windows keeps
+ * its flyout. Returns false when the message was not ours to translate.
+ *
+ * The canvas child answers WM_NCHITTEST with HTTRANSPARENT over this same
+ * rect, so it sees a WM_MOUSELEAVE as the pointer arrives — its
+ * cursor-still-inside/owner-is-an-ancestor test recognizes exactly this
+ * hand-off and suppresses the cancel, leaving hover for the move below to
+ * retarget. */
+static bool forwardZoomButtonNonClientMouse(Host *host, HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (!host) return false;
+    Window *window = chromelessWindowForHwnd(host, hwnd);
+    if (!window) return false;
+    if (message == WM_NCMOUSELEAVE) {
+        /* Left the non-client area — the resize borders are non-client too,
+         * so only a view actually mid-hover retires anything. Cancel covers
+         * both the hover wash and a press dragged off the button, exactly
+         * as the client-side leave does. */
+        for (auto &entry : host->native_views) {
+            NativeView &view = entry.second;
+            if (view.window_id != window->id || !view.zoom_button_nc_active) continue;
+            view.zoom_button_nc_active = false;
+            view.gpu_pointer_down = 0;
+            emitQueuedGpuSurfacePointerMotionInput(host, view);
+            emitGpuSurfaceInput(host, view, kGpuInputPointerCancel, view.gpu_pointer_x, view.gpu_pointer_y, 0, 0, 0, "", "", gpuModifierFlags());
+        }
+        return false;
+    }
+    if (wparam != HTMAXBUTTON) return false;
+    POINT point = { (int)(short)LOWORD(lparam), (int)(short)HIWORD(lparam) };
+    ScreenToClient(hwnd, &point);
+    double x = 0;
+    double y = 0;
+    NativeView *view = zoomButtonViewForWindow(host, *window, point, &x, &y);
+    if (!view) return false;
+    view->gpu_pointer_x = x;
+    view->gpu_pointer_y = y;
+    switch (message) {
+        case WM_NCMOUSEMOVE: {
+            if (!view->zoom_button_nc_active) {
+                /* Ask for the leave edge once per hover session —
+                 * TME_NONCLIENT is what turns it into WM_NCMOUSELEAVE. */
+                TRACKMOUSEEVENT track = {};
+                track.cbSize = sizeof(track);
+                track.dwFlags = TME_LEAVE | TME_NONCLIENT;
+                track.hwndTrack = hwnd;
+                if (TrackMouseEvent(&track)) view->zoom_button_nc_active = true;
+            }
+            /* Queued like every other pointer move, so hover follows the
+             * display-paced input path rather than the raw message rate. */
+            queueGpuSurfacePointerMotionInput(host, *view, view->gpu_pointer_down ? kGpuInputPointerDrag : kGpuInputPointerMove, x, y, 0, gpuModifierFlags());
+            return true;
+        }
+        case WM_NCLBUTTONDOWN:
+            view->gpu_pointer_down = 1;
+            emitQueuedGpuSurfacePointerMotionInput(host, *view);
+            emitGpuSurfaceInput(host, *view, kGpuInputPointerDown, x, y, 0, 0, 0, "", "", gpuModifierFlags());
+            return true;
+        case WM_NCLBUTTONUP:
+            view->gpu_pointer_down = 0;
+            emitQueuedGpuSurfacePointerMotionInput(host, *view);
+            emitGpuSurfaceInput(host, *view, kGpuInputPointerUp, x, y, 0, 0, 0, "", "", gpuModifierFlags());
+            return true;
+        default:
+            break;
+    }
+    return false;
 }
 
 static void emitQueuedGpuSurfaceInputs(Host *host, NativeView &view) {
@@ -3620,6 +3750,35 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
              * window-drag regions minus their press-claiming exclusions.
              * Everything else stays HTCLIENT and flows into the canvas
              * input pipeline unchanged. */
+            /* Chromeless windows have NO system caption, so this child
+             * covering the whole client area is the only thing the OS
+             * hit-tests: without a transparent answer here the parent's
+             * caption handling below is unreachable and the app's band
+             * loses double-click-to-maximize, the right-click system
+             * menu, and the snap-layout flyout. Yield exactly the drag
+             * regions (minus their press-claiming exclusions) and the
+             * app-drawn zoom button; the rest stays canvas input. */
+            if (host) {
+                auto chromeless = host->windows.find(view->window_id);
+                if (chromeless != host->windows.end() && chromeless->second.hwnd && windowIsChromeless(chromeless->second)) {
+                    POINT chromeless_point = { (int)(short)LOWORD(lparam), (int)(short)HIWORD(lparam) };
+                    ScreenToClient(chromeless->second.hwnd, &chromeless_point);
+                    /* The reclaimed top band is now client area this child
+                     * covers, so it has to yield those rows or the
+                     * parent's top-resize answer is unreachable. */
+                    if (chromeless->second.resizable && !IsZoomed(chromeless->second.hwnd) &&
+                        chromeless_point.y >= 0 && chromeless_point.y < hiddenFrameTopThickness(chromeless->second.hwnd))
+                        return HTTRANSPARENT;
+                    /* Same WS_MAXIMIZEBOX gate the parent applies: yielding
+                     * a rect the parent will not claim would drop the
+                     * button's clicks into dead space. */
+                    if ((GetWindowLongPtrW(chromeless->second.hwnd, GWL_STYLE) & WS_MAXIMIZEBOX) != 0 &&
+                        zoomButtonViewForWindow(host, chromeless->second, chromeless_point, nullptr, nullptr))
+                        return HTTRANSPARENT;
+                    if (windowDragRegionHit(host, chromeless->second, chromeless_point)) return HTTRANSPARENT;
+                    break;
+                }
+            }
             Window *chrome_window = nullptr;
             if (host) {
                 auto found = host->windows.find(view->window_id);
@@ -4344,7 +4503,7 @@ struct AudioSpectrumActivateWaiter final : public IActivateAudioInterfaceComplet
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **out) override {
         if (!out) return E_POINTER;
-        if (riid == IID_IUnknown || riid == IID_IActivateAudioInterfaceCompletionHandler) {
+        if (riid == IID_IUnknown || riid == __uuidof(IActivateAudioInterfaceCompletionHandler)) {
             *out = static_cast<IActivateAudioInterfaceCompletionHandler *>(this);
             AddRef();
             return S_OK;
@@ -4399,7 +4558,7 @@ static HRESULT audioSpectrumActivateClient(IAudioClient **out_client) {
         return E_FAIL;
     }
     IActivateAudioInterfaceAsyncOperation *operation = nullptr;
-    HRESULT hr = activate(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, IID_IAudioClient, &prop, waiter, &operation);
+    HRESULT hr = activate(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &prop, waiter, &operation);
     if (SUCCEEDED(hr) && operation) {
         /* Activation completes in milliseconds when it completes at all;
          * the deadline only guards against a wedged audio service. A
@@ -4409,7 +4568,7 @@ static HRESULT audioSpectrumActivateClient(IAudioClient **out_client) {
             HRESULT activated = E_FAIL;
             IUnknown *unknown = nullptr;
             if (SUCCEEDED(operation->GetActivateResult(&activated, &unknown)) && SUCCEEDED(activated) && unknown) {
-                unknown->QueryInterface(IID_IAudioClient, reinterpret_cast<void **>(out_client));
+                unknown->QueryInterface(__uuidof(IAudioClient), reinterpret_cast<void **>(out_client));
             }
             if (unknown) unknown->Release();
             hr = *out_client ? S_OK : (FAILED(activated) ? activated : E_NOINTERFACE);
@@ -4586,7 +4745,7 @@ static void audioSpectrumCaptureThread(std::shared_ptr<AudioSpectrumShared> shar
         if (!ready) break;
         if (FAILED(audioSpectrumActivateClient(&client)) || !client) break;
         if (FAILED(audioSpectrumInitializeClient(client, ready))) break;
-        if (FAILED(client->GetService(IID_IAudioCaptureClient, reinterpret_cast<void **>(&capture))) || !capture) break;
+        if (FAILED(client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void **>(&capture))) || !capture) break;
         if (FAILED(client->Start())) break;
         running = true;
     } while (false);
@@ -4751,11 +4910,11 @@ static void audioCaptureThread(std::shared_ptr<AudioCaptureShared> shared) {
     HANDLE ready = nullptr;
     bool running = false;
     do {
-        if (FAILED(CoCreateInstance(CLSID_MMDeviceEnumerator, nullptr, CLSCTX_ALL,
-                IID_IMMDeviceEnumerator, reinterpret_cast<void **>(&enumerator))) || !enumerator) break;
+        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                __uuidof(IMMDeviceEnumerator), reinterpret_cast<void **>(&enumerator))) || !enumerator) break;
         const EDataFlow flow = shared->source == 1 ? eRender : eCapture;
         if (FAILED(enumerator->GetDefaultAudioEndpoint(flow, eConsole, &device)) || !device) break;
-        if (FAILED(device->Activate(IID_IAudioClient, CLSCTX_ALL, nullptr,
+        if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                 reinterpret_cast<void **>(&client))) || !client) break;
         WAVEFORMATEX format = {};
         format.wFormatTag = WAVE_FORMAT_PCM;
@@ -4771,7 +4930,8 @@ static void audioCaptureThread(std::shared_ptr<AudioCaptureShared> shared) {
         if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 1000000, 0, &format, nullptr))) break;
         ready = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!ready || FAILED(client->SetEventHandle(ready))) break;
-        if (FAILED(client->GetService(IID_IAudioCaptureClient, reinterpret_cast<void **>(&capture))) || !capture) break;
+        /* Alchemist: embed the model-core capture-client GUID. */
+        if (FAILED(client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void **>(&capture))) || !capture) break;
         if (FAILED(client->Start())) break;
         running = true;
     } while (false);
@@ -5774,7 +5934,13 @@ static bool windowsAppsUseDarkTheme() {
  * all, so both stay out of this. Older builds reject the attribute and
  * keep the system default. */
 static void applyStandardTitlebarColorScheme(Window &window) {
-    if (!window.hwnd || windowUsesHiddenTitlebar(window) || windowIsChromeless(window)) return;
+    /* Chromeless windows have no caption, but Windows 11 still draws a
+     * 1px DWM border around them whose color follows this same attribute
+     * — and a light border is exactly the artifact the reclaimed top band
+     * above is removing. They take the scheme; only the hidden styles,
+     * which sample their own presented header pixels through
+     * syncHiddenCaptionColor (a strictly better signal), stay out. */
+    if (!window.hwnd || windowUsesHiddenTitlebar(window)) return;
     const DwmApi &dwm = dwmApi();
     if (!dwm.set_window_attribute) return;
     const BOOL dark = windowsAppsUseDarkTheme() ? TRUE : FALSE;
@@ -5949,6 +6115,47 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
      * the only caption there is, so a client-area hit inside one
      * answers HTCAPTION — the system move loop and the right-click
      * system menu for free, exactly like the hidden-titlebar shape. */
+    /* Reclaim the TOP frame band into the client so the app's own pixels
+     * reach the window's top edge and the DWM has no strip left to paint.
+     * The left/right/bottom borders keep their exact system metrics, so
+     * DefWindowProc keeps owning their resize grips (only the top band's
+     * grips move into WM_NCHITTEST below). Same maximize pitfall the
+     * hidden styles document: a zoomed window's outer rect overhangs the
+     * monitor by one frame thickness, so a client top restored to the
+     * outer top would push the first rows of content offscreen. */
+    /* Reclaiming those rows is only half the job: DefWindowProc still
+     * paints the CLASSIC Win32 frame measured from the WINDOW rect, which
+     * no longer matches the client it just shrank out of. Every HWND in a
+     * window tree shares one redirection surface, so that GDI paint lands
+     * ON TOP of the canvas child's pixels and — since nothing invalidates
+     * the child — stays there until the child next repaints for its own
+     * reasons. Measured: a white COLOR_BTNHIGHLIGHT row over six
+     * COLOR_3DSHADOW rows, reappearing on every activation change while
+     * PrintWindow on the child still showed the app's own #161616.
+     *
+     * lParam -1 is the documented "do not repaint the non-client area"
+     * contract for WM_NCACTIVATE, and WM_NCPAINT is swallowed outright.
+     * Neither costs the window anything visible: the DWM border and drop
+     * shadow are COMPOSITED, not drawn through this path, and the side and
+     * bottom borders are Windows 11's invisible resize margin. */
+    if ((message == WM_NCACTIVATE || message == WM_NCPAINT) && chromelessWindowForHwnd(host, hwnd)) {
+        if (message == WM_NCPAINT) return 0;
+        return DefWindowProcW(hwnd, WM_NCACTIVATE, wparam, -1);
+    }
+    if (message == WM_NCCALCSIZE && wparam) {
+        Window *chromeless_window = chromelessWindowForHwnd(host, hwnd);
+        if (chromeless_window) {
+            NCCALCSIZE_PARAMS *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(lparam);
+            const LONG original_top = params->rgrc[0].top;
+            const LRESULT def_result = DefWindowProcW(hwnd, WM_NCCALCSIZE, wparam, lparam);
+            if (def_result != 0) return def_result;
+            LONG top = original_top;
+            if (IsZoomed(hwnd)) top += hiddenFrameTopThickness(hwnd);
+            if (GetMenu(hwnd)) top += systemMetricForDpi(SM_CYMENU, dpiForWindow(hwnd));
+            params->rgrc[0].top = top;
+            return 0;
+        }
+    }
     if (message == WM_NCHITTEST) {
         Window *chromeless_window = chromelessWindowForHwnd(host, hwnd);
         if (chromeless_window) {
@@ -5956,9 +6163,40 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
             if (def_hit != HTCLIENT) return def_hit;
             POINT point = { (int)(short)LOWORD(lparam), (int)(short)HIWORD(lparam) };
             ScreenToClient(hwnd, &point);
+            RECT chromeless_client = {};
+            GetClientRect(hwnd, &chromeless_client);
+            /* Top resize band: the WM_NCCALCSIZE above moved the top frame
+             * INSIDE the client area, so hand its band back to the system
+             * — restored and resizable windows only. Corner slivers widen
+             * to the side borders so the diagonal grips survive at the
+             * very top. Checked BEFORE the zoom button and the drag
+             * regions: an app-drawn caption that starts at y=0 overlaps
+             * this band, and a window you cannot resize from its top edge
+             * is the worse failure. */
+            if (chromeless_window->resizable && !IsZoomed(hwnd) &&
+                point.y >= 0 && point.y < hiddenFrameTopThickness(hwnd)) {
+                const UINT chromeless_dpi = dpiForWindow(hwnd);
+                const int corner = systemMetricForDpi(SM_CXSIZEFRAME, chromeless_dpi) + systemMetricForDpi(SM_CXPADDEDBORDER, chromeless_dpi);
+                if (point.x < corner) return HTTOPLEFT;
+                if (point.x >= chromeless_client.right - corner) return HTTOPRIGHT;
+                return HTTOP;
+            }
+            /* Windows 11 pops the snap-layout flyout for the window whose
+             * hit-test answers HTMAXBUTTON, and for nothing else, so an
+             * app-drawn maximize button has to name itself one. Gated on
+             * WS_MAXIMIZEBOX: a window that cannot maximize must not
+             * offer layouts. */
+            if ((GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZEBOX) != 0 &&
+                zoomButtonViewForWindow(host, *chromeless_window, point, nullptr, nullptr))
+                return HTMAXBUTTON;
             if (windowDragRegionHit(host, *chromeless_window, point)) return HTCAPTION;
             return HTCLIENT;
         }
+    }
+    /* The pointer stream that HTMAXBUTTON answer diverts, handed back to
+     * the canvas drawing the button (see the helper). */
+    if (message == WM_NCMOUSEMOVE || message == WM_NCLBUTTONDOWN || message == WM_NCLBUTTONUP || message == WM_NCMOUSELEAVE) {
+        if (forwardZoomButtonNonClientMouse(host, hwnd, message, wparam, lparam)) return 0;
     }
     switch (message) {
         case kWakeMessage:
@@ -6275,7 +6513,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
                     adjustWindowRectForDpi(&frame, style, has_menu, ex_style, dpi);
                     LONG outer_width = frame.right - frame.left;
                     LONG outer_height = frame.bottom - frame.top;
-                    if (windowUsesHiddenTitlebar(window)) {
+                    if (windowUsesHiddenTitlebar(window) || windowIsChromeless(window)) {
                         const SIZE outer = hiddenOuterSizeForContent(style, ex_style, has_menu, min_content_width, min_content_height, dpi);
                         outer_width = outer.cx;
                         outer_height = outer.cy;
@@ -6348,13 +6586,34 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     return DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
+/* The app icon at one exact metric. Ordinal 1 is the first RT_GROUP_ICON in
+ * the executable (what `1 ICON` in a .rc produces); LR_SHARED lets the system
+ * cache and own the standard-metric handles, so the class icons need no
+ * teardown. Falls back to a .ico configured in app.zon .icons for hosts that
+ * embed no resource, and to nullptr — the system default — for neither. */
+static HICON loadAppIcon(Host *host, int cx, int cy) {
+    HICON embedded = static_cast<HICON>(LoadImageW(host->instance, MAKEINTRESOURCEW(1), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR | LR_SHARED));
+    if (embedded) return embedded;
+    if (!host->icon_path.empty()) {
+        std::wstring wide_path = widen(host->icon_path);
+        return static_cast<HICON>(LoadImageW(nullptr, wide_path.c_str(), IMAGE_ICON, cx, cy, LR_LOADFROMFILE));
+    }
+    return nullptr;
+}
+
 static ATOM registerClass(Host *host) {
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = windowProc;
     wc.hInstance = host->instance;
+    wc.hIcon = loadAppIcon(host, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON));
+    wc.hIconSm = loadAppIcon(host, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    /* Alchemist: erase in the app's panel wash, not COLOR_WINDOW's white.
+     * Function-local static so the brush is created once and lives for the
+     * process, which is exactly as long as the registered class does. */
+    static HBRUSH alchemist_window_background = CreateSolidBrush(RGB(0x0d, 0x0e, 0x10));
+    wc.hbrBackground = alchemist_window_background;
     wc.lpszClassName = L"NativeSdkWindowsHost";
     return RegisterClassExW(&wc);
 }
@@ -6422,7 +6681,10 @@ static bool createNativeWindow(Host *host, Window &window) {
     adjustWindowRectForDpi(&frame, style, has_menu ? TRUE : FALSE, 0, dpi);
     LONG outer_width = frame.right - frame.left;
     LONG outer_height = frame.bottom - frame.top;
-    if (windowUsesHiddenTitlebar(window)) {
+    /* Chromeless joins the hidden styles here: both now reclaim the top
+     * band, so both size from the no-top-chrome conversion or their client
+     * lands one frame thickness taller than the request. */
+    if (windowUsesHiddenTitlebar(window) || windowIsChromeless(window)) {
         const SIZE outer = hiddenOuterSizeForContent(style, 0, has_menu, content_width, content_height, dpi);
         outer_width = outer.cx;
         outer_height = outer.cy;
@@ -7071,6 +7333,35 @@ int native_sdk_windows_set_window_drag_regions(Host *host, uint64_t window_id, c
     return 1;
 }
 
+/* Whether a window is maximized right now: the pull behind the runtime's
+ * window-zoomed query, so an app-drawn maximize button paints the restore
+ * glyph no matter who zoomed the window — its own click, a caption
+ * double-click, Win+Up, a snap gesture. A MINIMIZED window reports false:
+ * it may hold a maximized restore state, but showing "restore" while the
+ * window is off the glass describes the wrong affordance. */
+int native_sdk_windows_window_zoomed(Host *host, uint64_t window_id) {
+    if (!host) return 0;
+    auto found = host->windows.find(window_id);
+    if (found == host->windows.end() || !found->second.hwnd) return 0;
+    const HWND hwnd = found->second.hwnd;
+    return (IsZoomed(hwnd) && !IsIconic(hwnd)) ? 1 : 0;
+}
+
+/* Replace a canvas view's app-drawn zoom-button rect (runtime push after
+ * layout installs). Coordinates are the view's logical coordinates, like
+ * the drag mirror's; enabled == 0 clears it. */
+int native_sdk_windows_set_window_zoom_button(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height, int enabled) {
+    if (!host || label_len == 0) return 0;
+    auto found = host->native_views.find(nativeViewKey(window_id, slice(label, label_len)));
+    if (found == host->native_views.end() || found->second.kind != kViewGpuSurface) return 0;
+    found->second.has_zoom_button = enabled != 0 && width > 0 && height > 0;
+    found->second.zoom_button_x = x;
+    found->second.zoom_button_y = y;
+    found->second.zoom_button_width = width;
+    found->second.zoom_button_height = height;
+    return 1;
+}
+
 /* Chrome overlay geometry for hidden-titlebar windows, logical points:
  * the caption-button band's depth on top, the min/max/close cluster's
  * extent from the trailing (right) edge, and the cluster's frame in
@@ -7148,6 +7439,20 @@ int native_sdk_windows_minimize_window(Host *host, uint64_t window_id) {
     auto found = host->windows.find(window_id);
     if (found == host->windows.end() || !found->second.hwnd) return 0;
     ShowWindow(found->second.hwnd, SW_MINIMIZE);
+    return 1;
+}
+
+/* The maximize/restore toggle behind an app-drawn caption button.
+ * ShowWindow owns the restore bounds, so a restore lands exactly where
+ * the window was before it was maximized — the same behavior the system
+ * caption button gives. A minimized window restores first rather than
+ * jumping straight to maximized. */
+int native_sdk_windows_toggle_window_zoom(Host *host, uint64_t window_id) {
+    if (!host) return 0;
+    auto found = host->windows.find(window_id);
+    if (found == host->windows.end() || !found->second.hwnd) return 0;
+    const HWND hwnd = found->second.hwnd;
+    ShowWindow(hwnd, (IsZoomed(hwnd) || IsIconic(hwnd)) ? SW_RESTORE : SW_MAXIMIZE);
     return 1;
 }
 
@@ -7360,6 +7665,44 @@ int native_sdk_windows_create_view(Host *host, uint64_t window_id, const char *l
         SetTimer(hwnd, kGpuFrameTimerId, 16, nullptr);
         if (window->second.activate_on_show) SetFocus(hwnd);
     }
+    return 1;
+}
+
+int native_sdk_windows_adopt_view_surface(Host *host, uint64_t window_id, const char *label,
+                                           size_t label_len, void *surface_handle) {
+    if (!host || !surface_handle || label_len == 0) return 0;
+    auto found = host->native_views.find(nativeViewKey(window_id, slice(label, label_len)));
+    HWND surface = static_cast<HWND>(surface_handle);
+    if (found == host->native_views.end() || !found->second.hwnd || !IsWindow(surface) ||
+        surface == found->second.hwnd) return 0;
+    NativeView &view = found->second;
+    if (view.adopted_surface && view.adopted_surface != surface) {
+        ShowWindow(view.adopted_surface, SW_HIDE);
+        SetParent(view.adopted_surface, HWND_MESSAGE);
+    }
+    LONG_PTR style = GetWindowLongPtrW(surface, GWL_STYLE);
+    style = (style & ~WS_POPUP) | WS_CHILD | WS_CLIPSIBLINGS;
+    SetWindowLongPtrW(surface, GWL_STYLE, style);
+    SetWindowLongPtrW(surface, GWL_EXSTYLE,
+        GetWindowLongPtrW(surface, GWL_EXSTYLE) | WS_EX_NOPARENTNOTIFY);
+    if (!SetParent(surface, view.hwnd)) return 0;
+    view.adopted_surface = surface;
+    RECT client{};
+    GetClientRect(view.hwnd, &client);
+    MoveWindow(surface, 0, 0, client.right, client.bottom, TRUE);
+    ShowWindow(surface, view.visible ? SW_SHOW : SW_HIDE);
+    return 1;
+}
+
+int native_sdk_windows_release_view_surface(Host *host, uint64_t window_id, const char *label,
+                                             size_t label_len) {
+    if (!host || label_len == 0) return 0;
+    auto found = host->native_views.find(nativeViewKey(window_id, slice(label, label_len)));
+    if (found == host->native_views.end() || !found->second.adopted_surface) return 0;
+    HWND surface = found->second.adopted_surface;
+    found->second.adopted_surface = nullptr;
+    ShowWindow(surface, SW_HIDE);
+    SetParent(surface, HWND_MESSAGE);
     return 1;
 }
 
