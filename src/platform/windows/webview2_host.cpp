@@ -412,6 +412,7 @@ struct DragRegionRect {
 };
 
 struct ChildWebView {
+    bool visible = true; // Alchemist dock visibility, including async creation
     uint64_t window_id = 1;
     HWND hwnd = nullptr;
     std::string label;
@@ -894,17 +895,25 @@ static NOTIFYICONDATAW notificationIconData(Host *host) {
     return data;
 }
 
+static HICON loadAppIcon(Host *host, int cx, int cy);
+
 static HICON loadNotificationIcon(Host *host, const std::string &icon_path, bool *destroy_icon) {
     *destroy_icon = false;
-    std::string path = !icon_path.empty() ? icon_path : (host ? host->icon_path : std::string());
-    if (!path.empty()) {
-        std::wstring wide_path = widen(path);
+    /* An explicit per-tray path wins: that is an app naming one exact image. */
+    if (!icon_path.empty()) {
+        std::wstring wide_path = widen(icon_path);
         HICON icon = reinterpret_cast<HICON>(LoadImageW(nullptr, wide_path.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));
         if (icon) {
             *destroy_icon = true;
             return icon;
         }
     }
+    /* Then the executable's own icon, at the notification area's metric.
+     * LR_SHARED inside loadAppIcon means the system owns that handle, so
+     * destroy_icon stays false and the caller never destroys it. */
+    HICON app_icon = loadAppIcon(host, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+    if (app_icon) return app_icon;
+    /* A host whose executable embeds no icon keeps the system default. */
     return LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
 }
 
@@ -5771,7 +5780,14 @@ static bool createChildWebView(Host *host, const std::string &key) {
                     RECT bounds = webViewRect(found->second);
                     controller->put_Bounds(bounds);
                     controller->put_ZoomFactor(found->second.zoom);
-                    controller->put_IsVisible(TRUE);
+                    controller->put_IsVisible(found->second.visible ? TRUE : FALSE);
+                    if (found->second.transparent) { // Alchemist transparent child WebView
+                        ComPtr<ICoreWebView2Controller2> controller2;
+                        if (SUCCEEDED(found->second.controller->QueryInterface(IID_ICoreWebView2Controller2, reinterpret_cast<void **>(controller2.GetAddressOf()))) && controller2) {
+                            COREWEBVIEW2_COLOR clear = {0, 0, 0, 0};
+                            controller2->put_DefaultBackgroundColor(clear);
+                        }
+                    }
                     EventRegistrationToken focus_token = {};
                     controller->add_GotFocus(Callback<ICoreWebView2FocusChangedEventHandler>(
                         [host, key, lifetime](ICoreWebView2Controller *, IUnknown *) -> HRESULT {
@@ -7999,6 +8015,15 @@ int native_sdk_windows_present_gpu_surface_pixels(Host *host, uint64_t window_id
 int native_sdk_windows_update_view(Host *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len) {
     if (!host || label_len == 0) return 0;
     std::string label_string = slice(label, label_len);
+    // Runtime sends only visibility here for a child WebView.
+    auto browser = host->webviews.find(webViewKey(window_id, label_string));
+    if (browser != host->webviews.end() && has_visible) {
+        browser->second.visible = visible != 0;
+#if NATIVE_SDK_HAS_WEBVIEW2
+        if (browser->second.controller) browser->second.controller->put_IsVisible(visible ? TRUE : FALSE);
+#endif
+        return 1;
+    }
     auto found = host->native_views.find(nativeViewKey(window_id, label_string));
     if (found == host->native_views.end() || !found->second.hwnd) return 0;
     NativeView &view = found->second;

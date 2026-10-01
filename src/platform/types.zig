@@ -277,14 +277,14 @@ pub const max_drop_paths_bytes: usize = 8192;
 pub const max_drop_paths: usize = max_drop_paths_bytes / 2 + 1;
 pub const max_window_event_name_bytes: usize = 64;
 pub const max_window_event_detail_bytes: usize = 8192;
-pub const max_views: usize = 96;
+pub const max_views: usize = 120;
 pub const max_view_label_bytes: usize = 64;
 pub const max_view_role_bytes: usize = 64;
 pub const max_view_accessibility_label_bytes: usize = 256;
 pub const max_view_text_bytes: usize = 1024;
 pub const max_view_command_bytes: usize = 128;
 pub const max_menus: usize = 16;
-pub const max_menu_items: usize = 128;
+pub const max_menu_items: usize = 192;
 pub const max_menu_title_bytes: usize = 64;
 pub const max_menu_item_label_bytes: usize = 128;
 pub const max_menu_command_bytes: usize = 128;
@@ -1018,6 +1018,8 @@ pub const Cursor = enum {
     text,
     resize_horizontal,
     resize_vertical,
+    crosshair,
+    grab,
 };
 
 pub const ViewInfo = struct {

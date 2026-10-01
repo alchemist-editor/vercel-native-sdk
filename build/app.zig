@@ -1975,7 +1975,9 @@ pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: A
         break :run value;
     } else b.addRunArtifact(exe);
     addCefRuntimeRunFiles(b, target, run, exe, web_engine, cef_dir);
-    addWebView2RuntimeRunFiles(dep, target, run, web_engine, web_layer);
+    addWebView2RuntimeRunFiles(b, target, run, web_engine, web_layer);
+    // Alchemist: forward `zig build run -- <args>` to the app.
+    run.addPassthruArgs();
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run.step);
 
@@ -2048,7 +2050,9 @@ pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: A
         .optimize = optimize,
     });
     analysis_mod.addImport("app", test_app_mod);
-    const analysis_obj = b.addObject(.{
+    // Alchemist: an archive, because the COFF linker cannot fold two C objects into one object.
+    const analysis_obj = b.addLibrary(.{
+        .linkage = .static,
         .name = b.fmt("{s}-analysis", .{app_options.name}),
         .root_module = analysis_mod,
         .use_llvm = useLlvmWorkaround(target),
@@ -2753,15 +2757,24 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
                 // The vendored WebView2 SDK header (third_party/webview2)
                 // turns on the host's embedded-WebView layer; the host
                 // fails the compile by design if it cannot be found.
-                app_mod.addIncludePath(dep.path("third_party/webview2/include"));
-                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/windows/webview2_host.cpp"), .flags = &.{"-std=c++17"} });
+                app_mod.addIncludePath(b.path("../../vendor/webview2/sdk/include"));
+                // Alchemist: <wrl.h> is in the Windows SDK's winrt directory.
+                if (target.result.abi == .msvc) {
+                    if (std.zig.LibCInstallation.findNative(b.allocator, b.graph.io, .{ .target = &target.result, .environ_map = &b.graph.environ_map })) |libc| {
+                        if (libc.include_dir) |ucrt| if (std.fs.path.dirname(ucrt)) |versioned|
+                            app_mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ versioned, "winrt" }) });
+                    } else |_| {}
+                }
+                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/windows/webview2_host.cpp"), .flags = &.{ "-std=c++17", "-Wno-unused-command-line-argument" } });
                 app_mod.addCSourceFile(.{ .file = dep.path("src/platform/windows/gpu_surface_renderer.cpp"), .flags = &.{"-std=c++17"} });
                 // WebView2Loader.dll rides next to the installed app
                 // executable: the host loads it at runtime to discover
                 // the machine's WebView2 runtime. Canvas apps never
                 // touch it.
-                const loader = b.addInstallBinFile(dep.path(webView2LoaderSubPath(target)), "WebView2Loader.dll");
+                const loader = b.addInstallBinFile(b.path(if (target.result.cpu.arch == .aarch64) "../../vendor/webview2/sdk/arm64/WebView2Loader.dll" else "../../vendor/webview2/sdk/x64/WebView2Loader.dll"), "WebView2Loader.dll");
                 b.getInstallStep().dependOn(&loader.step);
+                const webview_license = b.addInstallBinFile(b.path("../../vendor/webview2/sdk/LICENSE.txt"), "WebView2.LICENSE.txt");
+                b.getInstallStep().dependOn(&webview_license.step);
             } else {
                 // Native-only app (nothing in app.zon declares web use):
                 // compile the host without the embedded-WebView layer.
@@ -2801,7 +2814,7 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
         if (target.result.abi == .msvc)
             app_mod.linkSystemLibrary("libcpmt", .{})
         else
-        app_mod.linkSystemLibrary("c++", .{});
+            app_mod.linkSystemLibrary("c++", .{});
         app_mod.linkSystemLibrary("user32", .{});
         app_mod.linkSystemLibrary("gdi32", .{});
         // Retained gpu_surface packets are composited into a hardware
@@ -2872,12 +2885,12 @@ fn webView2LoaderSubPath(target: std.Build.ResolvedTarget) []const u8 {
 /// `zig build run` executes the cached artifact, which has no installed
 /// WebView2Loader.dll beside it; the vendored loader's directory goes on
 /// the run step's PATH so the host's LoadLibrary resolves it in dev runs.
-fn addWebView2RuntimeRunFiles(dep: *std.Build.Dependency, target: std.Build.ResolvedTarget, run: *std.Build.Step.Run, web_engine: WebEngineOption, web_layer: bool) void {
+fn addWebView2RuntimeRunFiles(b: *std.Build, target: std.Build.ResolvedTarget, run: *std.Build.Step.Run, web_engine: WebEngineOption, web_layer: bool) void {
     if (web_engine != .system) return;
     if (!web_layer) return;
     if (target.result.os.tag != .windows) return;
-    const loader_dir = std.fs.path.dirname(webView2LoaderSubPath(target)).?;
-    addRunPathDir(run, rootPath(dep.builder, loader_dir));
+    const loader_dir = if (target.result.cpu.arch == .aarch64) "../../vendor/webview2/sdk/arm64" else "../../vendor/webview2/sdk/x64";
+    addRunPathDir(run, rootPath(b, loader_dir));
 }
 
 fn addCefRuntimeRunFiles(b: *std.Build, target: std.Build.ResolvedTarget, run: *std.Build.Step.Run, exe: *std.Build.Step.Compile, web_engine: WebEngineOption, cef_dir: []const u8) void {

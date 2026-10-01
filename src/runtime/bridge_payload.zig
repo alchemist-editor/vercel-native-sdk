@@ -189,6 +189,7 @@ pub fn webViewLayerFromJson(payload: []const u8) !i32 {
 }
 
 pub fn webViewUrlOrigin(url: []const u8, buffer: []u8) ![]const u8 {
+    if (std.mem.startsWith(u8, url, "file:///")) return "file://local"; // Match both shipped browser backends.
     if (std.mem.startsWith(u8, url, "about:")) return "about://local";
     const scheme_end = std.mem.indexOf(u8, url, "://") orelse return error.InvalidWebViewOptions;
     const host_start = scheme_end + 3;

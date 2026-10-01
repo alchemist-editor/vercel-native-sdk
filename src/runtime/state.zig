@@ -70,6 +70,7 @@ pub const RuntimeWebView = struct {
     label_storage: [platform.max_webview_label_bytes]u8 = undefined,
     parent_storage: [platform.max_view_label_bytes]u8 = undefined,
     url_storage: [platform.max_webview_url_bytes]u8 = undefined,
+    visible: bool = true, // Alchemist docked WebView visibility
 };
 
 pub const RuntimeTrayItem = struct {
