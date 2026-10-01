@@ -60,8 +60,8 @@ extern fn guest_mac_vm_pump_main_loop(seconds: f64) void;
 extern fn guest_mac_vm_write_fresh_machine_identifier(path: [*]const u8, path_len: usize) c_int;
 
 fn stateFromInt(value: c_int) State {
-    if (value < 0 or value > @intFromEnum(State.err)) return .err;
-    return @enumFromInt(value);
+    if (value < 0 or value > @backingInt(State.err)) return .err;
+    return @fromBackingInt(@intCast(value));
 }
 
 pub fn pumpMainLoop(seconds: f64) void {
@@ -122,10 +122,10 @@ pub const Events = struct {
 
 fn eventTrampoline(context: ?*anyopaque, event_kind: c_int, state: c_int, progress: f64, message: [*]const u8, message_len: usize) callconv(.c) void {
     const events: *Events = @ptrCast(@alignCast(context.?));
-    if (event_kind < 0 or event_kind > @intFromEnum(EventKind.err)) return;
-    if (state < 0 or state > @intFromEnum(State.err)) return;
-    const kind: EventKind = @enumFromInt(event_kind);
-    const state_value: State = @enumFromInt(state);
+    if (event_kind < 0 or event_kind > @backingInt(EventKind.err)) return;
+    if (state < 0 or state > @backingInt(State.err)) return;
+    const kind: EventKind = @fromBackingInt(@intCast(event_kind));
+    const state_value: State = @fromBackingInt(@intCast(state));
     events.record(kind, state_value, progress, message[0..message_len]);
 }
 
@@ -249,7 +249,7 @@ pub fn writeFile(path: []const u8, bytes: []const u8) bool {
 }
 
 pub fn processAlive(pid: i32) bool {
-    return std.c.kill(pid, @enumFromInt(0)) == 0;
+    return std.c.kill(pid, @fromBackingInt(@intCast(0))) == 0;
 }
 
 // ---- named-VM locations -------------------------------------------------------

@@ -52,15 +52,15 @@ pub fn describe(comptime T: type) []const u8 {
             .void => return "void",
             .@"enum" => |info| {
                 var out: []const u8 = "enum(" ++ @typeName(info.tag_type) ++ "){";
-                for (info.fields) |field| {
-                    out = out ++ field.name ++ "=" ++ std.fmt.comptimePrint("{d}", .{field.value}) ++ ",";
+                for (info.field_names, info.field_values) |name, value| {
+                    out = out ++ name ++ "=" ++ std.fmt.comptimePrint("{d}", .{value}) ++ ",";
                 }
                 return out ++ "}";
             },
             .@"struct" => |info| {
                 var out: []const u8 = "struct{";
-                for (info.fields) |field| {
-                    out = out ++ field.name ++ ":" ++ describe(field.type) ++ ",";
+                for (info.field_names, info.field_types) |name, FieldType| {
+                    out = out ++ name ++ ":" ++ describe(FieldType) ++ ",";
                 }
                 return out ++ "}";
             },
@@ -74,8 +74,8 @@ pub fn describe(comptime T: type) []const u8 {
                     "union(" ++ describe(tag) ++ "){"
                 else
                     "union{";
-                for (info.fields) |field| {
-                    out = out ++ field.name ++ ":" ++ describe(field.type) ++ ",";
+                for (info.field_names, info.field_types) |name, FieldType| {
+                    out = out ++ name ++ ":" ++ describe(FieldType) ++ ",";
                 }
                 return out ++ "}";
             },

@@ -1312,7 +1312,7 @@ fn showSaveDialog(context: ?*anyopaque, options: platform_mod.SaveDialogOptions,
 fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOptions) anyerror!platform_mod.MessageDialogResult {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
     const opts = GtkMessageDialogOpts{
-        .style = @intFromEnum(options.style),
+        .style = @backingInt(options.style),
         .title = options.title.ptr,
         .title_len = options.title.len,
         .message = options.message.ptr,
@@ -1326,7 +1326,7 @@ fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOp
         .tertiary_button = options.tertiary_button.ptr,
         .tertiary_button_len = options.tertiary_button.len,
     };
-    return @enumFromInt(native_sdk_gtk_show_message_dialog(self.host, &opts));
+    return @fromBackingInt(@intCast(native_sdk_gtk_show_message_dialog(self.host, &opts)));
 }
 
 fn openExternalUrl(context: ?*anyopaque, url: []const u8) anyerror!void {
@@ -1425,7 +1425,7 @@ fn deleteCredential(context: ?*anyopaque, key: platform_mod.CredentialKey) anyer
 
 fn formatLocalTime(context: ?*anyopaque, timestamp_ms: i64, style: platform_mod.LocalTimeStyle, buffer: []u8) anyerror![]const u8 {
     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
-    const len = native_sdk_gtk_format_local_time(self.host, timestamp_ms, @intFromEnum(style), buffer.ptr, buffer.len);
+    const len = native_sdk_gtk_format_local_time(self.host, timestamp_ms, @backingInt(style), buffer.ptr, buffer.len);
     if (len == 0 or len > buffer.len) return error.LocalTimeFormatFailed;
     return buffer[0..len];
 }
@@ -1558,7 +1558,7 @@ fn configureSecurityPolicy(context: ?*anyopaque, policy: security.Policy) anyerr
         origins.len,
         external_urls.ptr,
         external_urls.len,
-        @intFromEnum(policy.navigation.external_links.action),
+        @backingInt(policy.navigation.external_links.action),
     );
 }
 

@@ -1,11 +1,11 @@
 ---
 name: zig
-description: Zig 0.16 idioms for Native SDK code, indexed by compile error. Load when `zig build` fails on std APIs with errors like "struct 'fs' has no member named 'cwd'", "struct 'array_list.Aligned(u8,null)' has no member named 'init'", "struct 'std' has no member named 'io'", "no member named 'GeneralPurposeAllocator'", "no member named 'getEnvMap'", or "invalid format string" - the signature of code written for Zig 0.15 or earlier. Covers main(std.process.Init), std.Io file IO and writers, ArrayList, process spawning, environment, clocks and sleep, sockets, custom formatting, and build.zig module shapes, each as this SDK writes them.
+description: Zig 0.17 idioms for Native SDK code, indexed by compile error. Load when `zig build` fails on std APIs with errors like "struct 'fs' has no member named 'cwd'", "struct 'array_list.Aligned(u8,null)' has no member named 'init'", "struct 'std' has no member named 'io'", "no member named 'GeneralPurposeAllocator'", "no member named 'getEnvMap'", or "invalid format string" - the signature of code written for Zig 0.15 or earlier. Covers main(std.process.Init), std.Io file IO and writers, ArrayList, process spawning, environment, clocks and sleep, sockets, custom formatting, and build.zig module shapes, each as this SDK writes them.
 ---
 
-# Zig 0.16 for Native SDK code
+# Zig 0.17 for Native SDK code
 
-The Native SDK requires Zig 0.16.0 (`minimum_zig_version` in `build.zig.zon`; the CLI pins the same version and offers a checksum-verified download into `~/.native/toolchains/` when the `zig` on PATH does not match). Training data and older guides teach Zig 0.15 idioms, and 0.16 moved everything that touches the outside world — files, stdout, clocks, sleeping, process spawning, sockets — behind an explicit `std.Io` value, while containers became allocator-per-call. Each section below is headed by the exact compile error the old idiom produces, so search this file by error text.
+This fork requires the exact Zig snapshot `0.17.0-dev.2375+d8aab4878` (`minimum_zig_version` in `build.zig.zon`; the CLI pins the same version and offers a checksum-verified download into `~/.native/toolchains/` when the `zig` on PATH does not match). Training data and older guides teach Zig 0.15 idioms, and 0.16 moved everything that touches the outside world — files, stdout, clocks, sleeping, process spawning, sockets — behind an explicit `std.Io` value, while containers became allocator-per-call. Each section below is headed by the exact compile error the old idiom produces, so search this file by error text.
 
 Two rules resolve most failures:
 
@@ -206,3 +206,7 @@ test "reads the manifest" {
 ## Unchanged — do not "migrate" these
 
 `std.fmt.bufPrint` / `allocPrint` / `parseInt` / `parseFloat`, `std.mem.*`, `std.debug.print`, `std.heap.page_allocator`, `std.time.ns_per_*` and `ms_per_*` constants, `@embedFile`, `std.testing.expect*`, and managed `std.StringHashMap` / `std.AutoHashMap` all work as before. If code using only these fails, the problem is elsewhere.
+
+## Zig 0.17 migration changes
+
+The I/O conventions introduced in 0.16 still apply. This snapshot removes array repetition (`**`), the `*Z` allocator/formatting helpers, `Build.args`, `Build.sysroot`, `Build.build_root`, custom build make callbacks, and descriptor arrays from `@typeInfo`. Use typed `@splat`, sentinel helpers with a final sentinel argument, `addPassthruArgs`, and tracked build paths. Type reflection exposes parallel `field_names`, `field_types`, and `field_attrs`; SDK code shares `src/compat/reflection.zig` descriptors. Pointer attributes are under `attrs`, function parameters are `param_types`, and optimize tags are `debug`, `safe`, `fast`, `small`.

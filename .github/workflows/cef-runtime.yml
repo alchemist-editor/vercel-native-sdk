@@ -41,7 +41,7 @@ jobs:
             runner: ubuntu-24.04-arm
           - platform: windows64
             runner: windows-2022
-          # windowsarm64 disabled: Zig 0.16.0 aarch64-windows binary is broken
+          # windowsarm64 disabled: Zig 0.17.0-dev.2375+d8aab4878 aarch64-windows binary is broken
           # https://codeberg.org/ziglang/zig/issues/31865
           # - platform: windowsarm64
           #   runner: windows-11-arm
@@ -49,9 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
 
       - name: Download official CEF
         if: ${{ inputs.source == 'official' }}

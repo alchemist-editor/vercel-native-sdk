@@ -26,8 +26,8 @@
         .{ .id = "app.quit", .title = "Quit" },
     },
     .shortcuts = .{
-        .{ .id = "player.toggle", .key = "p", .modifiers = .{ "primary" } },
-        .{ .id = "player.next", .key = "n", .modifiers = .{ "primary" } },
+        .{ .id = "player.toggle", .key = "p", .modifiers = .{"primary"} },
+        .{ .id = "player.next", .key = "n", .modifiers = .{"primary"} },
     },
     .menus = .{
         .{
@@ -35,10 +35,10 @@
             .items = .{
                 .{ .label = "Open Player", .command = "app.open" },
                 .{ .separator = true },
-                .{ .label = "Play or Pause", .command = "player.toggle", .key = "p", .modifiers = .{ "primary" } },
-                .{ .label = "Next Track", .command = "player.next", .key = "n", .modifiers = .{ "primary" } },
+                .{ .label = "Play or Pause", .command = "player.toggle", .key = "p", .modifiers = .{"primary"} },
+                .{ .label = "Next Track", .command = "player.next", .key = "n", .modifiers = .{"primary"} },
                 .{ .separator = true },
-                .{ .label = "Quit", .command = "app.quit", .key = "q", .modifiers = .{ "primary" } },
+                .{ .label = "Quit", .command = "app.quit", .key = "q", .modifiers = .{"primary"} },
             },
         },
     },

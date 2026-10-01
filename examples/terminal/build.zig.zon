@@ -2,12 +2,12 @@
     .name = .terminal,
     .fingerprint = 0x8f7b154131eea8ae,
     .version = "0.1.0",
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0-dev.2375+d8aab4878",
     .dependencies = .{
         .native_sdk = .{ .path = "../.." },
         // libghostty-vt: Ghostty's extracted terminal-state core, consumed
         // as the `ghostty-vt` Zig module. Pinned to the first upstream
-        // commit that builds under Zig 0.16.0 (the "Update to Zig 0.16.0"
+        // commit that builds under Zig 0.17.0-dev.2375+d8aab4878 (the "Update to Zig 0.17.0-dev.2375+d8aab4878"
         // merge); simd is disabled at import so the module stays pure Zig.
         .ghostty = .{
             .url = "https://github.com/ghostty-org/ghostty/archive/7aa9591746ffa4d2eee458960c76554352832595.tar.gz",

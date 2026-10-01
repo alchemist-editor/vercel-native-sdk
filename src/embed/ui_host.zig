@@ -152,7 +152,7 @@ pub fn UiAppHostWithStorageCredentialsAndImages(
         frame_index: u64 = 0,
         last_error: ?anyerror = null,
         command_count: usize = 0,
-        last_command_name: [max_mobile_command_name_bytes + 1]u8 = [_]u8{0} ** (max_mobile_command_name_bytes + 1),
+        last_command_name: [max_mobile_command_name_bytes + 1]u8 = @as([max_mobile_command_name_bytes + 1]u8, @splat(0)),
         asset_root: [max_mobile_asset_root_bytes]u8 = undefined,
         asset_root_len: usize = 0,
         asset_entry: [max_mobile_asset_entry_bytes]u8 = undefined,
@@ -220,7 +220,7 @@ pub fn UiAppHostWithStorageCredentialsAndImages(
             self.frame_index = 0;
             self.last_error = null;
             self.command_count = 0;
-            self.last_command_name = [_]u8{0} ** (max_mobile_command_name_bytes + 1);
+            self.last_command_name = @as([max_mobile_command_name_bytes + 1]u8, @splat(0));
             self.asset_root = undefined;
             self.asset_root_len = 0;
             self.asset_entry = undefined;

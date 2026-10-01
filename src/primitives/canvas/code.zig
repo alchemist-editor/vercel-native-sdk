@@ -47,14 +47,14 @@ pub const HighlightState = struct {
     /// enclosing opening tag has closed. Preserve those enclosing tag
     /// contexts so the inner `>` resumes attribute highlighting instead
     /// of ending it.
-    html_tag_context_bases: [max_html_tag_contexts]usize = [_]usize{0} ** max_html_tag_contexts,
-    html_tag_context_expect_names: [max_html_tag_contexts]bool = [_]bool{false} ** max_html_tag_contexts,
-    html_tag_context_opened_elements: [max_html_tag_contexts]bool = [_]bool{false} ** max_html_tag_contexts,
+    html_tag_context_bases: [max_html_tag_contexts]usize = @as([max_html_tag_contexts]usize, @splat(0)),
+    html_tag_context_expect_names: [max_html_tag_contexts]bool = @as([max_html_tag_contexts]bool, @splat(false)),
+    html_tag_context_opened_elements: [max_html_tag_contexts]bool = @as([max_html_tag_contexts]bool, @splat(false)),
     html_tag_context_len: usize = 0,
     /// Expression depth at which each currently open element began.
     /// A closing tag is structural at that same depth even when ordinary
     /// JSX text immediately before it ends in an identifier.
-    html_element_expression_bases: [max_html_tag_contexts]usize = [_]usize{0} ** max_html_tag_contexts,
+    html_element_expression_bases: [max_html_tag_contexts]usize = @as([max_html_tag_contexts]usize, @splat(0)),
     html_element_len: usize = 0,
     html_tag_opened_element: bool = false,
     /// Last non-whitespace source byte from the preceding presentation

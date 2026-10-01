@@ -9,6 +9,7 @@
 //! matching. A markup view builds exactly what an equivalent hand-written
 //! `view(ui, model)` would: same structural ids, same handler table.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const canvas = @import("root.zig");
 const markup = @import("ui_markup.zig");
@@ -727,14 +728,14 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
                 }
             }
             const model = scope.model;
-            inline for (@typeInfo(ModelT).@"struct".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(ModelT).@"struct")) |field| {
                 if (comptime sliceElement(field.type) != null and sliceElement(field.type).? == Item) {
                     if (std.mem.eql(u8, field.name, each)) {
                         return asSlice(Item, &@field(model, field.name));
                     }
                 }
             }
-            inline for (@typeInfo(ModelT).@"struct".decls) |decl| {
+            inline for (comptime reflection.declsOf(@typeInfo(ModelT).@"struct")) |decl| {
                 const DeclType = @TypeOf(@field(ModelT, decl.name));
                 if (comptime sliceElement(DeclType) != null and sliceElement(DeclType).? == Item) {
                     if (std.mem.eql(u8, decl.name, each)) {
@@ -1498,7 +1499,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
         /// `[]const u8` variant (mirrors `Ui.linkMsg`).
         fn linkConstructor(tag: []const u8) ?Ui.LinkMsgFn {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (field.type == []const u8) {
                     if (std.mem.eql(u8, field.name, tag)) {
                         return Ui.linkMsg(@field(std.meta.Tag(MsgT), field.name));
@@ -1512,7 +1513,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
         /// a `usize` variant (mirrors `Markdown(Msg).detailsMsg`).
         fn detailsConstructor(tag: []const u8) ?*const fn (index: usize) MsgT {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (field.type == usize) {
                     if (std.mem.eql(u8, field.name, tag)) {
                         return Md.detailsMsg(@field(std.meta.Tag(MsgT), field.name));
@@ -2257,7 +2258,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
 
         fn constructMessage(self: *Self, scope: *Scope, node: markup.MarkupNode, expression: markup.MessageExpression) BuildError!MsgT {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (std.mem.eql(u8, field.name, expression.tag)) {
                     if (field.type == void) {
                         if (expression.payload.len > 0) {
@@ -2278,7 +2279,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
         fn constructDragMessage(self: *Self, scope: *Scope, node: markup.MarkupNode, expression: markup.MessageExpression) BuildError!MsgT {
             if (expression.payload.len == 0) return self.failMsg(node, markup.on_drag_payload_message);
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (std.mem.eql(u8, field.name, expression.tag)) {
                     if (comptime !reflect.declaredWidgetDragDropRecord(field.type)) return self.failMsg(node, markup.on_drag_payload_message);
                     const value = try self.evalBinding(scope, node, expression.payload, true);
@@ -2330,7 +2331,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
 
         fn inputConstructor(tag: []const u8) ?Ui.InputMsgFn {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (field.type == canvas.TextInputEvent) {
                     if (std.mem.eql(u8, field.name, tag)) {
                         return Ui.inputMsg(@field(std.meta.Tag(MsgT), field.name));
@@ -2348,7 +2349,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
 
         fn scrollConstructor(tag: []const u8) ?Ui.ScrollMsgFn {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (field.type == canvas.ScrollState) {
                     if (std.mem.eql(u8, field.name, tag)) {
                         return Ui.scrollMsg(@field(std.meta.Tag(MsgT), field.name));
@@ -2367,7 +2368,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
 
         fn terminalConstructor(tag: []const u8) ?Ui.TerminalMsgFn {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (field.type == canvas.TerminalState) {
                     if (std.mem.eql(u8, field.name, tag)) {
                         return Ui.terminalMsg(@field(std.meta.Tag(MsgT), field.name));
@@ -2389,7 +2390,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
         /// can teach the two-axis migration by field name.
         fn legacyScrollTag(tag: []const u8) bool {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (comptime reflect.declaredLegacyScrollStateRecord(field.type)) {
                     if (std.mem.eql(u8, field.name, tag)) return true;
                 }
@@ -2399,7 +2400,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
 
         fn resizeConstructor(tag: []const u8) ?Ui.ValueMsgFn {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 if (field.type == f32) {
                     if (std.mem.eql(u8, field.name, tag)) {
                         return Ui.valueMsg(@field(std.meta.Tag(MsgT), field.name));
@@ -2423,7 +2424,7 @@ pub fn MarkupView(comptime ModelT: type, comptime MsgT: type) type {
         /// transpiled one-number float arm (`f64`, widened exactly).
         fn valueConstructor(tag: []const u8) ?Ui.ValueMsgFn {
             @setEvalBranchQuota(scan_quota);
-            inline for (@typeInfo(MsgT).@"union".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(MsgT).@"union")) |field| {
                 const class = comptime reflect.valueArmClass(field.type);
                 if (comptime class != null) {
                     if (std.mem.eql(u8, field.name, tag)) {
@@ -2767,12 +2768,12 @@ fn collectItemTypes(comptime Model: type) []const type {
     comptime {
         @setEvalBranchQuota(typeScanQuota(Model));
         var types: []const type = &.{};
-        for (@typeInfo(Model).@"struct".fields) |field| {
+        for (reflection.fieldsOf(@typeInfo(Model).@"struct")) |field| {
             if (sliceElement(field.type)) |Element| {
                 types = appendUniqueType(types, Element);
             }
         }
-        for (@typeInfo(Model).@"struct".decls) |decl| {
+        for (reflection.declsOf(@typeInfo(Model).@"struct")) |decl| {
             const DeclType = @TypeOf(@field(Model, decl.name));
             if (sliceElement(DeclType)) |Element| {
                 types = appendUniqueType(types, Element);
@@ -2819,7 +2820,7 @@ fn resolveOn(comptime T: type, value: *const T, path: []const u8, arena: ?std.me
     const tail = pathTail(path);
     switch (@typeInfo(T)) {
         .@"struct" => {
-            inline for (@typeInfo(T).@"struct".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(T).@"struct")) |field| {
                 if (std.mem.eql(u8, field.name, head)) {
                     if (tail) |rest| {
                         return resolveNested(field.type, &@field(value, field.name), rest, arena);
@@ -2827,11 +2828,11 @@ fn resolveOn(comptime T: type, value: *const T, path: []const u8, arena: ?std.me
                     return valueOf(field.type, @field(value, field.name));
                 }
             }
-            inline for (@typeInfo(T).@"struct".decls) |decl| {
+            inline for (comptime reflection.declsOf(@typeInfo(T).@"struct")) |decl| {
                 const DeclType = @TypeOf(@field(T, decl.name));
                 switch (@typeInfo(DeclType)) {
                     .@"fn" => |info| {
-                        if (info.params.len == 1 and info.return_type != null and info.params[0].type == *const T) {
+                        if (info.param_types.len == 1 and info.return_type != null and info.param_types[0] == *const T) {
                             if (std.mem.eql(u8, decl.name, head) and tail == null) {
                                 return valueOf(info.return_type.?, @field(T, decl.name)(value));
                             }
@@ -2852,7 +2853,7 @@ fn resolveOn(comptime T: type, value: *const T, path: []const u8, arena: ?std.me
         // a `*const Row` loop item or shared model node binds like the
         // struct it points at.
         .pointer => |info| {
-            if (info.size == .one and info.is_const) {
+            if (info.size == .one and info.attrs.@"const") {
                 return resolveOn(info.child, value.*, path, arena);
             }
             return null;
@@ -2869,7 +2870,7 @@ fn resolveOn(comptime T: type, value: *const T, path: []const u8, arena: ?std.me
 /// runs it inside its comptime binding resolution).
 pub fn fieldIsTextBuffer(comptime T: type, head: []const u8) bool {
     @setEvalBranchQuota(comptime typeScanQuota(T));
-    inline for (@typeInfo(T).@"struct".fields) |field| {
+    inline for (reflection.fieldsOf(@typeInfo(T).@"struct")) |field| {
         const is_buffer = comptime (std.mem.indexOf(u8, @typeName(field.type), "TextBuffer(") != null);
         if (is_buffer and std.mem.eql(u8, field.name, head)) return true;
     }
@@ -2881,7 +2882,7 @@ fn resolveNested(comptime T: type, ptr: anytype, path: []const u8, arena: ?std.m
         .@"struct" => resolveOn(T, ptr, path, arena),
         // The `reflect.Pointee` transparency: traverse through a
         // single-item const pointer field into the struct it shares.
-        .pointer => |info| if (info.size == .one and info.is_const)
+        .pointer => |info| if (info.size == .one and info.attrs.@"const")
             resolveNested(info.child, ptr.*, path, arena)
         else
             null,
@@ -2931,8 +2932,8 @@ pub const ElementKindEntry = struct { name: []const u8, kind: canvas.WidgetKind,
 
 fn widgetKindByName(comptime name: []const u8) canvas.WidgetKind {
     comptime {
-        for (@typeInfo(canvas.WidgetKind).@"enum".fields) |field| {
-            if (std.mem.eql(u8, field.name, name)) return @enumFromInt(field.value);
+        for (reflection.fieldsOf(@typeInfo(canvas.WidgetKind).@"enum")) |field| {
+            if (std.mem.eql(u8, field.name, name)) return @fromBackingInt(@intCast(field.value));
         }
         @compileError("registry element names an unknown widget kind: " ++ name);
     }

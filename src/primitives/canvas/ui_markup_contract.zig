@@ -34,6 +34,7 @@
 //! std-only by design: `native check` links this module standalone, and
 //! the emit program needs nothing beyond the app's own types.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const markup = @import("ui_markup.zig");
 const schema = @import("ui_schema.zig");
@@ -215,7 +216,7 @@ fn describeGroupSeen(comptime T: type, comptime seen: []const type) Group {
     comptime {
         var scalars: []const Scalar = &.{};
         var groups: []const NamedGroup = &.{};
-        for (@typeInfo(T).@"struct".fields) |field| {
+        for (reflection.fieldsOf(@typeInfo(T).@"struct")) |field| {
             if (reflect.supportedScalar(field.type)) {
                 scalars = scalars ++ &[_]Scalar{.{
                     .name = field.name,
@@ -238,7 +239,7 @@ fn describeGroupSeen(comptime T: type, comptime seen: []const type) Group {
                 }};
             }
         }
-        for (@typeInfo(T).@"struct".decls) |decl| {
+        for (reflection.declsOf(@typeInfo(T).@"struct")) |decl| {
             const DeclType = @TypeOf(@field(T, decl.name));
             if (@typeInfo(DeclType) != .@"fn") continue;
             const info = @typeInfo(DeclType).@"fn";
@@ -290,14 +291,14 @@ fn describeItem(comptime Item: type) Iterable {
 fn describeIterables(comptime Model: type) []const Iterable {
     comptime {
         var iterables: []const Iterable = &.{};
-        for (@typeInfo(Model).@"struct".fields) |field| {
+        for (reflection.fieldsOf(@typeInfo(Model).@"struct")) |field| {
             if (reflect.sliceElement(field.type)) |Item| {
                 var entry = describeItem(Item);
                 entry.name = field.name;
                 iterables = iterables ++ &[_]Iterable{entry};
             }
         }
-        for (@typeInfo(Model).@"struct".decls) |decl| {
+        for (reflection.declsOf(@typeInfo(Model).@"struct")) |decl| {
             const DeclType = @TypeOf(@field(Model, decl.name));
             if (reflect.sliceElement(DeclType)) |Item| {
                 var entry = describeItem(Item);
@@ -322,7 +323,7 @@ fn describeIterables(comptime Model: type) []const Iterable {
 fn describeMsgs(comptime Msg: type, comptime specials: Specials) []const MsgTag {
     comptime {
         var tags: []const MsgTag = &.{};
-        for (@typeInfo(Msg).@"union".fields) |field| {
+        for (reflection.fieldsOf(@typeInfo(Msg).@"union")) |field| {
             tags = tags ++ &[_]MsgTag{.{
                 .name = field.name,
                 .payload = payloadClassOf(field.type, specials),
@@ -376,7 +377,7 @@ fn optOutNames(comptime T: type) []const []const u8 {
         switch (@typeInfo(V)) {
             .@"struct" => |info| {
                 if (!info.is_tuple) @compileError(teaching);
-                for (info.fields) |field| {
+                for (reflection.fieldsOf(info)) |field| {
                     const name: []const u8 = @field(value, field.name);
                     names = names ++ &[_][]const u8{name};
                 }
@@ -1828,7 +1829,7 @@ fn stringLessThan(_: void, a: []const u8, b: []const u8) bool {
 /// Parse a serialized contract artifact. The result's slices are
 /// allocated from `allocator` (hand it an arena).
 pub fn parseArtifact(allocator: std.mem.Allocator, source: []const u8) error{ OutOfMemory, ParseZon }!Contract {
-    const source_z = try allocator.dupeZ(u8, source);
+    const source_z = try allocator.dupeSentinel(u8, source, 0);
     return std.zon.parse.fromSliceAlloc(Contract, allocator, source_z, null, .{});
 }
 

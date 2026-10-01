@@ -3863,7 +3863,7 @@ pub const SourceFile = struct {
 /// purpose: outside Debug the struct is empty and `fragment(path)`
 /// returns nothing, so release binaries carry no source paths, no
 /// embedded-baseline references, and no watch plumbing.
-pub const MarkupFragment = if (builtin.mode == .Debug) struct {
+pub const MarkupFragment = if (builtin.mode == .debug) struct {
     /// Identity of the compiled fragment type (the address of its
     /// comptime document), matched by the engine's build-time override
     /// lookup — registration and lookup derive it from the same type,

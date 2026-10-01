@@ -644,7 +644,7 @@ fn zonParseFailureMessage(allocator: std.mem.Allocator, source: []const u8) ?[]c
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
-    const source_z = scratch.dupeZ(u8, source) catch return null;
+    const source_z = scratch.dupeSentinel(u8, source, 0) catch return null;
     var diag: std.zon.parse.Diagnostics = .{};
     defer diag.deinit(scratch);
     @setEvalBranchQuota(4000);
@@ -678,7 +678,7 @@ pub fn parseText(allocator: std.mem.Allocator, source: []const u8) !Metadata {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
-    const source_z = try scratch.dupeZ(u8, source);
+    const source_z = try scratch.dupeSentinel(u8, source, 0);
     @setEvalBranchQuota(4000);
     const raw = try std.zon.parse.fromSliceAlloc(RawManifest, scratch, source_z, null, .{});
     return metadataFromRaw(allocator, raw);

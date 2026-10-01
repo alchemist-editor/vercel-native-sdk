@@ -99,7 +99,7 @@ pub fn command(name: []const u8) ?Msg {
 
 /// Debug builds keep the runtime markup engine for hot reload; release
 /// builds compile it out entirely.
-const dev_markup_reload = builtin.mode == .Debug;
+const dev_markup_reload = builtin.mode == .debug;
 
 const NotesApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = dev_markup_reload });
 pub const Effects = NotesApp.Effects;

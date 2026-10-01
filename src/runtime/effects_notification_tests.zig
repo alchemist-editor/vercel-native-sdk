@@ -42,8 +42,8 @@ test "notification effect rejects malformed and over-bound requests" {
     defer fx.deinit();
     fx.bindServices(&host.services);
 
-    const long_title = [_]u8{'x'} ** (platform.max_notification_title_bytes + 1);
-    const long_id = [_]u8{'x'} ** (platform.max_notification_id_bytes + 1);
+    const long_title = @as([platform.max_notification_title_bytes + 1]u8, @splat('x'));
+    const long_id = @as([platform.max_notification_id_bytes + 1]u8, @splat('x'));
     fx.showNotification(.{ .title = "" });
     fx.showNotification(.{ .title = "bad\x00title" });
     fx.showNotification(.{ .title = &long_title });

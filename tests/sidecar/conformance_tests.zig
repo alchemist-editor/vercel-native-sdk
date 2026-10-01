@@ -24,6 +24,7 @@
 //! suite (external_core_abi_tests.zig); this suite is the generator's
 //! reflection fence.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const native_sdk = @import("native_sdk");
 const lf = native_sdk.automation.layout_fingerprint;
@@ -122,7 +123,7 @@ test "markup fixture: wire tags ride the sidecar's declaration order" {
     try testing.expectEqual(expected_tags.len, shim_markup.msg_tags.len);
     inline for (expected_tags, 0..) |expected, tag| {
         try testing.expectEqualStrings(expected, shim_markup.msg_tags[tag]);
-        try testing.expectEqualStrings(expected, @typeInfo(shim_markup.Msg).@"union".fields[tag].name);
+        try testing.expectEqualStrings(expected, reflection.fieldsOf(@typeInfo(shim_markup.Msg).@"union")[tag].name);
     }
 }
 
@@ -328,13 +329,13 @@ test "integer fixture: model snapshots decode per-slot classes from raw bytes" {
 /// never leaves the generated module).
 fn refAllDeclsRecursive(comptime T: type) void {
     inline for (comptime std.meta.declarations(T)) |decl| {
-        if (@TypeOf(@field(T, decl.name)) == type) {
-            switch (@typeInfo(@field(T, decl.name))) {
-                .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(@field(T, decl.name)),
+        if (@TypeOf(@field(T, decl)) == type) {
+            switch (@typeInfo(@field(T, decl))) {
+                .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(@field(T, decl)),
                 else => {},
             }
         }
-        _ = &@field(T, decl.name);
+        _ = &@field(T, decl);
     }
 }
 

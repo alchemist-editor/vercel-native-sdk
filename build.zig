@@ -2,7 +2,7 @@ const std = @import("std");
 const web_engine_tool = @import("src/tooling/web_engine.zig");
 
 fn repositoryScriptcBin(b: *std.Build) []const u8 {
-    return b.pathFromRoot(if (b.graph.host.result.os.tag == .windows)
+    return @import("build/app.zig").rootPath(b, if (b.graph.host.result.os.tag == .windows)
         "packages/core/node_modules/.bin/scriptc.cmd"
     else
         "packages/core/node_modules/.bin/scriptc");
@@ -41,6 +41,11 @@ const SigningMode = enum {
     adhoc,
     identity,
 };
+
+pub const rootPath = @import("build/app.zig").rootPath;
+pub const macosSdkPath = @import("build/app.zig").macosSdkPath;
+pub const linkMacosFramework = @import("build/app.zig").linkMacosFramework;
+pub const addRunPathDir = @import("build/app.zig").addRunPathDir;
 
 pub const AppOptions = @import("build/app.zig").AppOptions;
 pub const addApp = @import("build/app.zig").addApp;
@@ -116,11 +121,11 @@ test "root TypeScript markup discovery classification and resolver budgets" {
     // desktop hot-reload resolver see the leading `src/` too. Pin the exact
     // source-relative boundaries that keep those full paths within 24
     // segments and 200 bytes.
-    const max_segments_path = "a/" ** 22 ++ "a";
+    const max_segments_path = std.mem.asBytes(&@as([22]["a/".len]u8, @splat("a/".*))) ++ "a";
     try std.testing.expect(app_build.markupSourcePathWithinBudget(max_segments_path));
     try std.testing.expect(!app_build.markupSourcePathWithinBudget(max_segments_path ++ "/a"));
-    try std.testing.expect(app_build.markupSourcePathWithinBudget("a" ** 196));
-    try std.testing.expect(!app_build.markupSourcePathWithinBudget("a" ** 197));
+    try std.testing.expect(app_build.markupSourcePathWithinBudget(std.mem.asBytes(&@as([196]["a".len]u8, @splat("a".*)))));
+    try std.testing.expect(!app_build.markupSourcePathWithinBudget(std.mem.asBytes(&@as([197]["a".len]u8, @splat("a".*)))));
 }
 
 test "generated TypeScript runners install the compiled root markup view" {
@@ -153,7 +158,7 @@ test "Debug TypeScript root markup stays outside the staged app module" {
         source,
         "_ = release_markup.addCopyFile(b.path(appPath(b, app_root, \"src/app.native\")), \"app.native\");",
     ) != null);
-    try std.testing.expect(std.mem.indexOf(u8, source, "if (optimize != .Debug)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "if (optimize != .debug)") != null);
 }
 
 test "native check preserves the app markup root for component files" {
@@ -166,6 +171,7 @@ test "native check preserves the app markup root for component files" {
 }
 
 pub fn build(b: *std.Build) void {
+    _ = b.addModule("reflection", .{ .root_source_file = b.path("src/compat/reflection.zig") });
     const target = b.standardTargetOptions(.{});
     const host_target = b.graph.host;
     const optimize = b.standardOptimizeOption(.{});
@@ -188,7 +194,7 @@ pub fn build(b: *std.Build) void {
     // Resolve against THIS build's root: as a dependency of a user app the
     // build runner's cwd is the app project, and a cwd-relative "app.zon"
     // would read (and panic on) the user's manifest instead of ours.
-    const app_web_engine = web_engine_tool.readManifestConfig(b.allocator, b.graph.io, b.pathFromRoot("app.zon")) catch |err| {
+    const app_web_engine = web_engine_tool.readManifestConfig(b.allocator, b.graph.io, @import("build/app.zig").rootPath(b, "app.zon")) catch |err| {
         std.debug.panic("failed to read the framework's own app.zon web engine config: {s}", .{@errorName(err)});
     };
     const resolved_web_engine = web_engine_tool.resolve(app_web_engine, .{
@@ -235,9 +241,9 @@ pub fn build(b: *std.Build) void {
         // The estimator-vs-CoreText agreement test (text_metrics_tests.zig)
         // shapes the bundled face through CoreText; apps already link these
         // transitively via AppKit.
-        canvas_mod.linkFramework("CoreFoundation", .{});
-        canvas_mod.linkFramework("CoreGraphics", .{});
-        canvas_mod.linkFramework("CoreText", .{});
+        @import("build/app.zig").linkMacosFramework(b, canvas_mod, "CoreFoundation", .{});
+        @import("build/app.zig").linkMacosFramework(b, canvas_mod, "CoreGraphics", .{});
+        @import("build/app.zig").linkMacosFramework(b, canvas_mod, "CoreText", .{});
         canvas_mod.linkSystemLibrary("c", .{});
     }
     const debug_mod = module(b, target, optimize, "src/debug/root.zig");
@@ -315,13 +321,13 @@ pub fn build(b: *std.Build) void {
     app_runner_test_step.dependOn(&app_runner_test_run.step);
     desktop_mod.link_libc = true;
     if (target.result.os.tag == .macos) {
-        const flags: []const []const u8 = if (b.sysroot) |sysroot|
+        const flags: []const []const u8 = if (@import("build/app.zig").macosSdkPath(b)) |sysroot|
             &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0", "-isysroot", sysroot, b.fmt("-I{s}/usr/include", .{sysroot}) }
         else
             &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0" };
         desktop_mod.addCSourceFile(.{ .file = b.path("src/platform/macos/image_fit_test.m"), .flags = flags });
-        desktop_mod.linkFramework("Foundation", .{});
-        desktop_mod.linkFramework("ImageIO", .{});
+        @import("build/app.zig").linkMacosFramework(b, desktop_mod, "Foundation", .{});
+        @import("build/app.zig").linkMacosFramework(b, desktop_mod, "ImageIO", .{});
         desktop_mod.linkSystemLibrary("objc", .{});
     }
     const desktop_tests = testArtifact(b, desktop_mod);
@@ -578,8 +584,8 @@ pub fn build(b: *std.Build) void {
         .root_module = docs_previews_mod,
     });
     const run_docs_previews = b.addRunArtifact(docs_previews_exe);
-    run_docs_previews.addArg(b.pathFromRoot("docs/public/components"));
-    run_docs_previews.addArg(b.pathFromRoot("docs/src/lib/component-vocab.json"));
+    run_docs_previews.addArg(@import("build/app.zig").rootPath(b, "docs/public/components"));
+    run_docs_previews.addArg(@import("build/app.zig").rootPath(b, "docs/src/lib/component-vocab.json"));
     run_docs_previews.has_side_effects = true;
     const docs_previews_step = b.step("docs-component-previews", "Render built-in component previews and vocab JSON into docs/");
     docs_previews_step.dependOn(&run_docs_previews.step);
@@ -604,7 +610,7 @@ pub fn build(b: *std.Build) void {
     // --check tools/bench-render-budgets.txt` compares the median e2e
     // p50 of three suite passes against the committed budgets (the
     // benchmark refuses --check outside ReleaseFast).
-    if (b.args) |bench_args| run_bench_render.addArgs(bench_args);
+    run_bench_render.addPassthruArgs();
     const bench_render_step = b.step("bench-render", "Run the render macro-benchmark (deterministic scenarios; pass -Doptimize=ReleaseFast for baselines, `-- --check tools/bench-render-budgets.txt` for the budget ratchet)");
     bench_render_step.dependOn(&run_bench_render.step);
 
@@ -613,7 +619,7 @@ pub fn build(b: *std.Build) void {
     // upgrade the static webp tiles to interactive engine instances.
     // ReleaseSmall + strip keep the module small enough to lazy-load.
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const wasm_optimize: std.builtin.OptimizeMode = .ReleaseSmall;
+    const wasm_optimize: std.builtin.OptimizeMode = .small;
     const wasm_geometry_mod = module(b, wasm_target, wasm_optimize, "src/primitives/geometry/root.zig");
     const wasm_json_mod = module(b, wasm_target, wasm_optimize, "src/primitives/json/root.zig");
     const wasm_canvas_mod = module(b, wasm_target, wasm_optimize, "src/primitives/canvas/root.zig");
@@ -675,9 +681,9 @@ pub fn build(b: *std.Build) void {
     if (host_target.result.os.tag == .macos) {
         // Same CoreText linkage the target canvas module carries (see
         // canvas_mod above): the shaping path calls it on macOS hosts.
-        pins_canvas_mod.linkFramework("CoreFoundation", .{});
-        pins_canvas_mod.linkFramework("CoreGraphics", .{});
-        pins_canvas_mod.linkFramework("CoreText", .{});
+        @import("build/app.zig").linkMacosFramework(b, pins_canvas_mod, "CoreFoundation", .{});
+        @import("build/app.zig").linkMacosFramework(b, pins_canvas_mod, "CoreGraphics", .{});
+        @import("build/app.zig").linkMacosFramework(b, pins_canvas_mod, "CoreText", .{});
         pins_canvas_mod.linkSystemLibrary("c", .{});
     }
     const pins_native_mod = module(b, host_target, optimize, "src/root.zig");
@@ -713,6 +719,7 @@ pub fn build(b: *std.Build) void {
     };
 
     const test_step = b.step("test", "Run package and framework tests");
+    test_step.dependOn(&b.addRunArtifact(testArtifact(b, module(b, target, optimize, "src/compat/reflection.zig"))).step);
     test_step.dependOn(&invalid_import_compile.step);
     test_step.dependOn(&b.addRunArtifact(build_graph_tests).step);
     test_step.dependOn(&b.addRunArtifact(geometry_tests).step);
@@ -769,7 +776,7 @@ pub fn build(b: *std.Build) void {
         kanban_driver_run.setCwd(b.path("examples/kanban"));
         kanban_driver_run.has_side_effects = true;
         kanban_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "typescript");
-        kanban_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/kanban-view-reference"));
+        kanban_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/kanban-view-reference"));
         _ = kanban_driver_run.captureStdOut(.{});
         _ = kanban_driver_run.captureStdErr(.{});
         kanban_driver_run.setName("TypeScript Kanban native test driver");
@@ -777,7 +784,7 @@ pub fn build(b: *std.Build) void {
         kanban_reference_run.setCwd(b.path("examples/kanban"));
         kanban_reference_run.has_side_effects = true;
         kanban_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "zig");
-        kanban_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/kanban-view-reference"));
+        kanban_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/kanban-view-reference"));
         _ = kanban_reference_run.captureStdOut(.{});
         _ = kanban_reference_run.captureStdErr(.{});
         kanban_reference_run.setName("Kanban native test driver reference view");
@@ -789,14 +796,14 @@ pub fn build(b: *std.Build) void {
         feed_reference_run.setCwd(b.path("examples/service-feed-reader"));
         feed_reference_run.has_side_effects = true;
         feed_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "zig");
-        feed_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/feed-view-reference"));
+        feed_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/feed-view-reference"));
         _ = feed_reference_run.captureStdOut(.{});
         _ = feed_reference_run.captureStdErr(.{});
         const feed_driver_run = managedExampleRun(b, host_cli_exe, &.{ "test", "-Dplatform=null", "-Dtypescript-view=true" });
         feed_driver_run.setCwd(b.path("examples/service-feed-reader"));
         feed_driver_run.has_side_effects = true;
         feed_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "typescript");
-        feed_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/feed-view-reference"));
+        feed_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/feed-view-reference"));
         _ = feed_driver_run.captureStdOut(.{});
         _ = feed_driver_run.captureStdErr(.{});
         feed_driver_run.step.dependOn(&feed_reference_run.step);
@@ -808,14 +815,14 @@ pub fn build(b: *std.Build) void {
         pipeline_reference_run.setCwd(b.path("examples/pipeline"));
         pipeline_reference_run.has_side_effects = true;
         pipeline_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "zig");
-        pipeline_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/pipeline-view-reference"));
+        pipeline_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/pipeline-view-reference"));
         _ = pipeline_reference_run.captureStdOut(.{});
         _ = pipeline_reference_run.captureStdErr(.{});
         const pipeline_driver_run = managedExampleRun(b, host_cli_exe, &.{ "test", "-Dplatform=null", "-Dtypescript-view=true" });
         pipeline_driver_run.setCwd(b.path("examples/pipeline"));
         pipeline_driver_run.has_side_effects = true;
         pipeline_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "typescript");
-        pipeline_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/pipeline-view-reference"));
+        pipeline_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/pipeline-view-reference"));
         _ = pipeline_driver_run.captureStdOut(.{});
         _ = pipeline_driver_run.captureStdErr(.{});
         pipeline_driver_run.step.dependOn(&pipeline_reference_run.step);
@@ -826,21 +833,21 @@ pub fn build(b: *std.Build) void {
         radio_policy_reference_run.setCwd(b.path("examples/radio-policy"));
         radio_policy_reference_run.has_side_effects = true;
         radio_policy_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "zig");
-        radio_policy_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/radio-policy-view-reference"));
+        radio_policy_reference_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/radio-policy-view-reference"));
         _ = radio_policy_reference_run.captureStdOut(.{});
         _ = radio_policy_reference_run.captureStdErr(.{});
         const radio_policy_driver_run = managedExampleRun(b, host_cli_exe, &.{ "test", "-Dplatform=null", "-Dtypescript-view=true" });
         radio_policy_driver_run.setCwd(b.path("examples/radio-policy"));
         radio_policy_driver_run.has_side_effects = true;
         radio_policy_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_BACKEND", "typescript");
-        radio_policy_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", b.pathFromRoot(".zig-cache/radio-policy-view-reference"));
+        radio_policy_driver_run.setEnvironmentVariable("NATIVE_SDK_TEST_VIEW_REFERENCE", @import("build/app.zig").rootPath(b, ".zig-cache/radio-policy-view-reference"));
         _ = radio_policy_driver_run.captureStdOut(.{});
         _ = radio_policy_driver_run.captureStdErr(.{});
         radio_policy_driver_run.step.dependOn(&radio_policy_reference_run.step);
         native_driver_step.dependOn(&radio_policy_driver_run.step);
         ts_core_e2e_step.dependOn(&radio_policy_driver_run.step);
         test_step.dependOn(&radio_policy_driver_run.step);
-        const native_api_tests = b.addSystemCommand(&.{ b.findProgram(&.{"node"}, &.{}) catch unreachable, "--test" });
+        const native_api_tests = b.addSystemCommand(&.{ b.findProgram(.{ .names = &.{"node"} }) orelse unreachable, "--test" });
         native_api_tests.addFileArg(b.path("packages/core/test/native_testing.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/view_frontend.test.ts"));
         native_api_tests.has_side_effects = true;
@@ -901,7 +908,7 @@ pub fn build(b: *std.Build) void {
         const profile_step = b.step("test-corewire-profile", "Test the scriptc-compiled profile generator and its preserved output fixtures");
         profile_step.dependOn(&profile_tests_run.step);
         test_step.dependOn(&profile_tests_run.step);
-        const profile_cli_tests = b.addSystemCommand(&.{b.findProgram(&.{"node"}, &.{}) catch unreachable});
+        const profile_cli_tests = b.addSystemCommand(&.{b.findProgram(.{ .names = &.{"node"} }) orelse unreachable});
         profile_cli_tests.addFileArg(b.path("tools/corewire/profile.test.ts"));
         profile_cli_tests.addArtifactArg(ts_core_artifacts.corewire);
         profile_cli_tests.addFileInput(b.path("tools/corewire/emit_profile.ts"));
@@ -1584,7 +1591,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "@[ @\"fonts\", @\"Fonts\", @\"assets/fonts\" ]" },
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "NativeSdkRegisterBundledFonts();" },
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "NativeSdkPacketPreferredFont(text, size)" },
-        .{ .path = "src/tooling/templates.zig", .pattern = "app_mod.linkFramework(\"CoreText\", .{});" },
+        .{ .path = "src/tooling/templates.zig", .pattern = "linkMacosFramework(b, app_mod, \"CoreText\", .{});" },
     });
     addFileContainsCheckStep(b, file_contains_checker, test_step, "test-appkit-gpu-packet-span-fonts", "Verify AppKit packet text resolves reserved span font ids to real weighted and italic faces", &.{
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "static NSFont *NativeSdkItalicSansFont(NSFont *font)" },
@@ -2063,7 +2070,7 @@ pub fn build(b: *std.Build) void {
     // the check needs no iOS cross-compile.
     const package_ios_layout_run = b.addRunArtifact(host_cli_exe);
     package_ios_layout_run.setCwd(b.path("examples/calculator"));
-    package_ios_layout_run.setEnvironmentVariable("NATIVE_SDK_PATH", b.pathFromRoot("."));
+    package_ios_layout_run.setEnvironmentVariable("NATIVE_SDK_PATH", @import("build/app.zig").rootPath(b, "."));
     package_ios_layout_run.addArgs(&.{ "package", "--target", "ios", "--output", "zig-out/package/test-ios-layout", "--binary" });
     package_ios_layout_run.addFileArg(embed_lib.getEmittedBin());
     package_ios_layout_run.has_side_effects = true;
@@ -2111,8 +2118,8 @@ pub fn build(b: *std.Build) void {
     // by the live loops, not CI).
     const package_android_layout_run = b.addRunArtifact(host_cli_exe);
     package_android_layout_run.setCwd(b.path("examples/calculator"));
-    package_android_layout_run.setEnvironmentVariable("NATIVE_SDK_PATH", b.pathFromRoot("."));
-    package_android_layout_run.setEnvironmentVariable("ANDROID_HOME", b.pathFromRoot("zig-out/no-android-sdk"));
+    package_android_layout_run.setEnvironmentVariable("NATIVE_SDK_PATH", @import("build/app.zig").rootPath(b, "."));
+    package_android_layout_run.setEnvironmentVariable("ANDROID_HOME", @import("build/app.zig").rootPath(b, "zig-out/no-android-sdk"));
     package_android_layout_run.addArgs(&.{ "package", "--target", "android", "--output", "zig-out/package/test-android-layout", "--binary" });
     package_android_layout_run.addFileArg(embed_lib.getEmittedBin());
     package_android_layout_run.has_side_effects = true;
@@ -3414,11 +3421,14 @@ fn sqliteCompileFlags() []const []const u8 {
 }
 
 fn module(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, path: []const u8) *std.Build.Module {
-    return b.createModule(.{
+    const mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = b.path(path),
         .target = target,
         .optimize = optimize,
     });
+    mod.addImport("reflection", b.modules.get("reflection").?);
+    return mod;
 }
 
 /// The framework module's `terminal_vt` import for THIS repository's own
@@ -3534,18 +3544,20 @@ fn tsCoreE2eArtifact(
     desktop_mod: *std.Build.Module,
     tooling_mod: *std.Build.Module,
 ) ?TsCoreE2eArtifacts {
-    const node = b.findProgram(&.{"node"}, &.{}) catch return null;
+    const node = b.findProgram(.{ .names = &.{"node"} }) orelse return null;
     // Both toolchains arrive with one `npm ci` in packages/core: the
     // frontend's TypeScript compiler and the external core compiler
     // (unless NATIVE_SDK_CORE_COMPILER points at the pinned release's
     // command directly).
-    b.build_root.handle.access(
+    @import("build/app.zig").accessRoot(
+        b,
         b.graph.io,
         "packages/core/node_modules/@typescript/old",
         .{},
     ) catch return null;
     if (b.graph.environ_map.get("NATIVE_SDK_CORE_COMPILER") == null) {
-        b.build_root.handle.access(
+        @import("build/app.zig").accessRoot(
+            b,
             b.graph.io,
             repositoryScriptcBin(b),
             .{},
@@ -3557,6 +3569,7 @@ fn tsCoreE2eArtifact(
     // conformance shims all run it, including under a cross -Dtarget
     // (the batteries compile for the target; this tool never does).
     const corewire_mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = b.path("tools/corewire/main.zig"),
         .target = b.graph.host,
         .optimize = optimize,
@@ -3629,6 +3642,7 @@ fn tsCoreE2eArtifact(
     _ = markup_view_stage.addCopyFile(b.path("tests/ts-core/markup_view.native"), "markup_view.native");
     _ = markup_view_stage.addCopyFile(b.path("tests/ts-core/components/actions.native"), "components/actions.native");
     const markup_e2e_mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = markup_view_root,
         .target = target,
         .optimize = optimize,
@@ -3650,6 +3664,7 @@ fn tsCoreE2eArtifact(
     _ = kanban_stage.addCopyFile(b.path("examples/kanban/src/app.native"), "app.native");
     _ = kanban_stage.addCopyFile(b.path("examples/kanban/src/components/board-column.native"), "components/board-column.native");
     const kanban_mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = kanban_root,
         .target = target,
         .optimize = optimize,
@@ -3671,6 +3686,7 @@ fn tsCoreE2eArtifact(
     const soundboard_root = soundboard_stage.addCopyFile(b.path("tests/ts-core/soundboard_e2e_tests.zig"), "soundboard_e2e_tests.zig");
     _ = soundboard_stage.addCopyFile(b.path("examples/soundboard-ts/src/app.native"), "app.native");
     const soundboard_mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = soundboard_root,
         .target = target,
         .optimize = optimize,
@@ -3697,6 +3713,7 @@ fn tsCoreE2eArtifact(
     _ = monitor_stage.addCopyFile(b.path("examples/system-monitor/src/fixtures/vm_stat.txt"), "fixtures/vm_stat.txt");
     _ = monitor_stage.addCopyFile(b.path("examples/system-monitor/src/fixtures/ps-edge.txt"), "fixtures/ps-edge.txt");
     const monitor_mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = monitor_root,
         .target = target,
         .optimize = optimize,
@@ -3722,6 +3739,7 @@ fn tsCoreE2eArtifact(
     const ai_chat_root = ai_chat_stage.addCopyFile(b.path("tests/ts-core/ai_chat_e2e_tests.zig"), "ai_chat_e2e_tests.zig");
     _ = ai_chat_stage.addCopyFile(b.path("examples/chatbot/src/app.native"), "app.native");
     const ai_chat_mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = ai_chat_root,
         .target = target,
         .optimize = optimize,
@@ -3767,6 +3785,7 @@ fn tsCoreE2eArtifact(
         \\pub const nativeViewEvent = core.nativeViewEvent;
     );
     const feed_reader_mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = feed_reader_root,
         .target = target,
         .optimize = optimize,
@@ -3832,6 +3851,7 @@ fn tsCoreE2eArtifact(
     const battery_target_is_mobile = target.result.os.tag == .ios or target.result.abi.isAndroid();
     const mobile_battery: ?std.Build.LazyPath = if (battery_target_is_mobile and service_host_fixture.archive != null) battery: {
         const battery_mod = b.createModule(.{
+            .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
             .root_source_file = b.path("tests/ts-services/mobile_e2e_battery.zig"),
             .target = target,
             .optimize = optimize,
@@ -4142,6 +4162,7 @@ fn externalServiceFixture(
         .executable = executable,
         .archive = archive,
         .registry = b.createModule(.{
+            .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
             .root_source_file = registry_source,
             .target = target,
             .optimize = optimize,
@@ -4201,11 +4222,14 @@ fn sidecarShimModule(
     const shim_root = staged.addCopyFile(generated, "core.zig");
     _ = staged.addCopyFile(b.path("tools/corewire/shim_rt.zig"), "shim_rt.zig");
     _ = staged.addCopyFile(b.path("tools/corewire/core_abi.zig"), "core_abi.zig");
-    return b.createModule(.{
+    const mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = shim_root,
         .target = target,
         .optimize = optimize,
     });
+    mod.addImport("reflection", b.modules.get("reflection").?);
+    return mod;
 }
 
 /// One externally compiled TS fixture core: the corewire-generated
@@ -4417,10 +4441,12 @@ fn externalCoreFixtureModule(
     _ = staged.addCopyFile(b.path("tools/corewire/shim_rt.zig"), "shim_rt.zig");
     _ = staged.addCopyFile(b.path("tools/corewire/core_abi.zig"), "core_abi.zig");
     const mod = b.createModule(.{
+        .imports = &.{.{ .name = "reflection", .module = b.modules.get("reflection").? }},
         .root_source_file = shim_root,
         .target = target,
         .optimize = optimize,
     });
+    mod.addImport("reflection", b.modules.get("reflection").?);
     mod.link_libc = true;
     mod.addObjectFile(archive);
     addScriptcArchiveSystemLibs(mod, target);
@@ -4438,7 +4464,7 @@ fn externalCoreFixtureModule(
 /// Service modules live below src/services/, so a flat scan would let their
 /// generated contract stay stale in a warm fixture build.
 fn tsCoreAddDirInputs(b: *std.Build, transpile: *std.Build.Step.Run, dir_path: []const u8) void {
-    var dir = b.build_root.handle.openDir(b.graph.io, dir_path, .{ .iterate = true }) catch return;
+    var dir = @import("build/app.zig").openRootDir(b, b.graph.io, dir_path, .{ .iterate = true }) catch return;
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return;
     defer walker.deinit();
@@ -4453,14 +4479,14 @@ fn tsCoreAddDirInputs(b: *std.Build, transpile: *std.Build.Step.Run, dir_path: [
 /// excluding the independent services compiler class and declaration files.
 /// Compiled views additionally consume every markup source in this tree.
 fn tsCoreAddCoreDirInputs(b: *std.Build, stage: *std.Build.Step.Run, dir_path: []const u8, include_markup: bool) void {
-    var dir = b.build_root.handle.openDir(b.graph.io, dir_path, .{ .iterate = true }) catch return;
+    var dir = @import("build/app.zig").openRootDir(b, b.graph.io, dir_path, .{ .iterate = true }) catch return;
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return;
     defer walker.deinit();
     while (walker.next(b.graph.io) catch null) |entry| {
         if (entry.kind != .file or std.mem.endsWith(u8, entry.basename, ".d.ts")) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".ts") and !(include_markup and std.mem.endsWith(u8, entry.basename, ".native"))) continue;
-        const normalized = b.dupe(entry.path);
+        const normalized = b.allocator.dupe(u8, entry.path) catch @panic("OOM");
         for (normalized) |*char| if (char.* == '\\') {
             char.* = '/';
         };
@@ -4607,7 +4633,7 @@ fn desktopTestFiles(b: *std.Build) []const DesktopTestFile {
     const gpa = b.allocator;
     const io = b.graph.io;
     var files: std.ArrayList(DesktopTestFile) = .empty;
-    var src_dir = b.build_root.handle.openDir(io, "src", .{ .iterate = true }) catch |err|
+    var src_dir = @import("build/app.zig").openRootDir(b, io, "src", .{ .iterate = true }) catch |err|
         std.debug.panic("framework test shards: unable to open src/: {s}", .{@errorName(err)});
     defer src_dir.close(io);
     var walker = src_dir.walk(gpa) catch @panic("OOM");
@@ -4707,7 +4733,7 @@ fn addExampleTestStep(b: *std.Build, cli_exe: *std.Build.Step.Compile, group: *s
 fn managedExampleRun(b: *std.Build, cli_exe: *std.Build.Step.Compile, argv_tail: []const []const u8) *std.Build.Step.Run {
     const run = b.addRunArtifact(cli_exe);
     run.addArgs(argv_tail);
-    run.setEnvironmentVariable("NATIVE_SDK_PATH", b.pathFromRoot("."));
+    run.setEnvironmentVariable("NATIVE_SDK_PATH", @import("build/app.zig").rootPath(b, "."));
     return run;
 }
 

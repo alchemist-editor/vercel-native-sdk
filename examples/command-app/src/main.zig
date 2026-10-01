@@ -144,7 +144,7 @@ const shell_scene: native_sdk.ShellConfig = .{ .windows = &shell_windows };
 
 const CommandApp = struct {
     command_count: u32 = 0,
-    sources: [8]native_sdk.CommandSource = [_]native_sdk.CommandSource{.runtime} ** 8,
+    sources: [8]native_sdk.CommandSource = @as([8]native_sdk.CommandSource, @splat(.runtime)),
     last_command_name: []const u8 = "",
 
     fn app(self: *@This()) native_sdk.App {

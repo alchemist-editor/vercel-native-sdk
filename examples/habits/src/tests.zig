@@ -212,7 +212,6 @@ test "the habits view lays out through the canvas engine" {
     try testing.expect(saw_button);
 }
 
-
 test "a11y audit sweep: every interactive widget is named, reachable, and unambiguous" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();

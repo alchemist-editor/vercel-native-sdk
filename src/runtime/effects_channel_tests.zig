@@ -214,9 +214,9 @@ test "an oversized post answers dropped_oversized and counts as a drop" {
     fx.executor = .fake;
 
     const handle = fx.openChannel(.{ .key = 4, .on_event = DirectFx.channelMsg(.event) });
-    const oversized = [_]u8{'x'} ** (effects_mod.max_effect_channel_bytes + 1);
+    const oversized = @as([effects_mod.max_effect_channel_bytes + 1]u8, @splat('x'));
     try testing.expectEqual(PostResult.dropped_oversized, handle.post(&oversized));
-    const at_bound = [_]u8{'y'} ** effects_mod.max_effect_channel_bytes;
+    const at_bound = @as([effects_mod.max_effect_channel_bytes]u8, @splat('y'));
     try testing.expectEqual(PostResult.accepted, handle.post(&at_bound));
 
     const event = try expectData(&fx, 4, &at_bound);
@@ -2436,7 +2436,7 @@ test "rejected posts never wake the host: the pending-wake count stays flat unde
     while (index < 64) : (index += 1) {
         try testing.expectEqual(PostResult.dropped_full, handle.post("refused"));
     }
-    const oversized = [_]u8{'x'} ** (effects_mod.max_effect_channel_bytes + 1);
+    const oversized = @as([effects_mod.max_effect_channel_bytes + 1]u8, @splat('x'));
     try testing.expectEqual(PostResult.dropped_oversized, handle.post(&oversized));
     try testing.expectEqual(before_refused, harness.null_platform.pendingWakeCount());
 
@@ -2581,7 +2581,7 @@ test "a channel record with bytes over the post bound refuses replay as damage" 
     // A recorded post can never exceed max_effect_channel_bytes — the
     // handle refuses the bound before staging — so the gate must fire
     // before the fed bytes could reach a fixed-size feed buffer.
-    const oversized = [_]u8{'z'} ** (effects_mod.max_effect_channel_bytes + 1);
+    const oversized = @as([effects_mod.max_effect_channel_bytes + 1]u8, @splat('z'));
     const result = replayChannelDamageRecord(.{
         .kind = .channel,
         .key = session_channel_key,
@@ -3115,7 +3115,7 @@ const MixedRejectionModel = struct {
         }
         var fold: [9]u8 = undefined;
         std.mem.writeInt(u64, fold[0..8], event.key, .little);
-        fold[8] = @intFromEnum(event.kind);
+        fold[8] = @backingInt(event.kind);
         model.order_digest = std.hash.Wyhash.hash(model.order_digest, &fold);
     }
 };

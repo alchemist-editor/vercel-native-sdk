@@ -170,7 +170,7 @@ pub const PathVerb = enum {
 
 pub const PathElement = struct {
     verb: PathVerb,
-    points: [3]geometry.PointF = [_]geometry.PointF{geometry.PointF.zero()} ** 3,
+    points: [3]geometry.PointF = @as([3]geometry.PointF, @splat(geometry.PointF.zero())),
 };
 
 pub const FillPath = struct {

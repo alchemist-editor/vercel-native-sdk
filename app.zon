@@ -4,16 +4,16 @@
     .display_name = "Native SDK",
     .version = "0.1.0",
     .icons = .{ "assets/icon.icns", "assets/icon.ico" },
-    .platforms = .{ "macos" },
-    .permissions = .{ "window" },
+    .platforms = .{"macos"},
+    .permissions = .{"window"},
     .capabilities = .{ "webview", "js_bridge", "native_module" },
     .bridge = .{
         .commands = .{
             .{ .name = "native.ping", .origins = .{ "zero://inline", "zero://app" } },
-            .{ .name = "native-sdk.window.list", .permissions = .{ "window" }, .origins = .{ "zero://inline", "zero://app" } },
-            .{ .name = "native-sdk.window.create", .permissions = .{ "window" }, .origins = .{ "zero://inline", "zero://app" } },
-            .{ .name = "native-sdk.window.focus", .permissions = .{ "window" }, .origins = .{ "zero://inline", "zero://app" } },
-            .{ .name = "native-sdk.window.close", .permissions = .{ "window" }, .origins = .{ "zero://inline", "zero://app" } },
+            .{ .name = "native-sdk.window.list", .permissions = .{"window"}, .origins = .{ "zero://inline", "zero://app" } },
+            .{ .name = "native-sdk.window.create", .permissions = .{"window"}, .origins = .{ "zero://inline", "zero://app" } },
+            .{ .name = "native-sdk.window.focus", .permissions = .{"window"}, .origins = .{ "zero://inline", "zero://app" } },
+            .{ .name = "native-sdk.window.close", .permissions = .{"window"}, .origins = .{ "zero://inline", "zero://app" } },
         },
     },
     .security = .{

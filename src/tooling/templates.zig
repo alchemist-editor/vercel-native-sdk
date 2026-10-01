@@ -619,7 +619,7 @@ fn nativeBuildZon(allocator: std.mem.Allocator, names: TemplateNames, framework_
     try out.appendSlice(allocator,
         \\,
         \\    .version = "0.1.0",
-        \\    .minimum_zig_version = "0.16.0",
+        \\    .minimum_zig_version = "0.17.0-dev.2375+d8aab4878",
         \\    .dependencies = .{ .native_sdk = .{ .path =
     );
     try out.appendSlice(allocator, " ");
@@ -1203,7 +1203,7 @@ fn nativeCiYaml(allocator: std.mem.Allocator, names: TemplateNames, framework_pa
         \\      - uses: actions/checkout@v4
         \\      - uses: vercel-labs/setup-zig@v1
         \\        with:
-        \\          version: 0.16.0
+        \\          version: 0.17.0-dev.2375+d8aab4878
         \\
     );
     if (core == .ts) try out.appendSlice(allocator, node_setup);
@@ -1226,7 +1226,7 @@ fn nativeCiYaml(allocator: std.mem.Allocator, names: TemplateNames, framework_pa
         \\      - uses: actions/checkout@v4
         \\      - uses: vercel-labs/setup-zig@v1
         \\        with:
-        \\          version: 0.16.0
+        \\          version: 0.17.0-dev.2375+d8aab4878
         \\
     );
     if (core == .ts) try out.appendSlice(allocator, node_setup);
@@ -1302,7 +1302,7 @@ fn frontendCiYaml(allocator: std.mem.Allocator, names: TemplateNames) ![]const u
         \\      - uses: actions/checkout@v4
         \\      - uses: vercel-labs/setup-zig@v1
         \\        with:
-        \\          version: 0.16.0
+        \\          version: 0.17.0-dev.2375+d8aab4878
         \\      - name: Fetch native-sdk
         \\        run: |
         \\          if [ ! -f "$NATIVE_SDK_PATH/build.zig" ]; then
@@ -1355,6 +1355,27 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
 
     try out.appendSlice(allocator,
         \\const std = @import("std");
+        \\fn rootPath(b: *std.Build, sub_path: []const u8) []const u8 {
+        \\    if (std.fs.path.isAbsolute(sub_path)) return sub_path;
+        \\    return b.root.joinString(b.allocator, sub_path) catch @panic("OOM");
+        \\}
+        \\
+        \\fn addRunPathDir(run: *std.Build.Step.Run, path: []const u8) void {
+        \\    const b = run.step.owner;
+        \\    const old = run.getEnvMap().get("PATH") orelse "";
+        \\    run.setEnvironmentVariable("PATH", b.fmt("{s}{c}{s}", .{ path, std.fs.path.delimiter, old }));
+        \\}
+        \\
+        \\fn linkMacosFramework(b: *std.Build, mod: *std.Build.Module, name: []const u8, options: std.Build.Module.LinkFrameworkOptions) void {
+        \\    const sdk = macosSdkPath(b) orelse @panic("macOS framework linking requires SDKROOT or xcrun");
+        \\    const stub = b.pathJoin(&.{ sdk, "System/Library/Frameworks", b.fmt("{s}.framework", .{name}), b.fmt("{s}.tbd", .{name}) });
+        \\    const alias = b.fmt("native_sdk_framework_{s}", .{name});
+        \\    const files = b.addWriteFiles();
+        \\    _ = files.addCopyFile(.{ .cwd_relative = stub }, b.fmt("lib{s}.tbd", .{alias}));
+        \\    mod.addLibraryPath(files.getDirectory());
+        \\    mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
+        \\    mod.linkSystemLibrary(alias, .{ .use_pkg_config = .no, .needed = options.needed, .weak = options.weak });
+        \\}
         \\
         \\const PlatformOption = enum {
         \\    auto,
@@ -1404,8 +1425,8 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    // release-shaped exe — the same split `native dev`/`native build`
         \\    // apply. An explicit -Doptimize (or --release) pins both roles.
         \\    const optimize_request = b.option(std.builtin.OptimizeMode, "optimize", "Prioritize performance, safety, or binary size");
-        \\    const optimize = optimizeMode(b, optimize_request, .Debug);
-        \\    const package_optimize = optimizeMode(b, optimize_request, .ReleaseFast);
+        \\    const optimize = optimizeMode(b, optimize_request, .debug);
+        \\    const package_optimize = optimizeMode(b, optimize_request, .fast);
         \\    const platform_option = b.option(PlatformOption, "platform", "Desktop backend: auto, null, macos, linux, windows") orelse .auto;
         \\    const trace_option = b.option(TraceOption, "trace", "Trace output: off, events, runtime, all") orelse .events;
         \\    const debug_overlay = b.option(bool, "debug-overlay", "Enable debug overlay output") orelse false;
@@ -1417,6 +1438,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    const cef_auto_install_override = b.option(bool, "cef-auto-install", "Override app.zon CEF auto-install setting");
         \\    const package_target = b.option(PackageTarget, "package-target", "Package target: macos, windows, linux") orelse .macos;
         \\    const native_sdk_path = b.option([]const u8, "native-sdk-path", "Path to the Native SDK framework checkout") orelse default_native_sdk_path;
+        \\    _ = b.addModule("reflection", .{ .root_source_file = nativeSdkPath(b, native_sdk_path, "src/compat/reflection.zig") });
         \\    const package_optimize_name = @tagName(package_optimize);
         \\    const selected_platform: PlatformOption = switch (platform_option) {
         \\        .auto => if (target.result.os.tag == .macos) .macos else if (target.result.os.tag == .linux) .linux else if (target.result.os.tag == .windows) .windows else .@"null",
@@ -1494,7 +1516,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    // console behind its window; Debug keeps the console for dev logs.
         \\    // Redirected logging still works on GUI exes - only console
         \\    // AUTO-allocation is subsystem-gated.
-        \\    if (target.result.os.tag == .windows and optimize != .Debug) {
+        \\    if (target.result.os.tag == .windows and optimize != .debug) {
         \\        exe.subsystem = .windows;
         \\    }
         \\    linkPlatform(b, target, app_mod, exe, selected_platform, web_engine, web_layer, native_sdk_path, cef_dir, cef_auto_install);
@@ -1552,7 +1574,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\        });
         \\        // Same subsystem posture as the dev exe above, keyed on this
         \\        // exe's own mode: release-shaped Windows exes are GUI-subsystem.
-        \\        if (target.result.os.tag == .windows and package_optimize != .Debug) {
+        \\        if (target.result.os.tag == .windows and package_optimize != .debug) {
         \\            built.subsystem = .windows;
         \\        }
         \\        linkPlatform(b, target, package_app_mod, built, selected_platform, web_engine, web_layer, native_sdk_path, cef_dir, cef_auto_install);
@@ -1581,7 +1603,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    // loader) from the framework root; a PATH-resolved `native` could
         \\    // belong to a different checkout than the one this build compiled
         \\    // against, so hand the same root over explicitly.
-        \\    package.setEnvironmentVariable("NATIVE_SDK_PATH", b.pathFromRoot(native_sdk_path));
+        \\    package.setEnvironmentVariable("NATIVE_SDK_PATH", rootPath(b, native_sdk_path));
         \\    package.addFileArg(package_exe.getEmittedBin());
         \\    package.addArgs(&.{ "--web-engine", @tagName(web_engine), "--cef-dir", cef_dir });
         \\    // Forward the RESOLVED web-layer decision, never the raw inputs:
@@ -1653,11 +1675,11 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\// ReleaseFast for the exe `zig build package` wraps.
         \\fn optimizeMode(b: *std.Build, requested: ?std.builtin.OptimizeMode, default_mode: std.builtin.OptimizeMode) std.builtin.OptimizeMode {
         \\    if (requested) |mode| return mode;
-        \\    return switch (b.release_mode) {
+        \\    return switch (b.graph.release_mode) {
         \\        .off => default_mode,
-        \\        .any, .fast => .ReleaseFast,
-        \\        .safe => .ReleaseSafe,
-        \\        .small => .ReleaseSmall,
+        \\        .any, .fast => .fast,
+        \\        .safe => .safe,
+        \\        .small => .small,
         \\    };
         \\}
         \\
@@ -1665,9 +1687,6 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    const target = b.standardTargetOptions(.{});
         \\    if (target.result.os.tag != .macos) return target;
         \\
-        \\    if (b.sysroot == null) {
-        \\        b.sysroot = macosSdkPath(b) orelse b.sysroot;
-        \\    }
         \\
         \\    var query = target.query;
         \\    query.os_tag = .macos;
@@ -1744,9 +1763,9 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    generate.addArg("--zig-out");
         \\    const migrations = generate.addOutputFileArg("migrations.zig");
         \\    generate.addArgs(&.{ "--state", "src/schema/migrations.lock.json" });
-        \\    if (b.build_root.handle.access(b.graph.io, "src/schema/migrations.lock.json", .{})) |_| {
+        \\    if (b.root.access(b.graph.io, "src/schema/migrations.lock.json", .{})) |_| {
         \\        generate.addFileInput(b.path("src/schema/migrations.lock.json"));
-        \\    } else |_| {}
+        \\    } else |_| { b.graph.poisonCache(); }
         \\    generate.addFileInput(nativeSdkPath(b, native_sdk_path, "packages/core/src/sqlite_codegen.ts"));
         \\    generate.addFileInput(nativeSdkPath(b, native_sdk_path, "packages/core/src/sqlite_runtime_policy.ts"));
         \\    addAppSqlDirInputs(b, generate, "src");
@@ -1754,8 +1773,9 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\}
         \\
         \\fn addAppSqlDirInputs(b: *std.Build, run: *std.Build.Step.Run, src_path: []const u8) void {
-        \\    var dir = b.build_root.handle.openDir(b.graph.io, src_path, .{ .iterate = true }) catch return;
+        \\    var dir = b.root.openDir(b.graph.io, src_path, .{ .iterate = true }) catch return;
         \\    defer dir.close(b.graph.io);
+        \\    b.dependOnDirectoryContents(.{ .cwd_relative = rootPath(b, src_path) });
         \\    var walker = dir.walk(b.allocator) catch return;
         \\    defer walker.deinit();
         \\    while (walker.next(b.graph.io) catch null) |entry| {
@@ -1774,21 +1794,23 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\}
         \\
         \\fn externalModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, native_sdk_path: []const u8, path: []const u8) *std.Build.Module {
-        \\    return b.createModule(.{
+        \\    const mod = b.createModule(.{
         \\        .root_source_file = nativeSdkPath(b, native_sdk_path, path),
         \\        .target = target,
         \\        .optimize = optimize,
         \\    });
+        \\    mod.addImport("reflection", b.modules.get("reflection").?);
+        \\    return mod;
         \\}
         \\
         \\fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.Build.Module, exe: *std.Build.Step.Compile, platform: PlatformOption, web_engine: WebEngineOption, web_layer: bool, native_sdk_path: []const u8, cef_dir: []const u8, cef_auto_install: bool) void {
         \\    if (platform == .macos) {
         \\        switch (web_engine) {
         \\            .system => {
-        \\                const sdk_include = if (b.sysroot) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";
-        \\                const flags: []const []const u8 = if (b.sysroot) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0" };
+        \\                const sdk_include = if (macosSdkPath(b)) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";
+        \\                const flags: []const []const u8 = if (macosSdkPath(b)) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0" };
         \\                app_mod.addCSourceFile(.{ .file = nativeSdkPath(b, native_sdk_path, "src/platform/macos/appkit_host.m"), .flags = flags });
-        \\                app_mod.linkFramework("WebKit", .{});
+        \\                linkMacosFramework(b, app_mod, "WebKit", .{});
         \\            },
         \\            .chromium => {
         \\                const cef_check = addCefCheck(b, target, cef_dir);
@@ -1802,31 +1824,31 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\                // The SDK's usr/include must stay a system include dir (searched after zig's
         \\                // bundled libc++/libc headers). A plain -I shadows libc++'s <string.h>/<math.h>
         \\                // wrappers in ObjC++ and surfaces SDK nullability gaps as a diagnostic flood.
-        \\                const sdk_include = if (b.sysroot) |sysroot| b.fmt("-isystem{s}/usr/include", .{sysroot}) else "";
-        \\                const flags: []const []const u8 = if (b.sysroot) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include, include_arg, define_arg } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", include_arg, define_arg };
+        \\                const sdk_include = if (macosSdkPath(b)) |sysroot| b.fmt("-isystem{s}/usr/include", .{sysroot}) else "";
+        \\                const flags: []const []const u8 = if (macosSdkPath(b)) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include, include_arg, define_arg } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", include_arg, define_arg };
         \\                app_mod.addCSourceFile(.{ .file = nativeSdkPath(b, native_sdk_path, "src/platform/macos/cef_host.mm"), .flags = flags });
         \\                app_mod.addObjectFile(b.path(b.fmt("{s}/libcef_dll_wrapper/libcef_dll_wrapper.a", .{cef_dir})));
         \\                app_mod.addFrameworkPath(b.path(b.fmt("{s}/Release", .{cef_dir})));
-        \\                app_mod.linkFramework("Chromium Embedded Framework", .{});
+        \\                app_mod.addObjectFile(b.path(b.fmt("{s}/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{cef_dir})));
         \\                app_mod.addRPath(.{ .cwd_relative = "@executable_path/Frameworks" });
         \\            },
         \\        }
-        \\        if (b.sysroot) |sysroot| {
+        \\        if (macosSdkPath(b)) |sysroot| {
         \\            app_mod.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
         \\        }
-        \\        app_mod.linkFramework("AppKit", .{});
-        \\        app_mod.linkFramework("AVFoundation", .{});
-        \\        app_mod.linkFramework("CoreMedia", .{});
-        \\        app_mod.linkFramework("ScreenCaptureKit", .{ .weak = true });
-        \\        app_mod.linkFramework("CoreVideo", .{});
-        \\        app_mod.linkFramework("MediaToolbox", .{});
-        \\        app_mod.linkFramework("Accelerate", .{});
-        \\        app_mod.linkFramework("Foundation", .{});
-        \\        app_mod.linkFramework("CoreText", .{});
-        \\        app_mod.linkFramework("UniformTypeIdentifiers", .{});
-        \\        app_mod.linkFramework("Security", .{});
-        \\        app_mod.linkFramework("Metal", .{});
-        \\        app_mod.linkFramework("QuartzCore", .{});
+        \\        linkMacosFramework(b, app_mod, "AppKit", .{});
+        \\        linkMacosFramework(b, app_mod, "AVFoundation", .{});
+        \\        linkMacosFramework(b, app_mod, "CoreMedia", .{});
+        \\        linkMacosFramework(b, app_mod, "ScreenCaptureKit", .{ .weak = true });
+        \\        linkMacosFramework(b, app_mod, "CoreVideo", .{});
+        \\        linkMacosFramework(b, app_mod, "MediaToolbox", .{});
+        \\        linkMacosFramework(b, app_mod, "Accelerate", .{});
+        \\        linkMacosFramework(b, app_mod, "Foundation", .{});
+        \\        linkMacosFramework(b, app_mod, "CoreText", .{});
+        \\        linkMacosFramework(b, app_mod, "UniformTypeIdentifiers", .{});
+        \\        linkMacosFramework(b, app_mod, "Security", .{});
+        \\        linkMacosFramework(b, app_mod, "Metal", .{});
+        \\        linkMacosFramework(b, app_mod, "QuartzCore", .{});
         \\        app_mod.linkSystemLibrary("c", .{});
         \\        if (web_engine == .chromium) app_mod.linkSystemLibrary("c++", .{});
         \\    } else if (platform == .linux) {
@@ -1965,7 +1987,7 @@ fn buildZig(allocator: std.mem.Allocator, names: TemplateNames, framework_path: 
         \\    if (!web_layer) return;
         \\    if (target.result.os.tag != .windows) return;
         \\    const loader_dir = std.fs.path.dirname(webView2LoaderSubPath(target)).?;
-        \\    run.addPathDir(b.pathFromRoot(b.pathJoin(&.{ native_sdk_path, loader_dir })));
+        \\    addRunPathDir(run, rootPath(b, b.pathJoin(&.{ native_sdk_path, loader_dir })));
         \\}
         \\
         \\fn addCefRuntimeRunFiles(b: *std.Build, target: std.Build.ResolvedTarget, run: *std.Build.Step.Run, exe: *std.Build.Step.Compile, web_engine: WebEngineOption, cef_dir: []const u8) void {
@@ -2248,7 +2270,7 @@ fn buildZon(allocator: std.mem.Allocator, names: TemplateNames) ![]const u8 {
     try out.appendSlice(allocator,
         \\,
         \\    .version = "0.1.0",
-        \\    .minimum_zig_version = "0.16.0",
+        \\    .minimum_zig_version = "0.17.0-dev.2375+d8aab4878",
         \\    .dependencies = .{},
         \\    .paths = .{ "build.zig", "build.zig.zon", "src", "assets", "frontend", "app.json", "README.md" },
         \\}
@@ -4196,7 +4218,7 @@ test "writeDefaultApp emits Vite project files" {
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "\"native\", \"dev\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "dev.step.dependOn(&frontend_install.step)") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "addWebView2RuntimeRunFiles(b, target, dev, web_engine, web_layer, native_sdk_path)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "package.setEnvironmentVariable(\"NATIVE_SDK_PATH\", b.pathFromRoot(native_sdk_path))") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "package.setEnvironmentVariable(\"NATIVE_SDK_PATH\", rootPath(b, native_sdk_path))") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "chromium") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "cef-dir") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "src/platform/macos/cef_host.mm") != null);
@@ -4248,7 +4270,7 @@ test "writeDefaultApp emits Vite project files" {
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "if (!web_layer) return;") != null);
     // Release-shaped Windows exes must be GUI-subsystem (same posture as
     // the SDK build graph) so packaged scaffold apps never flash a console.
-    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "if (target.result.os.tag == .windows and optimize != .Debug) {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "if (target.result.os.tag == .windows and optimize != .debug) {") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "exe.subsystem = .windows;") != null);
     // The package step wraps its own release-shaped exe: Debug stays the
     // run/dev default, but `zig build package` must never ship a Debug
@@ -4257,10 +4279,10 @@ test "writeDefaultApp emits Vite project files" {
     // package exe's actual mode, and the exe carries its own
     // subsystem-posture check keyed on that mode.
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "const optimize_request = b.option(std.builtin.OptimizeMode, \"optimize\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "const optimize = optimizeMode(b, optimize_request, .Debug);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "const package_optimize = optimizeMode(b, optimize_request, .ReleaseFast);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "const optimize = optimizeMode(b, optimize_request, .debug);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "const package_optimize = optimizeMode(b, optimize_request, .fast);") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "const package_exe = if (package_optimize == optimize) exe else pkg: {") != null);
-    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "if (target.result.os.tag == .windows and package_optimize != .Debug) {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "if (target.result.os.tag == .windows and package_optimize != .debug) {") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "built.subsystem = .windows;") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "package.addFileArg(package_exe.getEmittedBin());") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_zig_text, "package.step.dependOn(&package_exe.step);") != null);
@@ -4647,7 +4669,7 @@ test "writeDefaultApp emits a CI workflow for native apps" {
     try std.testing.expect(std.mem.indexOf(u8, ci_yaml_text, "  test:") != null);
     try std.testing.expect(std.mem.indexOf(u8, ci_yaml_text, "  smoke:") != null);
     try std.testing.expect(std.mem.indexOf(u8, ci_yaml_text, "vercel-labs/setup-zig@v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ci_yaml_text, "version: 0.16.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ci_yaml_text, "version: 0.17.0-dev.2375+d8aab4878") != null);
     try std.testing.expect(std.mem.indexOf(u8, ci_yaml_text, "zig build test -Dplatform=null") != null);
     // The smoke job builds with automation, launches under Xvfb, and drives
     // the snapshot: the binary name comes from the template context. A

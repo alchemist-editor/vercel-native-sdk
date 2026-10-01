@@ -39,8 +39,8 @@ pub fn drawImageFingerprint(image: DrawImage) u64 {
     var hash = resourceHashTag("image");
     hash = resourceHashU64(hash, image.image_id);
     hash = resourceHashOptionalRect(hash, image.src);
-    hash = resourceHashEnum(hash, @intFromEnum(image.fit));
-    hash = resourceHashEnum(hash, @intFromEnum(image.sampling));
+    hash = resourceHashEnum(hash, @backingInt(image.fit));
+    hash = resourceHashEnum(hash, @backingInt(image.sampling));
     return hash;
 }
 
@@ -145,13 +145,13 @@ fn resourceHashOptionalTextLayoutOptions(hash: u64, options: ?TextLayoutOptions)
         var next = resourceHashU8(hash, 1);
         next = resourceHashF32(next, nonNegative(value.max_width));
         next = resourceHashF32(next, nonNegative(value.line_height));
-        next = resourceHashEnum(next, @intFromEnum(value.wrap));
-        next = resourceHashEnum(next, @intFromEnum(value.alignment));
+        next = resourceHashEnum(next, @backingInt(value.wrap));
+        next = resourceHashEnum(next, @backingInt(value.alignment));
         // The default overflow stays out of the hash so fingerprints of
         // runs untouched by elision keep their pinned values; a
         // non-default (clip) run hashes apart from its elided twin.
         if (value.overflow != .ellipsis) {
-            next = resourceHashEnum(resourceHashBytes(next, "text_overflow"), @intFromEnum(value.overflow));
+            next = resourceHashEnum(resourceHashBytes(next, "text_overflow"), @backingInt(value.overflow));
         }
         return next;
     }
@@ -201,7 +201,7 @@ fn resourceHashCanvasCommand(hash: u64, command: anytype) u64 {
             next = resourceHashStroke(next, value.stroke);
             // The cap changes rendered pixels at open subpath ends, so a
             // cap flip must invalidate any cached render keyed off this.
-            next = resourceHashEnum(next, @intFromEnum(value.cap));
+            next = resourceHashEnum(next, @backingInt(value.cap));
         },
         .draw_image => |value| {
             next = resourceHashOptionalObjectId(next, nonZeroObjectId(value.id));

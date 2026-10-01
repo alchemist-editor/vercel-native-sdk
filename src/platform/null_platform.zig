@@ -381,35 +381,35 @@ pub const NullPlatform = struct {
     menu_item_count: usize = 0,
     shortcuts: [max_shortcuts]Shortcut = undefined,
     shortcut_count: usize = 0,
-    window_sources: [max_windows]?WebViewSource = [_]?WebViewSource{null} ** max_windows,
+    window_sources: [max_windows]?WebViewSource = @as([max_windows]?WebViewSource, @splat(null)),
     windows: [max_windows]WindowInfo = undefined,
     /// Captured `WindowOptions.resizable` per created window, indexed
     /// like `windows` — `WindowInfo` does not carry it, and tests need
     /// to assert the flag survives to the platform seam (the macOS host
     /// used to drop it at the C ABI).
-    window_resizable: [max_windows]bool = [_]bool{true} ** max_windows,
+    window_resizable: [max_windows]bool = @as([max_windows]bool, @splat(true)),
     /// Captured `WindowOptions.titlebar` per created window, indexed
     /// like `windows` — same seam-regression purpose as
     /// `window_resizable` (the startup create used to hardcode it).
-    window_titlebar: [max_windows]WindowTitlebarStyle = [_]WindowTitlebarStyle{.standard} ** max_windows,
+    window_titlebar: [max_windows]WindowTitlebarStyle = @as([max_windows]WindowTitlebarStyle, @splat(.standard)),
     /// Captured independently from `restore_state`: persistence opt-in does
     /// not mean a frame was actually found and restored.
-    window_placement: [max_windows]WindowInitialPlacement = [_]WindowInitialPlacement{.default} ** max_windows,
-    window_restore_policy: [max_windows]WindowRestorePolicy = [_]WindowRestorePolicy{.clamp_to_visible_screen} ** max_windows,
-    window_transparent: [max_windows]bool = [_]bool{false} ** max_windows,
-    window_always_on_top: [max_windows]bool = [_]bool{false} ** max_windows,
-    window_click_through: [max_windows]bool = [_]bool{false} ** max_windows,
-    window_activate_on_show: [max_windows]bool = [_]bool{true} ** max_windows,
-    window_allows_fullscreen: [max_windows]bool = [_]bool{true} ** max_windows,
+    window_placement: [max_windows]WindowInitialPlacement = @as([max_windows]WindowInitialPlacement, @splat(.default)),
+    window_restore_policy: [max_windows]WindowRestorePolicy = @as([max_windows]WindowRestorePolicy, @splat(.clamp_to_visible_screen)),
+    window_transparent: [max_windows]bool = @as([max_windows]bool, @splat(false)),
+    window_always_on_top: [max_windows]bool = @as([max_windows]bool, @splat(false)),
+    window_click_through: [max_windows]bool = @as([max_windows]bool, @splat(false)),
+    window_activate_on_show: [max_windows]bool = @as([max_windows]bool, @splat(true)),
+    window_allows_fullscreen: [max_windows]bool = @as([max_windows]bool, @splat(true)),
     /// Minimize calls per window (`minimize_window_fn`), indexed like
     /// `windows`: the observable seam for app-drawn minimize controls —
     /// the null platform has no Dock to genie into, so the count IS the
     /// behavior tests pin.
-    window_minimize_count: [max_windows]u32 = [_]u32{0} ** max_windows,
-    window_hide_count: [max_windows]u32 = [_]u32{0} ** max_windows,
+    window_minimize_count: [max_windows]u32 = @as([max_windows]u32, @splat(0)),
+    window_hide_count: [max_windows]u32 = @as([max_windows]u32, @splat(0)),
     /// Show calls per window (`show_window_fn`), indexed like `windows`
     /// — the counterpart seam (tray "Open", the un-hide verb).
-    window_show_count: [max_windows]u32 = [_]u32{0} ** max_windows,
+    window_show_count: [max_windows]u32 = @as([max_windows]u32, @splat(0)),
     /// Graceful-quit requests (`quit_app_fn`). The real hosts QUEUE
     /// the stop onto their run loop (macOS dispatch_async, GTK
     /// g_idle_add, Windows PostQuitMessage) so `app_shutdown` emits
@@ -432,16 +432,16 @@ pub const NullPlatform = struct {
     /// macOS/Windows hosts. Defaults to false — a modeled window is on
     /// glass unless a test says otherwise — so window-less harnesses
     /// and every suite that never occludes keep their reports.
-    window_occluded: [max_windows]bool = [_]bool{false} ** max_windows,
+    window_occluded: [max_windows]bool = @as([max_windows]bool, @splat(false)),
     /// Captured `WindowOptions.show` per created window: the
     /// present-before-show policy that must survive to the create seam.
-    window_show: [max_windows]types.WindowShowMode = [_]types.WindowShowMode{.immediate} ** max_windows,
+    window_show: [max_windows]types.WindowShowMode = @as([max_windows]types.WindowShowMode, @splat(.immediate)),
     /// Captured `WindowOptions.close_policy` per created window — the
     /// seam-regression capture (like `window_resizable`) AND the
     /// modeled behavior: `userCloseWindow` consults it exactly like the
     /// real hosts' close delegates, hiding instead of closing under
     /// `.hide`.
-    window_close_policy: [max_windows]types.WindowClosePolicy = [_]types.WindowClosePolicy{.quit} ** max_windows,
+    window_close_policy: [max_windows]types.WindowClosePolicy = @as([max_windows]types.WindowClosePolicy, @splat(.quit)),
     /// Test seam: make the NEXT `close_window_fn` call fail with
     /// `error.CloseFailed` (the real hosts' refusal), consuming the
     /// flag — the injection runtime rollback tests use to assert
@@ -462,25 +462,25 @@ pub const NullPlatform = struct {
     /// window — the content min-size floor that must survive to the
     /// create seam (macOS applies it as `contentMinSize`); same
     /// seam-regression purpose as `window_resizable`.
-    window_min_width: [max_windows]f32 = [_]f32{0} ** max_windows,
-    window_min_height: [max_windows]f32 = [_]f32{0} ** max_windows,
+    window_min_width: [max_windows]f32 = @as([max_windows]f32, @splat(0)),
+    window_min_height: [max_windows]f32 = @as([max_windows]f32, @splat(0)),
     /// Live visibility per window, modeling the macOS host: immediate
     /// windows are visible at create; `.on_first_present` windows stay
     /// hidden until their first gpu-surface present (or an explicit
     /// `focusWindow`) shows them.
-    window_visible: [max_windows]bool = [_]bool{false} ** max_windows,
+    window_visible: [max_windows]bool = @as([max_windows]bool, @splat(false)),
     /// The present-before-show ORDERING seam: a per-platform op counter
     /// stamps when each window's first gpu-surface present landed and
     /// when it became visible (0 = never), so tests can assert the
     /// present strictly precedes visibility.
     show_op_seq: usize = 0,
-    window_first_present_seq: [max_windows]usize = [_]usize{0} ** max_windows,
-    window_shown_seq: [max_windows]usize = [_]usize{0} ** max_windows,
+    window_first_present_seq: [max_windows]usize = @as([max_windows]usize, @splat(0)),
+    window_shown_seq: [max_windows]usize = @as([max_windows]usize, @splat(0)),
     /// Window ids handed to `startWindowDrag`, in call order: the
     /// window-drag region channel's recording seam. A double-click is
     /// two recorded calls (the host side decides drag vs zoom from the
     /// native event's click count).
-    window_drag_starts: [max_windows * 4]WindowId = [_]WindowId{0} ** (max_windows * 4),
+    window_drag_starts: [max_windows * 4]WindowId = @as([max_windows * 4]WindowId, @splat(0)),
     window_drag_start_count: usize = 0,
     /// Chrome overlay geometry `windowChrome` reports for every window
     /// — settable so tests model a hidden-titlebar macOS host (insets
@@ -526,7 +526,7 @@ pub const NullPlatform = struct {
     notification_action_label_len: usize = 0,
     notification_action_command: [max_notification_action_command_bytes]u8 = undefined,
     notification_action_command_len: usize = 0,
-    notifications: [max_null_notifications]NullNotification = [_]NullNotification{.{}} ** max_null_notifications,
+    notifications: [max_null_notifications]NullNotification = @as([max_null_notifications]NullNotification, @splat(.{})),
     notification_count: usize = 0,
     notification_replacement_count: usize = 0,
     clipboard_mime_type: [max_clipboard_mime_type_bytes]u8 = undefined,
@@ -551,7 +551,7 @@ pub const NullPlatform = struct {
     /// fixed offset so suites can pin exact output without ambient state.
     local_time_offset_minutes: i16 = 0,
     webview_navigate_count: usize = 0,
-    status_items: [max_status_items]NullStatusItem = [_]NullStatusItem{.{}} ** max_status_items,
+    status_items: [max_status_items]NullStatusItem = @as([max_status_items]NullStatusItem, @splat(.{})),
     status_item_count: usize = 0,
     tray_create_count: usize = 0,
     tray_shell_update_count: usize = 0,
@@ -593,7 +593,7 @@ pub const NullPlatform = struct {
     /// First bytes of the last binary packet payload (magic + version +
     /// header), enough for tests to pin the wire framing without
     /// retaining whole packets.
-    gpu_surface_packet_present_binary_prefix: [16]u8 = [_]u8{0} ** 16,
+    gpu_surface_packet_present_binary_prefix: [16]u8 = @as([16]u8, @splat(0)),
     gpu_surface_packet_present_binary_count: usize = 0,
     /// Full copy of the last binary packet payload, so patch tests can
     /// decode the wire bytes and replay them against a reference retained
@@ -615,7 +615,7 @@ pub const NullPlatform = struct {
     /// without a real GPU. Disable `gpu_surface_image_uploads` to model a
     /// platform without the seam (`error.UnsupportedService`).
     gpu_surface_image_uploads: bool = true,
-    gpu_surface_images: [max_gpu_surface_images]NullGpuSurfaceImage = [_]NullGpuSurfaceImage{.{}} ** max_gpu_surface_images,
+    gpu_surface_images: [max_gpu_surface_images]NullGpuSurfaceImage = @as([max_gpu_surface_images]NullGpuSurfaceImage, @splat(.{})),
     gpu_surface_image_count: usize = 0,
     gpu_surface_image_upload_count: usize = 0,
     gpu_surface_image_remove_count: usize = 0,
@@ -639,7 +639,7 @@ pub const NullPlatform = struct {
     /// Per-instance where the real host tables are per-process: tests
     /// model "one process" by pointing every runtime at ONE instance.
     gpu_surface_font_registrations: bool = false,
-    gpu_surface_fonts: [max_gpu_surface_fonts]NullGpuSurfaceFont = [_]NullGpuSurfaceFont{.{}} ** max_gpu_surface_fonts,
+    gpu_surface_fonts: [max_gpu_surface_fonts]NullGpuSurfaceFont = @as([max_gpu_surface_fonts]NullGpuSurfaceFont, @splat(.{})),
     gpu_surface_font_count: usize = 0,
     gpu_surface_font_register_count: usize = 0,
     /// The mirror's monotonic token counter, pre-incremented per
@@ -659,7 +659,7 @@ pub const NullPlatform = struct {
     gpu_surface_font_unregister_count: usize = 0,
     gpu_surface_font_unregister_id: u64 = 0,
     gpu_surface_font_unregister_token: u64 = 0,
-    timers: [max_null_timers]NullTimer = [_]NullTimer{.{}} ** max_null_timers,
+    timers: [max_null_timers]NullTimer = @as([max_null_timers]NullTimer, @splat(.{})),
     timer_count: usize = 0,
     timer_start_count: usize = 0,
     timer_cancel_count: usize = 0,
@@ -696,7 +696,7 @@ pub const NullPlatform = struct {
     /// A `.loaded` acknowledgment waiting to be taken — set by a
     /// successful `audioLoad`, consumed by `takeAudioLoaded`.
     audio_loaded_pending: bool = false,
-    audio_durations: [max_null_audio_durations]NullAudioDuration = [_]NullAudioDuration{.{}} ** max_null_audio_durations,
+    audio_durations: [max_null_audio_durations]NullAudioDuration = @as([max_null_audio_durations]NullAudioDuration, @splat(.{})),
     audio_duration_count: usize = 0,
     /// The fake track cache: hashes of URLs whose streamed playback ran
     /// to completion. `audioLoadUrl` answers `.cache` for these — the
@@ -713,7 +713,7 @@ pub const NullPlatform = struct {
     audio_volume_count: usize = 0,
     microphone_capture: bool = true,
     system_audio_capture: bool = true,
-    audio_captures: [2]NullAudioCapture = [_]NullAudioCapture{.{}} ** 2,
+    audio_captures: [2]NullAudioCapture = @as([2]NullAudioCapture, @splat(.{})),
     /// Whether this modeled host has a video decoder. On by default (the
     /// fake below stands in for AVFoundation); tests modelling a staged
     /// host (Windows/Linux today) set it false BEFORE `platform()` so
@@ -733,7 +733,7 @@ pub const NullPlatform = struct {
     /// A `.loaded` acknowledgment waiting to be taken — set by a
     /// successful video load, consumed by `takeVideoLoaded`.
     video_loaded_pending: bool = false,
-    video_metas: [max_null_video_metas]NullVideoMeta = [_]NullVideoMeta{.{}} ** max_null_video_metas,
+    video_metas: [max_null_video_metas]NullVideoMeta = @as([max_null_video_metas]NullVideoMeta, @splat(.{})),
     video_meta_count: usize = 0,
     video_load_count: usize = 0,
     video_load_url_count: usize = 0,
@@ -2030,7 +2030,7 @@ pub const NullPlatform = struct {
         const self: *NullPlatform = @ptrCast(@alignCast(context.?));
         if ((source == .microphone and !self.microphone_capture) or
             (source == .system and !self.system_audio_capture)) return error.UnsupportedService;
-        const capture = &self.audio_captures[@intFromEnum(source)];
+        const capture = &self.audio_captures[@backingInt(source)];
         capture.active = true;
         capture.format = format;
         capture.sink = sink;
@@ -2040,7 +2040,7 @@ pub const NullPlatform = struct {
 
     fn audioCaptureStop(context: ?*anyopaque, source: types.AudioCaptureSource) anyerror!void {
         const self: *NullPlatform = @ptrCast(@alignCast(context.?));
-        const capture = &self.audio_captures[@intFromEnum(source)];
+        const capture = &self.audio_captures[@backingInt(source)];
         capture.active = false;
         capture.sink = .{};
         capture.stop_count += 1;
@@ -2048,7 +2048,7 @@ pub const NullPlatform = struct {
 
     /// Push deterministic PCM through a live fake capture.
     pub fn pushAudioCapture(self: *NullPlatform, source: types.AudioCaptureSource, timestamp_ns: u64, pcm_s16le: []const u8) types.AudioCapturePushResult {
-        const capture = &self.audio_captures[@intFromEnum(source)];
+        const capture = &self.audio_captures[@backingInt(source)];
         if (!capture.active) return .closed;
         const stride = @as(usize, capture.format.channels) * 2;
         if (stride == 0 or pcm_s16le.len % stride != 0) return .dropped_oversized;
@@ -2063,7 +2063,7 @@ pub const NullPlatform = struct {
     }
 
     pub fn failAudioCapture(self: *NullPlatform, source: types.AudioCaptureSource) types.AudioCapturePushResult {
-        const capture = &self.audio_captures[@intFromEnum(source)];
+        const capture = &self.audio_captures[@backingInt(source)];
         if (!capture.active) return .closed;
         capture.active = false;
         return capture.sink.push(.{ .kind = .failed, .source = source, .format = capture.format });

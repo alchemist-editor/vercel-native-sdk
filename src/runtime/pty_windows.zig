@@ -1383,7 +1383,7 @@ fn fdToHandle(fd: c_int) win.HANDLE {
 }
 
 fn lastError() u32 {
-    return @intFromEnum(std.os.windows.GetLastError());
+    return @backingInt(std.os.windows.GetLastError());
 }
 
 /// Self-contained Win32 surface, the file's `extern "c"` analog: only

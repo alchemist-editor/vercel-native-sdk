@@ -44,8 +44,8 @@ test "refresh spawns uname -srm in collect mode and enters probing" {
     try std.testing.expectEqual(@as(u8, 2), spawn.arg_count);
     try std.testing.expectEqualStrings("/usr/bin/uname", spawn.arg(0));
     try std.testing.expectEqualStrings("-srm", spawn.arg(1));
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).info_done), spawn.exit_tag);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).info_failed), spawn.err_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).info_done), spawn.exit_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).info_failed), spawn.err_tag);
     try std.testing.expect(g_model.phase == .probing);
 }
 

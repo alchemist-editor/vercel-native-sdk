@@ -250,7 +250,7 @@ test "a grapheme cluster the emulator holds paints whole - down to the last mark
     // grapheme storage bounds a cluster at roughly 256 scalars; the
     // scratch stays store-sized so larger clusters keep painting whole
     // as that bound moves.)
-    const cluster = "a" ++ ("\u{0301}" ** 200) ++ "\u{20DD}";
+    const cluster = "a" ++ (std.mem.asBytes(&@as([200]["\u{0301}".len]u8, @splat("\u{0301}".*)))) ++ "\u{20DD}";
     session.feed(cluster);
 
     var commands: [512]canvas.CanvasCommand = undefined;
@@ -280,7 +280,7 @@ test "a concealed row never blanks the rows painted after it" {
     defer session.destroy();
     // Row 0: sixty concealed cells (SGR 8) — painting emits NO text for
     // them. Row 1: ordinary visible text.
-    session.feed("\x1b[8m" ++ ("x" ** 60) ++ "\x1b[0m\r\nvisible\r\n");
+    session.feed("\x1b[8m" ++ (std.mem.asBytes(&@as([60]["x".len]u8, @splat("x".*)))) ++ "\x1b[0m\r\nvisible\r\n");
 
     var commands: [512]canvas.CanvasCommand = undefined;
     var builder = canvas.Builder.init(&commands);
@@ -1129,7 +1129,7 @@ test "retained replies keep accumulating while further output feeds - the buffer
     // clearing or dropping would strand a child blocked on an answer.
     app_state.effects.fake_pty_write_full = true;
     app_state.model.outbound_len = app_state.model.outbound_buffer.len;
-    const burst = "\x1b[6n" ** 6000; // ~36 KiB of replies, > 16 KiB initial
+    const burst = std.mem.asBytes(&@as([6000]["\x1b[6n".len]u8, @splat("\x1b[6n".*))); // ~36 KiB of replies, > 16 KiB initial
     session.feed(burst);
     app.moveResponsesToOutbound(&app_state.model, &app_state.effects);
     try testing.expectEqual(@as(u32, 0), session.responses_dropped);

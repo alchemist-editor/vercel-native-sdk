@@ -379,7 +379,7 @@ const WriteCursor = struct {
     }
 
     fn writeEnum(self: *WriteCursor, value: anytype) JournalError!void {
-        const int_value = @intFromEnum(value);
+        const int_value = @backingInt(value);
         if (int_value < 0 or int_value > std.math.maxInt(u8)) return error.JournalRecordOverBudget;
         try self.writeByte(@intCast(int_value));
     }
@@ -743,7 +743,7 @@ pub fn encodeEvent(event: platform.Event, buffer: []u8) JournalError![]const u8 
             try cursor.writeInt(u64, action.id);
             // The verb rides i32, not the u8 every other enum takes — a
             // hand-written width stated in `formatLayoutDescription`.
-            try cursor.writeInt(i32, @intFromEnum(action.action));
+            try cursor.writeInt(i32, @backingInt(action.action));
             try cursor.writeStr(action.text);
             try cursor.writeBool(action.selection != null);
             if (action.selection) |selection| {
@@ -1318,7 +1318,7 @@ pub fn decodeEnd(bytes: []const u8) JournalError!End {
 pub fn frameRecord(kind: RecordKind, payload: []const u8, buffer: []u8) JournalError![]const u8 {
     if (payload.len > max_session_record_bytes) return error.JournalRecordOverBudget;
     if (buffer.len < 5 + payload.len) return error.JournalRecordOverBudget;
-    buffer[0] = @intFromEnum(kind);
+    buffer[0] = @backingInt(kind);
     std.mem.writeInt(u32, buffer[1..5], @intCast(payload.len), .little);
     @memcpy(buffer[5 .. 5 + payload.len], payload);
     return buffer[0 .. 5 + payload.len];
@@ -2015,7 +2015,7 @@ test "reader refuses bad magic and format skew" {
     var legacy: [preamble_len]u8 = undefined;
     @memcpy(legacy[0..magic.len], magic);
     std.mem.writeInt(u32, legacy[magic.len..][0..4], 8, .little);
-    legacy[magic.len + 4] = @intFromEnum(RecordKind.header);
+    legacy[magic.len + 4] = @backingInt(RecordKind.header);
     std.mem.writeInt(u24, legacy[magic.len + 5 ..][0..3], 42, .little);
     try testing.expectError(error.JournalFormatMismatch, Reader.init(&legacy));
     // The teaching says whose build differs and what to do about it,
@@ -2097,7 +2097,7 @@ test "reader refuses count mismatches and over-budget records" {
     // any payload is touched.
     var hostile: [preamble_len + 5]u8 = undefined;
     _ = writePreamble(&hostile);
-    hostile[preamble_len] = @intFromEnum(RecordKind.header);
+    hostile[preamble_len] = @backingInt(RecordKind.header);
     std.mem.writeInt(u32, hostile[preamble_len + 1 ..][0..4], std.math.maxInt(u32), .little);
     var hostile_reader = try Reader.init(&hostile);
     try testing.expectError(error.JournalRecordOverBudget, hostile_reader.next());

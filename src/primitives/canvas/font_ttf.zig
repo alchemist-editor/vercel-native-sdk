@@ -607,7 +607,7 @@ fn diagnoseParseFailure(bytes: []const u8) []const u8 {
         .{ .tag = "hmtx", .teach = "missing required table 'hmtx' (horizontal advances)" },
         .{ .tag = "hhea", .teach = "missing required table 'hhea' (horizontal header)" },
     };
-    var found = [_]bool{false} ** required.len;
+    var found = @as([required.len]bool, @splat(false));
     var index: usize = 0;
     while (index < table_count) : (index += 1) {
         const record = 12 + index * 16;

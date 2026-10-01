@@ -373,6 +373,7 @@
 //! producer is the compiled core's own runtime builders, so a bad record is a
 //! build-pipeline bug the app author must see immediately.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const runtime_effects = @import("effects.zig");
 const platform = @import("../platform/root.zig");
@@ -471,7 +472,7 @@ pub fn TsCoreHost(comptime core: type) type {
             decode_fn: *const fn (operation: u16, tag: u8, bytes: []const u8) Msg,
         };
 
-        const msg_arms = @typeInfo(Msg).@"union".fields;
+        const msg_arms = reflection.fieldsOf(@typeInfo(Msg).@"union");
 
         const update_returns_cmd = @typeInfo(@TypeOf(core.update)).@"fn".return_type.? != *const Model;
         const init_returns_cmd = @typeInfo(@TypeOf(core.initialModel)).@"fn".return_type.? != *const Model;
@@ -3206,9 +3207,9 @@ pub fn TsCoreHost(comptime core: type) type {
             inline for (msg_arms, 0..) |arm, index| {
                 if (tag == index) {
                     const info = @typeInfo(arm.type);
-                    if (comptime info == .@"struct" and info.@"struct".fields.len == 3) {
+                    if (comptime info == .@"struct" and reflection.fieldsOf(info.@"struct").len == 3) {
                         var payload: arm.type = undefined;
-                        inline for (info.@"struct".fields) |field| {
+                        inline for (reflection.fieldsOf(info.@"struct")) |field| {
                             if (comptime std.mem.eql(u8, field.name, "exists") and field.type == bool) {
                                 @field(payload, field.name) = result.exists;
                             } else if (comptime std.mem.eql(u8, field.name, "size") and (field.type == i64 or field.type == u64 or field.type == f64)) {
@@ -3281,8 +3282,8 @@ pub fn TsCoreHost(comptime core: type) type {
         fn reconcileSubscriptions(fx: *Fx) void {
             if (comptime !has_subscriptions) return;
             const subs = core.subscriptions(model_root);
-            var seen_timers = [_]bool{false} ** timers.len;
-            var seen_db = [_]bool{false} ** dbs.len;
+            var seen_timers = @as([timers.len]bool, @splat(false));
+            var seen_db = @as([dbs.len]bool, @splat(false));
 
             // Free live DB slots whose wire keys disappeared before the pass
             // allocates replacements. Otherwise two independently valid sets
@@ -3409,7 +3410,7 @@ pub fn TsCoreHost(comptime core: type) type {
         /// Reconciliation uses this pre-pass to retire genuinely stale slots
         /// before it allocates any new ones.
         fn retainedDbSubscriptions(subs: []const u8) [runtime_effects.max_db_effects]bool {
-            var retained = [_]bool{false} ** runtime_effects.max_db_effects;
+            var retained = @as([runtime_effects.max_db_effects]bool, @splat(false));
             var at: usize = 0;
             while (at < subs.len) switch (takeByte(subs, &at)) {
                 0x01 => {
@@ -3536,7 +3537,7 @@ pub fn TsCoreHost(comptime core: type) type {
                 if (tag == index) {
                     const arm_info = @typeInfo(arm.type);
                     if (comptime arm_info == .@"struct") {
-                        const fields = arm_info.@"struct".fields;
+                        const fields = reflection.fieldsOf(arm_info.@"struct");
                         const record_shape = comptime blk: {
                             if (fields.len != 2) break :blk false;
                             var bytes_fields = 0;
@@ -3588,7 +3589,7 @@ pub fn TsCoreHost(comptime core: type) type {
         fn audioArmShape(comptime T: type) bool {
             const info = @typeInfo(T);
             if (info != .@"struct") return false;
-            const fields = info.@"struct".fields;
+            const fields = reflection.fieldsOf(info.@"struct");
             if (fields.len != 6) return false;
             var ok = true;
             for (fields) |f| {
@@ -3612,8 +3613,8 @@ pub fn TsCoreHost(comptime core: type) type {
         /// app's declaration order never matters to the wire).
         fn audioStateValue(comptime E: type, kind: runtime_effects.EffectAudioEventKind) E {
             const name = @tagName(kind);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: an audio event kind has no member in the event arm's state union - the frontend's own shape check should have stopped this build");
         }
@@ -3627,7 +3628,7 @@ pub fn TsCoreHost(comptime core: type) type {
             inline for (msg_arms, 0..) |arm, index| {
                 if (tag == index) {
                     if (comptime audioArmShape(arm.type)) {
-                        const fields = @typeInfo(arm.type).@"struct".fields;
+                        const fields = reflection.fieldsOf(@typeInfo(arm.type).@"struct");
                         var payload: arm.type = undefined;
                         inline for (fields) |f| {
                             if (comptime std.mem.eql(u8, f.name, "state")) {
@@ -3662,7 +3663,7 @@ pub fn TsCoreHost(comptime core: type) type {
         fn videoArmShape(comptime T: type) bool {
             const info = @typeInfo(T);
             if (info != .@"struct") return false;
-            const fields = info.@"struct".fields;
+            const fields = reflection.fieldsOf(info.@"struct");
             if (fields.len != 7) return false;
             var ok = true;
             for (fields) |f| {
@@ -3685,8 +3686,8 @@ pub fn TsCoreHost(comptime core: type) type {
         /// by member NAME — `audioStateValue`'s twin.
         fn videoStateValue(comptime E: type, kind: runtime_effects.EffectVideoEventKind) E {
             const name = @tagName(kind);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: a video event kind has no member in the event arm's state union - the frontend's own shape check should have stopped this build");
         }
@@ -3699,7 +3700,7 @@ pub fn TsCoreHost(comptime core: type) type {
             inline for (msg_arms, 0..) |arm, index| {
                 if (tag == index) {
                     if (comptime videoArmShape(arm.type)) {
-                        const fields = @typeInfo(arm.type).@"struct".fields;
+                        const fields = reflection.fieldsOf(@typeInfo(arm.type).@"struct");
                         var payload: arm.type = undefined;
                         inline for (fields) |f| {
                             if (comptime std.mem.eql(u8, f.name, "state")) {
@@ -3731,7 +3732,7 @@ pub fn TsCoreHost(comptime core: type) type {
         fn imageArmShape(comptime T: type) bool {
             const info = @typeInfo(T);
             if (info != .@"struct") return false;
-            const fields = info.@"struct".fields;
+            const fields = reflection.fieldsOf(info.@"struct");
             if (fields.len != 5) return false;
             var ok = true;
             for (fields) |f| {
@@ -3750,8 +3751,8 @@ pub fn TsCoreHost(comptime core: type) type {
         /// matched by member NAME — `audioStateValue`'s twin.
         fn imageStateValue(comptime E: type, outcome: runtime_effects.EffectImageOutcome) E {
             const name = @tagName(outcome);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: an image outcome has no member in the result arm's state union - the frontend's own shape check should have stopped this build");
         }
@@ -3764,7 +3765,7 @@ pub fn TsCoreHost(comptime core: type) type {
             inline for (msg_arms, 0..) |arm, index| {
                 if (tag == index) {
                     if (comptime imageArmShape(arm.type)) {
-                        const fields = @typeInfo(arm.type).@"struct".fields;
+                        const fields = reflection.fieldsOf(@typeInfo(arm.type).@"struct");
                         var payload: arm.type = undefined;
                         inline for (fields) |f| {
                             if (comptime std.mem.eql(u8, f.name, "state")) {
@@ -3794,7 +3795,7 @@ pub fn TsCoreHost(comptime core: type) type {
         fn channelArmShape(comptime T: type) bool {
             const info = @typeInfo(T);
             if (info != .@"struct") return false;
-            const fields = info.@"struct".fields;
+            const fields = reflection.fieldsOf(info.@"struct");
             if (fields.len != 5) return false;
             var ok = true;
             for (fields) |f| {
@@ -3815,8 +3816,8 @@ pub fn TsCoreHost(comptime core: type) type {
         /// matched by member NAME — `imageStateValue`'s twin.
         fn channelStateValue(comptime E: type, kind: runtime_effects.EffectChannelEventKind) E {
             const name = @tagName(kind);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: a channel event kind has no member in the event arm's state union - the frontend's own shape check should have stopped this build");
         }
@@ -3833,7 +3834,7 @@ pub fn TsCoreHost(comptime core: type) type {
             inline for (msg_arms, 0..) |arm, index| {
                 if (tag == index) {
                     if (comptime channelArmShape(arm.type)) {
-                        const fields = @typeInfo(arm.type).@"struct".fields;
+                        const fields = reflection.fieldsOf(@typeInfo(arm.type).@"struct");
                         var payload: arm.type = undefined;
                         inline for (fields) |f| {
                             if (comptime std.mem.eql(u8, f.name, "state")) {
@@ -3869,7 +3870,7 @@ pub fn TsCoreHost(comptime core: type) type {
         fn audioCaptureArmShape(comptime T: type) bool {
             const info = @typeInfo(T);
             if (info != .@"struct") return false;
-            const fields = info.@"struct".fields;
+            const fields = reflection.fieldsOf(info.@"struct");
             if (fields.len != 10) return false;
             var ok = true;
             for (fields) |f| {
@@ -3895,16 +3896,16 @@ pub fn TsCoreHost(comptime core: type) type {
 
         fn audioCaptureStateValue(comptime E: type, kind: runtime_effects.EffectAudioCaptureEventKind) E {
             const name = @tagName(kind);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: an audio capture event kind has no member in the event arm's state union - the frontend's own shape check should have stopped this build");
         }
 
         fn audioCaptureSourceValue(comptime E: type, source: platform.AudioCaptureSource) E {
             const name = @tagName(source);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: an audio capture source has no member in the event arm's source union - the frontend's own shape check should have stopped this build");
         }
@@ -3913,7 +3914,7 @@ pub fn TsCoreHost(comptime core: type) type {
             inline for (msg_arms, 0..) |arm, index| {
                 if (tag == index) {
                     if (comptime audioCaptureArmShape(arm.type)) {
-                        const fields = @typeInfo(arm.type).@"struct".fields;
+                        const fields = reflection.fieldsOf(@typeInfo(arm.type).@"struct");
                         var payload: arm.type = undefined;
                         inline for (fields) |f| {
                             if (comptime std.mem.eql(u8, f.name, "state")) {
@@ -3957,7 +3958,7 @@ pub fn TsCoreHost(comptime core: type) type {
         fn ptyArmShape(comptime T: type) bool {
             const info = @typeInfo(T);
             if (info != .@"struct") return false;
-            const fields = info.@"struct".fields;
+            const fields = reflection.fieldsOf(info.@"struct");
             if (fields.len != 7) return false;
             var ok = true;
             for (fields) |f| {
@@ -3984,8 +3985,8 @@ pub fn TsCoreHost(comptime core: type) type {
         /// matched by member NAME — `channelStateValue`'s twin.
         fn ptyStateValue(comptime E: type, kind: runtime_effects.EffectPtyEventKind) E {
             const name = @tagName(kind);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: a pty event kind has no member in the event arm's state union - the frontend's own shape check should have stopped this build");
         }
@@ -3994,8 +3995,8 @@ pub fn TsCoreHost(comptime core: type) type {
         /// by member NAME — the state member's twin.
         fn ptyReasonValue(comptime E: type, reason: runtime_effects.EffectExitReason) E {
             const name = @tagName(reason);
-            inline for (@typeInfo(E).@"enum".fields) |f| {
-                if (std.mem.eql(u8, f.name, name)) return @enumFromInt(f.value);
+            inline for (reflection.fieldsOf(@typeInfo(E).@"enum")) |f| {
+                if (std.mem.eql(u8, f.name, name)) return @fromBackingInt(@intCast(f.value));
             }
             @panic("ts core host: a pty exit reason has no member in the event arm's reason union - the frontend's own shape check should have stopped this build");
         }
@@ -4011,7 +4012,7 @@ pub fn TsCoreHost(comptime core: type) type {
             inline for (msg_arms, 0..) |arm, index| {
                 if (tag == index) {
                     if (comptime ptyArmShape(arm.type)) {
-                        const fields = @typeInfo(arm.type).@"struct".fields;
+                        const fields = reflection.fieldsOf(@typeInfo(arm.type).@"struct");
                         var payload: arm.type = undefined;
                         inline for (fields) |f| {
                             if (comptime std.mem.eql(u8, f.name, "state")) {

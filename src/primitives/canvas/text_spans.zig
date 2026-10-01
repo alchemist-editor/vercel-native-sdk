@@ -803,7 +803,7 @@ fn spanWrapKey(spans: []const TextSpan, options: TextSpanLayoutOptions) SpanWrap
         hasher.update(std.mem.asBytes(&span.text.len));
         hasher.update(span.text);
         hasher.update(&[_]u8{
-            @intFromEnum(span.weight),
+            @backingInt(span.weight),
             @intFromBool(span.italic),
             @intFromBool(span.monospace),
         });

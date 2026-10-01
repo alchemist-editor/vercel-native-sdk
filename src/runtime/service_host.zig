@@ -578,7 +578,7 @@ pub fn ServiceHost(comptime Registry: type) type {
             if (self.child_reaping) return;
             const id = self.child_id orelse return;
             if (builtin.os.tag == .windows) {
-                _ = std.os.windows.ntdll.NtTerminateProcess(id, @enumFromInt(1));
+                _ = std.os.windows.ntdll.NtTerminateProcess(id, @fromBackingInt(@intCast(1)));
             } else {
                 std.posix.kill(-id, .KILL) catch std.posix.kill(id, .KILL) catch {};
             }
@@ -649,7 +649,7 @@ fn readU64(bytes: []const u8, at: usize) u64 {
 test "service host binding is lazy and shuts down without spawning" {
     const Registry = struct {
         pub const protocol_version: u8 = 3;
-        pub const contract_fingerprint = [_]u8{0} ** 32;
+        pub const contract_fingerprint = @as([32]u8, @splat(0));
         pub const Operation = struct { name: []const u8, index: u16, deadline_ms: ?u32, cancellable: bool, streaming: bool, in_flight: u8 };
         pub fn indexOf(name: []const u8) ?u16 {
             return if (std.mem.eql(u8, name, "fixture.echo")) 0 else null;
@@ -670,7 +670,7 @@ test "service host binding is lazy and shuts down without spawning" {
 test "service cancellation markers live under the writable service cwd" {
     const Registry = struct {
         pub const protocol_version: u8 = 3;
-        pub const contract_fingerprint = [_]u8{0} ** 32;
+        pub const contract_fingerprint = @as([32]u8, @splat(0));
         pub const Operation = struct { name: []const u8, index: u16, deadline_ms: ?u32, cancellable: bool, streaming: bool, in_flight: u8 };
         pub fn indexOf(_: []const u8) ?u16 {
             return null;

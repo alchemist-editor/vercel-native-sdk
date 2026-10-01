@@ -440,7 +440,7 @@ test "the text preflight counts referenced sibling text already in the list" {
     // against the per-view text budget, so the grid must degrade against
     // it. Pre-emit a referenced-text command consuming most of the view
     // budget, then a terminal row that would cross the ceiling drops.
-    const filler = "x" ** (canvas.max_display_list_text_bytes - 4);
+    const filler = std.mem.asBytes(&@as([canvas.max_display_list_text_bytes - 4]["x".len]u8, @splat("x".*)));
     const row = comptime asciiRow("cells", white);
     const rows = [_]grid_model.TerminalRow{.{ .cells = &row }};
 
@@ -655,7 +655,7 @@ test "a row adding no text paints even when siblings spent the text share" {
     // Earlier widgets already sit past the grid's reserved text share;
     // an all-box row ADDS no text, so it must paint — the ceiling bounds
     // what the grid adds, never what siblings spent.
-    const filler = "x" ** (canvas.max_display_list_text_bytes - 100);
+    const filler = std.mem.asBytes(&@as([canvas.max_display_list_text_bytes - 100]["x".len]u8, @splat("x".*)));
     var cells: [8]grid_model.TerminalCell = undefined;
     for (&cells) |*c| c.* = .{ .cp = 0x2500, .fg = white };
     const rows = [_]grid_model.TerminalRow{.{ .cells = &cells }};
@@ -912,7 +912,7 @@ test "a wide cheap terminal paints its rows under the widget command budget" {
     var text_rows: usize = 0;
     for (builder.displayList().commands) |command| {
         switch (command) {
-            .draw_text => |t| if (std.mem.eql(u8, t.text, "a" ** 198)) {
+            .draw_text => |t| if (std.mem.eql(u8, t.text, std.mem.asBytes(&@as([198]["a".len]u8, @splat("a".*))))) {
                 text_rows += 1;
             },
             else => {},
@@ -1064,7 +1064,7 @@ test "the text preflight accounts for bytes earlier widgets already consumed" {
     var builder = canvas.Builder.init(&commands);
     // Pre-consume all but 2 bytes of the store, as an earlier widget
     // would.
-    const filler = [_]u8{'x'} ** (canvas.max_display_list_text_bytes - 2);
+    const filler = @as([canvas.max_display_list_text_bytes - 2]u8, @splat('x'));
     _ = try builder.allocTextBytes(&filler);
 
     try grid_model.paint(baseGrid(&rows), &builder, .{

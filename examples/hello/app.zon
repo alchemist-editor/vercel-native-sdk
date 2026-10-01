@@ -5,7 +5,7 @@
     .version = "0.1.0",
     .platforms = .{ "macos", "linux" },
     .permissions = .{},
-    .capabilities = .{ "webview" },
+    .capabilities = .{"webview"},
     .security = .{
         .navigation = .{
             .allowed_origins = .{ "zero://app", "zero://inline" },

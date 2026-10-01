@@ -4,19 +4,19 @@
     .display_name = "Command App",
     .version = "0.1.0",
     .platforms = .{ "macos", "linux" },
-    .permissions = .{ "command" },
+    .permissions = .{"command"},
     .capabilities = .{ "webview", "js_bridge", "native_views", "menus", "shortcuts", "tray" },
     .commands = .{
         .{ .id = "app.sync", .title = "Sync" },
     },
     .shortcuts = .{
-        .{ .id = "app.sync", .key = "s", .modifiers = .{ "primary" } },
+        .{ .id = "app.sync", .key = "s", .modifiers = .{"primary"} },
     },
     .menus = .{
         .{
             .title = "View",
             .items = .{
-                .{ .label = "Sync", .command = "app.sync", .key = "s", .modifiers = .{ "primary" } },
+                .{ .label = "Sync", .command = "app.sync", .key = "s", .modifiers = .{"primary"} },
             },
         },
     },

@@ -1118,7 +1118,7 @@ test "context-menu declarations sum across widgets to the budget and overflow lo
     const harness = try createMenuHarness(app);
     defer harness.destroy(std.testing.allocator);
 
-    const bulk = [_]canvas.WidgetContextMenuItem{.{ .label = "Op" }} ** (budget - 1);
+    const bulk = @as([budget - 1]canvas.WidgetContextMenuItem, @splat(.{ .label = "Op" }));
     const pair = [_]canvas.WidgetContextMenuItem{ .{ .label = "A" }, .{ .label = "B" } };
     var nodes = [_]canvas.WidgetLayoutNode{
         .{

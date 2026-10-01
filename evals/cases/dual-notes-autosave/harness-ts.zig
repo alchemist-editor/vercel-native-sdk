@@ -60,7 +60,7 @@ test "starts clean; edits mark dirty and re-arm one keyed 800ms debounce" {
     try std.testing.expect(g_model.save_state == .dirty);
     const delay = cmdview.findOp(first, .delay) orelse return error.NoDebounceArmed;
     try std.testing.expectEqual(@as(f64, 800), delay.after_ms);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).autosave_fired), delay.msg_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).autosave_fired), delay.msg_tag);
 
     var key_buf: [64]u8 = undefined;
     @memcpy(key_buf[0..delay.key.len], delay.key);
@@ -80,8 +80,8 @@ test "the autosave fire writes the pinned serialization to notes.tsv" {
     const write = cmdview.findOp(fired, .write_file) orelse return error.NoWriteIssued;
     try std.testing.expectEqualStrings("notes.tsv", write.path);
     try std.testing.expectEqualStrings(serialized_after_edit, write.bytes);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).saved), write.ok_tag);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).save_failed), write.err_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).saved), write.ok_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).save_failed), write.err_tag);
     _ = dispatch(.saved);
     try std.testing.expect(g_model.save_state == .saved);
 }

@@ -244,7 +244,7 @@ pub const EffectDbResult = struct {
 };
 
 pub fn dbJournalCode(kind: EffectDbResultKind, outcome: EffectDbOutcome) i32 {
-    return @as(i32, @intFromEnum(kind)) | (@as(i32, @intFromEnum(outcome)) << 8);
+    return @as(i32, @backingInt(kind)) | (@as(i32, @backingInt(outcome)) << 8);
 }
 
 pub fn dbKindFromJournalCode(code: i32) ?EffectDbResultKind {
@@ -4739,7 +4739,7 @@ pub fn Effects(comptime Msg: type) type {
         /// Journaled wall-clock values queued for replay-mode `wallMs`
         /// reads (FIFO; fed from `.clock` records before the consuming
         /// event dispatches).
-        replay_clock: [max_effect_replay_clock_entries]i64 = [_]i64{0} ** max_effect_replay_clock_entries,
+        replay_clock: [max_effect_replay_clock_entries]i64 = @as([max_effect_replay_clock_entries]i64, @splat(0)),
         replay_clock_head: usize = 0,
         replay_clock_len: usize = 0,
         /// Replay `wallMs` reads that found no journaled value: a
@@ -4982,15 +4982,15 @@ pub fn Effects(comptime Msg: type) type {
         /// process-lifetime posting handles. Seedable in tests to pin
         /// the non-wrapping guarantee without 2^32 opens.
         channel_generation: u64 = 0,
-        slots: [total_effect_slots]Slot = [_]Slot{.{}} ** total_effect_slots,
-        file_stream_slots: [max_effect_file_streams]FileStreamSlot = [_]FileStreamSlot{.{}} ** max_effect_file_streams,
+        slots: [total_effect_slots]Slot = @as([total_effect_slots]Slot, @splat(.{})),
+        file_stream_slots: [max_effect_file_streams]FileStreamSlot = @as([max_effect_file_streams]FileStreamSlot, @splat(.{})),
         next_file_stream_generation: u64 = 1,
-        db_slots: [max_db_effects]DbSlot = [_]DbSlot{.{}} ** max_db_effects,
+        db_slots: [max_db_effects]DbSlot = @as([max_db_effects]DbSlot, @splat(.{})),
         next_db_generation: u64 = 1,
         db_revision: u64 = 0,
         /// Fixed fx timer table (see `max_effect_timers`): timers live
         /// beside the effect slots, never in them. Loop-thread only.
-        timer_slots: [max_effect_timers]TimerSlot = [_]TimerSlot{.{}} ** max_effect_timers,
+        timer_slots: [max_effect_timers]TimerSlot = @as([max_effect_timers]TimerSlot, @splat(.{})),
         /// The single audio playback channel (see `AudioChannel`).
         /// Loop-thread only, like the timer table.
         audio: AudioChannel = .{},
@@ -5003,11 +5003,11 @@ pub fn Effects(comptime Msg: type) type {
         /// `max_effect_channels`): long-lived keyed occupancies beside
         /// the effect slots. Loop-thread only — the thread-shared half
         /// of each slot lives behind its `ChannelSlot.shared` header.
-        channel_slots: [max_effect_channels]ChannelSlot = [_]ChannelSlot{.{}} ** max_effect_channels,
+        channel_slots: [max_effect_channels]ChannelSlot = @as([max_effect_channels]ChannelSlot, @splat(.{})),
         /// One independently-running capture per source. PCM itself rides the
         /// channel table; this tiny loop-side mirror exists to quiesce native
         /// audio callbacks before closing/reusing their channel occupancy.
-        audio_capture_slots: [2]AudioCaptureSlot = [_]AudioCaptureSlot{.{}} ** 2,
+        audio_capture_slots: [2]AudioCaptureSlot = @as([2]AudioCaptureSlot, @splat(.{})),
         /// Monotonic post-order stamp shared by every channel's staging
         /// FIFO and the close markers: the cross-channel delivery order
         /// and the drain boundary's causality cut (posts stamped at or
@@ -5026,7 +5026,7 @@ pub fn Effects(comptime Msg: type) type {
         /// occupancies beside the channel table. Loop-thread only —
         /// the thread-shared half of each slot lives behind its
         /// `PtySlot.shared` header.
-        pty_slots: [max_effect_ptys]PtySlot = [_]PtySlot{.{}} ** max_effect_ptys,
+        pty_slots: [max_effect_ptys]PtySlot = @as([max_effect_ptys]PtySlot, @splat(.{})),
         /// Monotonic stamp shared by every pty's staged output backlog
         /// and exit marker — the channels' `channel_seq`, pty-shaped:
         /// cross-pty delivery order and the drain boundary's causality
@@ -5839,7 +5839,7 @@ pub fn Effects(comptime Msg: type) type {
             self.pending_db_head = 0;
             self.pending_db_len = 0;
             for (&self.db_slots) |*slot| self.freeDbLive(slot);
-            self.db_slots = [_]DbSlot{.{}} ** max_db_effects;
+            self.db_slots = @as([max_db_effects]DbSlot, @splat(.{}));
             self.db_revision = 0;
             // The durable key buffers those staged Msgs referenced.
             self.releaseStagedKeys();
@@ -7723,7 +7723,7 @@ pub fn Effects(comptime Msg: type) type {
                 self.rejectChannel(options.key, options.on_event, true);
                 return;
             }
-            const capture_index: usize = @intFromEnum(options.source);
+            const capture_index: usize = @backingInt(options.source);
             const capture = &self.audio_capture_slots[capture_index];
 
             // Admit the replacement BEFORE stopping the source it would
@@ -9880,7 +9880,7 @@ pub fn Effects(comptime Msg: type) type {
                 {
                     return self.feedInvalidNativeRequest(key);
                 }
-                const style: platform.LocalTimeStyle = @enumFromInt(@as(u8, @intFromFloat(style_value)));
+                const style: platform.LocalTimeStyle = @fromBackingInt(@intCast(@as(u8, @intFromFloat(style_value))));
                 const timestamp_ms: i64 = @intFromFloat(timestamp_value);
                 var result_buffer: [platform.max_local_time_text_bytes]u8 = undefined;
                 const result = binding.format_local_time_fn(binding.context, timestamp_ms, style, &result_buffer) catch |err| {
@@ -13713,8 +13713,8 @@ pub fn Effects(comptime Msg: type) type {
             const total = audio_capture_packet_header_bytes + event.pcm_s16le.len;
             if (total > packet.len) return .dropped_oversized;
             @memcpy(packet[0..4], audio_capture_packet_magic);
-            packet[4] = @intFromEnum(event.kind);
-            packet[5] = @intFromEnum(event.source);
+            packet[4] = @backingInt(event.kind);
+            packet[5] = @backingInt(event.source);
             packet[6] = event.format.channels;
             packet[7] = 0;
             std.mem.writeInt(u32, packet[8..12], event.format.sample_rate, .little);
@@ -15733,7 +15733,7 @@ pub fn Effects(comptime Msg: type) type {
                 // by the abandon net. Job objects would kill the whole
                 // tree properly — the future strengthening; not built
                 // here.
-                _ = std.os.windows.ntdll.NtTerminateProcess(id, @enumFromInt(1));
+                _ = std.os.windows.ntdll.NtTerminateProcess(id, @fromBackingInt(@intCast(1)));
             } else {
                 // The child owns its process group (see the spawn in
                 // `runChild`), so the negative-pid form signals every
@@ -16164,7 +16164,7 @@ pub fn Effects(comptime Msg: type) type {
                 .extra_headers = slot.fetchHeaders(),
                 // Mirrors `std.http.Client.fetch`: payloads cannot be
                 // replayed across redirects.
-                .redirect_behavior = if (slot.payload_len > 0) .unhandled else @enumFromInt(3),
+                .redirect_behavior = if (slot.payload_len > 0) .unhandled else @fromBackingInt(@intCast(3)),
             }) catch |err| {
                 // Establishing the connection is what `request` does, so
                 // an UNTYPED failure here is a connect failure. (The
@@ -16196,7 +16196,7 @@ pub fn Effects(comptime Msg: type) type {
             }
             var redirect_buffer: [8 * 1024]u8 = undefined;
             var response = try request.receiveHead(&redirect_buffer);
-            slot.fetch_status = @intFromEnum(response.head.status);
+            slot.fetch_status = @backingInt(response.head.status);
 
             const decompress_buffer: []u8 = switch (response.head.content_encoding) {
                 .identity => &.{},
@@ -17085,7 +17085,7 @@ pub fn Effects(comptime Msg: type) type {
             defer client.deinit();
             var request = client.request(.GET, uri, .{
                 .keep_alive = false,
-                .redirect_behavior = @enumFromInt(3),
+                .redirect_behavior = @fromBackingInt(@intCast(3)),
             }) catch |err| {
                 // See `runFetch`: an untyped failure here is a connect
                 // failure.
@@ -17096,7 +17096,7 @@ pub fn Effects(comptime Msg: type) type {
             try request.sendBodiless();
             var redirect_buffer: [8 * 1024]u8 = undefined;
             var response = try request.receiveHead(&redirect_buffer);
-            slot.fetch_status = @intFromEnum(response.head.status);
+            slot.fetch_status = @backingInt(response.head.status);
             if (response.head.status.class() != .success) {
                 slot.image_outcome = .http_status;
                 slot.body_len = 0;

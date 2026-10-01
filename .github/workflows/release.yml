@@ -92,9 +92,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+        uses: ./.github/actions/setup-zig
 
       - name: Extract changelog entry
         run: |

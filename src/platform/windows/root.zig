@@ -321,7 +321,7 @@ pub const WindowsPlatform = struct {
     /// `createWithOptions` and retire it through `destroy`, the
     /// latch-gated free.
     channel_wake_abandoned: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    audio_capture_sinks: [2]platform_mod.AudioCaptureSink = [_]platform_mod.AudioCaptureSink{.{}} ** 2,
+    audio_capture_sinks: [2]platform_mod.AudioCaptureSink = @as([2]platform_mod.AudioCaptureSink, @splat(.{})),
 
     pub fn init(title: []const u8, size: geometry.SizeF) Error!WindowsPlatform {
         return initWithEngine(title, size, .system);
@@ -1482,7 +1482,7 @@ fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOp
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
     if (self.web_engine != .system) return error.UnsupportedService;
     const opts = WindowsMessageDialogOpts{
-        .style = @intFromEnum(options.style),
+        .style = @backingInt(options.style),
         .title = options.title.ptr,
         .title_len = options.title.len,
         .message = options.message.ptr,
@@ -1496,7 +1496,7 @@ fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOp
         .tertiary_button = options.tertiary_button.ptr,
         .tertiary_button_len = options.tertiary_button.len,
     };
-    return @enumFromInt(native_sdk_windows_show_message_dialog(self.host, &opts));
+    return @fromBackingInt(@intCast(native_sdk_windows_show_message_dialog(self.host, &opts)));
 }
 
 fn showNotification(context: ?*anyopaque, options: platform_mod.NotificationOptions) anyerror!void {
@@ -1605,7 +1605,7 @@ fn updateTrayMenu(context: ?*anyopaque, status_item_id: platform_mod.StatusItemI
                 const selected_detail = if (option.selected) "Selected" else "";
                 details[count] = selected_detail.ptr;
                 detail_lens[count] = selected_detail.len;
-                roles[count] = @intFromEnum(platform_mod.TrayItemRole.command);
+                roles[count] = @backingInt(platform_mod.TrayItemRole.command);
                 keys[count] = "".ptr;
                 key_lens[count] = 0;
                 modifiers[count] = 0;
@@ -1626,7 +1626,7 @@ fn updateTrayMenu(context: ?*anyopaque, status_item_id: platform_mod.StatusItemI
         enabled_flags[count] = if (item.enabled and (item.role == .command or item.role == .agent)) 1 else 0;
         details[count] = detail.ptr;
         detail_lens[count] = detail.len;
-        roles[count] = @intFromEnum(item.role);
+        roles[count] = @backingInt(item.role);
         keys[count] = item.key.ptr;
         key_lens[count] = item.key.len;
         modifiers[count] = shortcutModifierFlags(item.modifiers);
@@ -1716,7 +1716,7 @@ fn deleteCredential(context: ?*anyopaque, key: platform_mod.CredentialKey) anyer
 
 fn formatLocalTime(context: ?*anyopaque, timestamp_ms: i64, style: platform_mod.LocalTimeStyle, buffer: []u8) anyerror![]const u8 {
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
-    const len = native_sdk_windows_format_local_time(self.host, timestamp_ms, @intFromEnum(style), buffer.ptr, buffer.len);
+    const len = native_sdk_windows_format_local_time(self.host, timestamp_ms, @backingInt(style), buffer.ptr, buffer.len);
     if (len == 0 or len > buffer.len) return error.LocalTimeFormatFailed;
     return buffer[0..len];
 }
@@ -1805,13 +1805,13 @@ fn nativeSdkAudioCapturePush(context: ?*anyopaque, kind: c_int, source_value: c_
 fn audioCaptureStart(context: ?*anyopaque, source: platform_mod.AudioCaptureSource, format: platform_mod.AudioCaptureFormat, sink: platform_mod.AudioCaptureSink) anyerror!void {
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
     if (self.web_engine != .system) return error.UnsupportedService;
-    const stored = &self.audio_capture_sinks[@intFromEnum(source)];
+    const stored = &self.audio_capture_sinks[@backingInt(source)];
     // The native stop is a synchronous callback fence. Quiesce the old
     // producer before replacing the memory its callback context points at;
     // otherwise a final old-source callback can be delivered to the new sink.
-    _ = native_sdk_windows_audio_capture_stop(self.host, @intFromEnum(source));
+    _ = native_sdk_windows_audio_capture_stop(self.host, @backingInt(source));
     stored.* = sink;
-    if (native_sdk_windows_audio_capture_start(self.host, @intFromEnum(source), format.sample_rate, format.channels, nativeSdkAudioCapturePush, stored) == 0) {
+    if (native_sdk_windows_audio_capture_start(self.host, @backingInt(source), format.sample_rate, format.channels, nativeSdkAudioCapturePush, stored) == 0) {
         stored.* = .{};
         return error.AudioCaptureStartFailed;
     }
@@ -1819,8 +1819,8 @@ fn audioCaptureStart(context: ?*anyopaque, source: platform_mod.AudioCaptureSour
 
 fn audioCaptureStop(context: ?*anyopaque, source: platform_mod.AudioCaptureSource) anyerror!void {
     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
-    _ = native_sdk_windows_audio_capture_stop(self.host, @intFromEnum(source));
-    self.audio_capture_sinks[@intFromEnum(source)] = .{};
+    _ = native_sdk_windows_audio_capture_stop(self.host, @backingInt(source));
+    self.audio_capture_sinks[@backingInt(source)] = .{};
 }
 
 /// The video tier's teaching refusal: the load verbs exist so a video
@@ -1855,7 +1855,7 @@ fn configureSecurityPolicy(context: ?*anyopaque, policy: security.Policy) anyerr
         origins.len,
         external_urls.ptr,
         external_urls.len,
-        @intFromEnum(policy.navigation.external_links.action),
+        @backingInt(policy.navigation.external_links.action),
     );
 }
 

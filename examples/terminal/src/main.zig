@@ -865,17 +865,17 @@ fn mapKey(event: canvas.WidgetKeyboardEvent) ?MappedKey {
         const ch = key[0];
         const utf8 = key[0..1];
         if (ch >= 'a' and ch <= 'z') {
-            const base = @intFromEnum(vt.input.Key.key_a);
+            const base = @backingInt(vt.input.Key.key_a);
             return .{
-                .key = @enumFromInt(base + @as(c_int, ch - 'a')),
+                .key = @fromBackingInt(@intCast(base + @as(c_int, ch - 'a'))),
                 .utf8 = utf8,
                 .unshifted = ch,
             };
         }
         if (ch >= '0' and ch <= '9') {
-            const base = @intFromEnum(vt.input.Key.digit_0);
+            const base = @backingInt(vt.input.Key.digit_0);
             return .{
-                .key = @enumFromInt(base + @as(c_int, ch - '0')),
+                .key = @fromBackingInt(@intCast(base + @as(c_int, ch - '0'))),
                 .utf8 = utf8,
                 .unshifted = ch,
             };

@@ -13,6 +13,7 @@
 //! interpreter only diagnoses branches it builds, while the contract
 //! checker (like the compiled engine) is total over the document.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const canvas = @import("root.zig");
 const markup = @import("ui_markup.zig");
@@ -29,7 +30,7 @@ const Card = struct {
     id: u32,
     done: bool = false,
     weight: f32 = 1,
-    label_storage: [16]u8 = [_]u8{0} ** 16,
+    label_storage: [16]u8 = @as([16]u8, @splat(0)),
     label_len: usize = 0,
 
     pub fn label(card: *const Card) []const u8 {
@@ -1296,7 +1297,7 @@ test "describe traverses *const record fields and pointer-item lists like the en
 
 test "the reflect tag vocabulary never drifts from canvas.TextInputEvent" {
     const reflect = @import("ui_markup_reflect.zig");
-    const event_fields = @typeInfo(canvas.TextInputEvent).@"union".fields;
+    const event_fields = reflection.fieldsOf(@typeInfo(canvas.TextInputEvent).@"union");
     try testing.expectEqual(reflect.text_input_event_tags.len, event_fields.len);
     inline for (event_fields) |field| {
         var found = false;
@@ -1305,7 +1306,7 @@ test "the reflect tag vocabulary never drifts from canvas.TextInputEvent" {
         }
         try testing.expect(found);
     }
-    const direction_fields = @typeInfo(canvas.TextCaretDirection).@"enum".fields;
+    const direction_fields = reflection.fieldsOf(@typeInfo(canvas.TextCaretDirection).@"enum");
     try testing.expectEqual(reflect.text_caret_direction_members.len, direction_fields.len);
     inline for (direction_fields) |field| {
         var found = false;
@@ -1318,7 +1319,7 @@ test "the reflect tag vocabulary never drifts from canvas.TextInputEvent" {
 
 test "the reflect field vocabulary never drifts from canvas.ScrollState" {
     const reflect = @import("ui_markup_reflect.zig");
-    const state_fields = @typeInfo(canvas.ScrollState).@"struct".fields;
+    const state_fields = reflection.fieldsOf(@typeInfo(canvas.ScrollState).@"struct");
     try testing.expectEqual(reflect.scroll_state_field_names.len, state_fields.len);
     inline for (state_fields) |field| {
         // Every real field appears in the pinned vocabulary, and every

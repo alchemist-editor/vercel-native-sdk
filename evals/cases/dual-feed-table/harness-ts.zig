@@ -50,8 +50,8 @@ test "refresh issues one buffered GET to the pinned URL" {
     const fetch = cmdview.findOp(cmd, .fetch) orelse return error.NoFetchIssued;
     try std.testing.expectEqual(@as(u8, 0), fetch.method); // GET
     try std.testing.expectEqualStrings("https://feeds.native-sdk.dev/releases.json", fetch.url);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).feed_loaded), fetch.ok_tag);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).feed_failed), fetch.err_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).feed_loaded), fetch.ok_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).feed_failed), fetch.err_tag);
     try std.testing.expect(g_model.phase == .loading);
 }
 

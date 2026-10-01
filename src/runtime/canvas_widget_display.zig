@@ -577,7 +577,7 @@ fn hashWidgetAccessibilityNodes(nodes: []const platform.WidgetAccessibilityNode)
     for (nodes) |node| {
         hashAccessibilityValue(&hasher, node.id);
         hashAccessibilityOptional(&hasher, node.parent_id);
-        hashAccessibilityValue(&hasher, @intFromEnum(node.role));
+        hashAccessibilityValue(&hasher, @backingInt(node.role));
         hashAccessibilityBytes(&hasher, node.label);
         hashAccessibilityBytes(&hasher, node.text_value);
         hashAccessibilityBytes(&hasher, node.placeholder);

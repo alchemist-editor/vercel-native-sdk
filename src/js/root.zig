@@ -62,4 +62,3 @@ test "bridge validates call names before invoking engine" {
     const bridge = engine.bridge();
     try std.testing.expectError(error.InvalidCall, bridge.call(.{ .module = "", .function = "main" }));
 }
-

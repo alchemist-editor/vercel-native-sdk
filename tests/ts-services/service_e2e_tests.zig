@@ -20,7 +20,7 @@ const Bridge = Adapter.Host;
 const ServiceTransport = native_sdk.ServiceHost(registry);
 const SkewedRegistry = struct {
     pub const protocol_version = registry.protocol_version;
-    pub const contract_fingerprint = [_]u8{0xff} ** registry.contract_fingerprint.len;
+    pub const contract_fingerprint = @as([registry.contract_fingerprint.len]u8, @splat(0xff));
 
     pub fn indexOf(name: []const u8) ?u16 {
         return registry.indexOf(name);
@@ -207,7 +207,7 @@ const Harness = struct {
 
 fn killChild(id: std.process.Child.Id) void {
     if (builtin.os.tag == .windows) {
-        _ = std.os.windows.ntdll.NtTerminateProcess(id, @enumFromInt(1));
+        _ = std.os.windows.ntdll.NtTerminateProcess(id, @fromBackingInt(@intCast(1)));
     } else {
         std.posix.kill(-id, .KILL) catch std.posix.kill(id, .KILL) catch {};
     }
@@ -434,7 +434,7 @@ const Snapshot = struct {
             .successes = model.successes,
             .failures = model.failures,
             .failed = model.failed,
-            .bytes = [_]u8{0} ** 256,
+            .bytes = @as([256]u8, @splat(0)),
             .bytes_len = @min(model.bytes.len, 256),
         };
         @memcpy(result.bytes[0..result.bytes_len], model.bytes[0..result.bytes_len]);

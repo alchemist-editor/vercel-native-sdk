@@ -3,7 +3,7 @@
     .name = "android-example",
     .display_name = "Android Example",
     .version = "0.1.0",
-    .platforms = .{ "android" },
+    .platforms = .{"android"},
     .permissions = .{},
     .capabilities = .{ "webview", "native_views", "native_module" },
     .commands = .{

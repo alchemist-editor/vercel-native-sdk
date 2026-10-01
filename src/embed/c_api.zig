@@ -10,6 +10,7 @@
 //! hosts share. `exportMobileCApi(Host)` exports every function under its
 //! canonical symbol name for a static library root.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const geometry = @import("geometry");
 const types = @import("types.zig");
@@ -44,7 +45,7 @@ fn hostApp(comptime Host: type, raw: ?*anyopaque) ?*Host {
 /// a `comptime` block in a static library's root module.
 pub fn exportMobileCApi(comptime Host: type) void {
     const Api = MobileCApi(Host);
-    inline for (@typeInfo(Api).@"struct".decls) |decl| {
+    inline for (comptime reflection.declsOf(@typeInfo(Api).@"struct")) |decl| {
         @export(&@field(Api, decl.name), .{ .name = decl.name });
     }
 }

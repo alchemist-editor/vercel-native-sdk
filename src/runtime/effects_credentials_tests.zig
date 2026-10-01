@@ -310,7 +310,7 @@ test "credential replay delivers a deterministic redacted placeholder" {
     const request = fx.pendingHostAt(0).?;
     try std.testing.expectEqualStrings("core.credentials.get", request.name);
 
-    const digest = [_]u8{0x5a} ** 32;
+    const digest = @as([32]u8, @splat(0x5a));
     try fx.feedCredentialsResult(20, .get, .ok, 12, digest);
     const first = try takeResult(&fx);
     try std.testing.expectEqual(effects_mod.EffectCredentialsOutcome.ok, first.outcome);
@@ -325,7 +325,7 @@ test "credential replay delivers a deterministic redacted placeholder" {
     try std.testing.expectEqualSlices(u8, &first_copy, second.bytes);
 
     fx.credentialsGet(.{ .key = 22, .credential_key = "missing", .on_result = Fx.credentialsMsg(.result) });
-    try fx.feedCredentialsResult(22, .get, .miss, 0, [_]u8{0} ** 32);
+    try fx.feedCredentialsResult(22, .get, .miss, 0, @as([32]u8, @splat(0)));
     const miss = try takeResult(&fx);
     try std.testing.expectEqual(effects_mod.EffectCredentialsOutcome.miss, miss.outcome);
     try std.testing.expectEqualStrings("", miss.bytes);

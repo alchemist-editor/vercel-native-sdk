@@ -61,8 +61,8 @@ test "export writes the byte-exact quoted CSV to export.csv" {
     const write = cmdview.findOp(cmd, .write_file) orelse return error.NoWriteIssued;
     try std.testing.expectEqualStrings("export.csv", write.path);
     try std.testing.expectEqualStrings(seeded_csv, write.bytes);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).exported), write.ok_tag);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).export_failed), write.err_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).exported), write.ok_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).export_failed), write.err_tag);
     _ = dispatch(.exported);
     try std.testing.expect(g_model.export_state == .done);
 }

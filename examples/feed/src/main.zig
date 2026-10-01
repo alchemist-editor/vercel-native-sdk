@@ -83,10 +83,10 @@ const author_names = [_][]const u8{
     "Niklaus Wirth", "Radia Perl",     "Sofia Kovaleva", "Vera Cortez",
 };
 const author_handles = [_][]const u8{
-    "@ada",    "@kay",    "@easley", "@liskov",
-    "@dwilson", "@edith",  "@gmurray", "@hedy",
-    "@ivanm",  "@kross",  "@linchen", "@mallen",
-    "@wirth",  "@radia",  "@sofia",   "@vera",
+    "@ada",     "@kay",   "@easley",  "@liskov",
+    "@dwilson", "@edith", "@gmurray", "@hedy",
+    "@ivanm",   "@kross", "@linchen", "@mallen",
+    "@wirth",   "@radia", "@sofia",   "@vera",
 };
 const author_initials = [_][]const u8{
     "AB", "AK", "AE", "BL",
@@ -248,8 +248,8 @@ pub const Model = struct {
     fetches: u32 = 0,
     /// Per-post interaction state, keyed by post INDEX — the identity
     /// that outlives every window shift.
-    liked: LikedSet = LikedSet.initEmpty(),
-    boosted: LikedSet = LikedSet.initEmpty(),
+    liked: LikedSet = LikedSet.empty,
+    boosted: LikedSet = LikedSet.empty,
     selected: ?usize = null,
     /// Chrome overlay geometry from `on_chrome` (tall hidden-inset
     /// titlebar): the header leads with a spacer this wide so its

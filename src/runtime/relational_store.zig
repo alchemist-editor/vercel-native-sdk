@@ -120,7 +120,7 @@ pub const Database = struct {
     pub fn open(allocator: std.mem.Allocator, data_dir: []const u8) !Database {
         const path_plain = try std.fs.path.join(allocator, &.{ data_dir, "app.db" });
         defer allocator.free(path_plain);
-        const path = try allocator.dupeZ(u8, path_plain);
+        const path = try allocator.dupeSentinel(u8, path_plain, 0);
         errdefer allocator.free(path);
 
         var write_db = try sqlite.Connection.open(path);
@@ -138,7 +138,7 @@ pub const Database = struct {
     }
 
     pub fn openMemory(allocator: std.mem.Allocator) !Database {
-        const path = try allocator.dupeZ(u8, ":memory:");
+        const path = try allocator.dupeSentinel(u8, ":memory:", 0);
         errdefer allocator.free(path);
         var write_db = try sqlite.Connection.open(path);
         errdefer write_db.close();
@@ -210,13 +210,13 @@ pub const Database = struct {
         defer self.write_db.setRelationalAuthorizer(false) catch {};
         for (migrations) |migration| {
             if (migration.version <= current) continue;
-            const sql_z = self.allocator.dupeZ(u8, migration.sql) catch return .{ .outcome = .migrate_failed, .version = current };
+            const sql_z = self.allocator.dupeSentinel(u8, migration.sql, 0) catch return .{ .outcome = .migrate_failed, .version = current };
             defer self.allocator.free(sql_z);
             self.write_db.exec(sql_z) catch return .{ .outcome = .migrate_failed, .version = current };
         }
         self.write_db.setRelationalAuthorizer(false) catch return .{ .outcome = .migrate_failed, .version = current };
         var version_sql_buf: [64]u8 = undefined;
-        const version_sql = std.fmt.bufPrintZ(&version_sql_buf, "PRAGMA user_version={d};", .{target}) catch
+        const version_sql = std.fmt.bufPrintSentinel(&version_sql_buf, "PRAGMA user_version={d};", .{target}, 0) catch
             return .{ .outcome = .migrate_failed, .version = current };
         self.write_db.exec(version_sql) catch return .{ .outcome = .migrate_failed, .version = current };
         self.write_db.exec("COMMIT;") catch return .{ .outcome = .migrate_failed, .version = current };
@@ -239,7 +239,7 @@ pub const Database = struct {
 
     pub fn query(self: *Database, sql_text: []const u8, params: []const Value, page_context: *anyopaque, page_fn: PageFn) Outcome {
         if (!validSql(sql_text) or !validParameters(params, max_parameter_bytes)) return .rejected;
-        const sql_z = self.allocator.dupeZ(u8, sql_text) catch return .io_failed;
+        const sql_z = self.allocator.dupeSentinel(u8, sql_text, 0) catch return .io_failed;
         defer self.allocator.free(sql_z);
 
         self.lockRead();
@@ -327,7 +327,7 @@ pub const Database = struct {
         defer self.write_db.installRelationalAuthorizer() catch {};
 
         for (statements) |item| {
-            const sql_z = self.allocator.dupeZ(u8, item.sql) catch return .io_failed;
+            const sql_z = self.allocator.dupeSentinel(u8, item.sql, 0) catch return .io_failed;
             defer self.allocator.free(sql_z);
             var statement = self.write_db.prepareOne(sql_z) catch |err| return failure(err);
             defer statement.finalize();

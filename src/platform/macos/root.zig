@@ -478,7 +478,7 @@ extern fn native_sdk_appkit_set_tray_callback(host: *AppKitHost, callback: AppKi
 /// icon from the bundle's .icns (already masked at package time), and
 /// prebuilt .icns paths ship untouched in every mode.
 fn devDockIconNeedsMask(path: []const u8) bool {
-    if (builtin.mode != .Debug) return false;
+    if (builtin.mode != .debug) return false;
     return app_icon.sourceKindForPath(path) != null;
 }
 
@@ -656,7 +656,7 @@ pub const MacPlatform = struct {
     /// every push happens on the main thread (the host's frame pump is
     /// a run-loop timer), so a plain field is race-free.
     video_sink: platform_mod.VideoFrameSink = .{},
-    audio_capture_sinks: [2]platform_mod.AudioCaptureSink = [_]platform_mod.AudioCaptureSink{.{}} ** 2,
+    audio_capture_sinks: [2]platform_mod.AudioCaptureSink = @as([2]platform_mod.AudioCaptureSink, @splat(.{})),
 
     pub fn init(title: []const u8, size: geometry.SizeF) Error!MacPlatform {
         return initWithEngine(title, size, .system);
@@ -929,7 +929,7 @@ pub const MacPlatform = struct {
     fn audioCaptureSupported(host: *AppKitHost, source: platform_mod.AudioCaptureSource) bool {
         if (comptime @import("builtin").is_test) return false;
         if (@import("builtin").target.os.tag != .macos) return false;
-        return native_sdk_appkit_audio_capture_supported(host, @intFromEnum(source)) != 0;
+        return native_sdk_appkit_audio_capture_supported(host, @backingInt(source)) != 0;
     }
 
     fn run(context: *anyopaque, handler: platform_mod.EventHandler, handler_context: *anyopaque) anyerror!void {
@@ -1820,13 +1820,13 @@ fn nativeSdkAudioCapturePush(context: ?*anyopaque, kind: c_int, source_value: c_
 fn audioCaptureStart(context: ?*anyopaque, source: platform_mod.AudioCaptureSource, format: platform_mod.AudioCaptureFormat, sink: platform_mod.AudioCaptureSink) anyerror!void {
     const self: *MacPlatform = @ptrCast(@alignCast(context.?));
     if (self.web_engine != .system) return error.UnsupportedService;
-    const stored = &self.audio_capture_sinks[@intFromEnum(source)];
+    const stored = &self.audio_capture_sinks[@backingInt(source)];
     // The native stop is a synchronous callback fence. Quiesce the old
     // producer before replacing the memory its callback context points at;
     // otherwise a final old-source callback can be delivered to the new sink.
-    _ = native_sdk_appkit_audio_capture_stop(self.host, @intFromEnum(source));
+    _ = native_sdk_appkit_audio_capture_stop(self.host, @backingInt(source));
     stored.* = sink;
-    if (native_sdk_appkit_audio_capture_start(self.host, @intFromEnum(source), format.sample_rate, format.channels, nativeSdkAudioCapturePush, stored) == 0) {
+    if (native_sdk_appkit_audio_capture_start(self.host, @backingInt(source), format.sample_rate, format.channels, nativeSdkAudioCapturePush, stored) == 0) {
         stored.* = .{};
         return error.AudioCaptureStartFailed;
     }
@@ -1834,8 +1834,8 @@ fn audioCaptureStart(context: ?*anyopaque, source: platform_mod.AudioCaptureSour
 
 fn audioCaptureStop(context: ?*anyopaque, source: platform_mod.AudioCaptureSource) anyerror!void {
     const self: *MacPlatform = @ptrCast(@alignCast(context.?));
-    _ = native_sdk_appkit_audio_capture_stop(self.host, @intFromEnum(source));
-    self.audio_capture_sinks[@intFromEnum(source)] = .{};
+    _ = native_sdk_appkit_audio_capture_stop(self.host, @backingInt(source));
+    self.audio_capture_sinks[@backingInt(source)] = .{};
 }
 
 /// The C-callable bridge for `VideoFrameSink.push`: the sink's `push_fn`
@@ -2164,7 +2164,7 @@ fn updateWidgetAccessibility(context: ?*anyopaque, snapshot: platform_mod.Widget
         nodes[index] = .{
             .id = node.id,
             .parent_id = node.parent_id orelse 0,
-            .role = @intFromEnum(node.role),
+            .role = @backingInt(node.role),
             .label = node.label.ptr,
             .label_len = node.label.len,
             .text_value = node.text_value.ptr,
@@ -2359,7 +2359,7 @@ fn deleteCredential(context: ?*anyopaque, key: platform_mod.CredentialKey) anyer
 
 fn formatLocalTime(context: ?*anyopaque, timestamp_ms: i64, style: platform_mod.LocalTimeStyle, buffer: []u8) anyerror![]const u8 {
     const self: *MacPlatform = @ptrCast(@alignCast(context.?));
-    const len = native_sdk_appkit_format_local_time(self.host, timestamp_ms, @intFromEnum(style), buffer.ptr, buffer.len);
+    const len = native_sdk_appkit_format_local_time(self.host, timestamp_ms, @backingInt(style), buffer.ptr, buffer.len);
     if (len == 0 or len > buffer.len) return error.LocalTimeFormatFailed;
     return buffer[0..len];
 }
@@ -2401,7 +2401,7 @@ fn configureSecurityPolicy(context: ?*anyopaque, policy: security.Policy) anyerr
         origins.len,
         external_urls.ptr,
         external_urls.len,
-        @intFromEnum(policy.navigation.external_links.action),
+        @backingInt(policy.navigation.external_links.action),
     );
 }
 
@@ -2727,7 +2727,7 @@ fn showSaveDialog(context: ?*anyopaque, options: platform_mod.SaveDialogOptions,
 fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOptions) anyerror!platform_mod.MessageDialogResult {
     const self: *MacPlatform = @ptrCast(@alignCast(context.?));
     const opts = AppKitMessageDialogOpts{
-        .style = @intFromEnum(options.style),
+        .style = @backingInt(options.style),
         .title = options.title.ptr,
         .title_len = options.title.len,
         .message = options.message.ptr,
@@ -2742,7 +2742,7 @@ fn showMessageDialog(context: ?*anyopaque, options: platform_mod.MessageDialogOp
         .tertiary_button_len = options.tertiary_button.len,
     };
     const result = native_sdk_appkit_show_message_dialog(self.host, &opts);
-    return @enumFromInt(result);
+    return @fromBackingInt(@intCast(result));
 }
 
 const max_tray_items: usize = 32;
@@ -2762,11 +2762,11 @@ fn createTray(context: ?*anyopaque, status_item_id: platform_mod.StatusItemId, o
         options.tooltip.len,
         if (options.visible) 1 else 0,
         presentation.width,
-        @intFromEnum(presentation.tone),
+        @backingInt(presentation.tone),
         presentation.icon_opacity,
         if (presentation.monospaced) 1 else 0,
         presentation.font_size,
-        @intFromEnum(presentation.font_weight),
+        @backingInt(presentation.font_weight),
         options.activation_command.ptr,
         options.activation_command.len,
         options.alternate_activation_command.ptr,
@@ -2806,7 +2806,7 @@ fn updateTrayMenu(context: ?*anyopaque, status_item_id: platform_mod.StatusItemI
         enabled_flags[i] = if (item.enabled) 1 else 0;
         details[i] = item.detail.ptr;
         detail_lens[i] = item.detail.len;
-        roles[i] = @intFromEnum(item.role);
+        roles[i] = @backingInt(item.role);
         keys[i] = item.key.ptr;
         key_lens[i] = item.key.len;
         modifiers[i] = @as(u32, @intFromBool(item.modifiers.primary)) |
@@ -2884,7 +2884,7 @@ fn updateTrayTitle(context: ?*anyopaque, status_item_id: platform_mod.StatusItem
 
 fn updateTrayPresentation(context: ?*anyopaque, status_item_id: platform_mod.StatusItemId, presentation: platform_mod.TrayPresentation) anyerror!void {
     const self: *MacPlatform = @ptrCast(@alignCast(context.?));
-    native_sdk_appkit_update_tray_presentation(self.host, status_item_id, presentation.title.ptr, presentation.title.len, presentation.width, @intFromEnum(presentation.tone), presentation.icon_opacity, if (presentation.monospaced) 1 else 0, presentation.font_size, @intFromEnum(presentation.font_weight));
+    native_sdk_appkit_update_tray_presentation(self.host, status_item_id, presentation.title.ptr, presentation.title.len, presentation.width, @backingInt(presentation.tone), presentation.icon_opacity, if (presentation.monospaced) 1 else 0, presentation.font_size, @backingInt(presentation.font_weight));
 }
 
 fn removeTray(context: ?*anyopaque, status_item_id: platform_mod.StatusItemId) anyerror!void {

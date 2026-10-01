@@ -36,7 +36,7 @@ pub export fn native_sdk_update_verify_feed(
         .archive_url_len = 0,
         .release_notes_len = 0,
         .archive_bytes = 0,
-        .sha256 = [_]u8{0} ** 64,
+        .sha256 = @as([64]u8, @splat(0)),
     };
     var verified = feed.verifyEnvelope(
         std.heap.page_allocator,

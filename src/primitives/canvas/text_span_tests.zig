@@ -222,7 +222,7 @@ test "an oversized word cluster-wraps instead of overflowing" {
 }
 
 test "a later visual-line page retains an over-capacity wrapped paragraph" {
-    const spans = [_]TextSpan{.{ .text = "a" ** 140 }};
+    const spans = [_]TextSpan{.{ .text = std.mem.asBytes(&@as([140]["a".len]u8, @splat("a".*))) }};
     const options = text_spans.TextSpanLayoutOptions{ .size = 14, .max_width = 1 };
     var first_runs: [text_spans.max_text_span_runs_per_paragraph]TextSpanRun = undefined;
     const first = layout(&spans, options, &first_runs);
@@ -248,7 +248,7 @@ test "a later visual-line page retains an over-capacity wrapped paragraph" {
 }
 
 test "ordinary span paragraphs paint a visible page after the line cap" {
-    const source = ("x\n" ** 139) ++ "TAIL_SENTINEL";
+    const source = (std.mem.asBytes(&@as([139]["x\n".len]u8, @splat("x\n".*)))) ++ "TAIL_SENTINEL";
     const spans = [_]TextSpan{.{ .text = source }};
     const tokens = canvas.DesignTokens{};
     const line_height = tokens.typography.body_size * 1.25;
@@ -722,7 +722,7 @@ test "preformatted span hit mapping preserves unpainted source whitespace" {
 }
 
 test "span hit mapping and selection page beyond the first 128 visual lines" {
-    const paragraph = "a" ** 140;
+    const paragraph = std.mem.asBytes(&@as([140]["a".len]u8, @splat("a".*)));
     const spans = [_]TextSpan{.{ .text = paragraph, .monospace = true }};
     const options = text_spans.TextSpanLayoutOptions{ .size = 14, .max_width = 1 };
     var runs: [text_spans.max_text_span_runs_per_paragraph]TextSpanRun = undefined;
@@ -781,7 +781,7 @@ test "span hit mapping and selection page beyond the first 128 visual lines" {
 
 test "span selection crosses an empty interior visual-line page" {
     const paragraph = "a\n" ++
-        ("\n" ** (text_spans.max_text_span_lines_per_paragraph * 2)) ++
+        (std.mem.asBytes(&@as([text_spans.max_text_span_lines_per_paragraph * 2]["\n".len]u8, @splat("\n".*)))) ++
         "b";
     const spans = [_]TextSpan{.{ .text = paragraph, .monospace = true }};
     const options = text_spans.TextSpanLayoutOptions{ .size = 14, .max_width = 100 };

@@ -4,7 +4,7 @@
     .display_name = "Native Panels",
     .version = "0.1.0",
     .platforms = .{ "macos", "linux" },
-    .permissions = .{ "view" },
+    .permissions = .{"view"},
     .capabilities = .{ "webview", "js_bridge", "native_views" },
     .shell = .{
         .windows = .{

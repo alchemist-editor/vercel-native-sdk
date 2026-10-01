@@ -1068,7 +1068,7 @@ pub fn canvasGpuCommandFingerprint(command: CanvasGpuCommand) u64 {
     h = hash.resourceHashRect(h, command.bounds);
     h = hash.resourceHashF32(h, command.opacity);
     h = hash.resourceHashF32(h, command.stroke_width);
-    h = hash.resourceHashEnum(h, @intFromEnum(command.cap));
+    h = hash.resourceHashEnum(h, @backingInt(command.cap));
     h = hash.resourceHashOptionalObjectId(h, command.id);
     h = hash.resourceHashOptionalRect(h, command.clip);
     h = hash.resourceHashAffine(h, command.transform);
@@ -1114,8 +1114,8 @@ pub fn canvasGpuCommandFingerprint(command: CanvasGpuCommand) u64 {
         h = hash.resourceHashOptionalRect(h, image.src);
         h = hash.resourceHashRect(h, image.dst);
         h = hash.resourceHashF32(h, image.opacity);
-        h = hash.resourceHashEnum(h, @intFromEnum(image.fit));
-        h = hash.resourceHashEnum(h, @intFromEnum(image.sampling));
+        h = hash.resourceHashEnum(h, @backingInt(image.fit));
+        h = hash.resourceHashEnum(h, @backingInt(image.sampling));
         h = hash.resourceHashRadius(h, image.radius);
     } else {
         h = hash.resourceHashU8(h, 0);
@@ -1141,13 +1141,13 @@ pub fn canvasGpuCommandFingerprint(command: CanvasGpuCommand) u64 {
             h = hash.resourceHashU8(h, 1);
             h = hash.resourceHashF32(h, nonNegative(options.max_width));
             h = hash.resourceHashF32(h, nonNegative(options.line_height));
-            h = hash.resourceHashEnum(h, @intFromEnum(options.wrap));
-            h = hash.resourceHashEnum(h, @intFromEnum(options.alignment));
+            h = hash.resourceHashEnum(h, @backingInt(options.wrap));
+            h = hash.resourceHashEnum(h, @backingInt(options.alignment));
             // Default overflow stays out of the hash: fingerprints of
             // runs the elision default never touches keep their pinned
             // values; clip-opted runs hash apart from elided twins.
             if (options.overflow != .ellipsis) {
-                h = hash.resourceHashEnum(hash.resourceHashBytes(h, "text_overflow"), @intFromEnum(options.overflow));
+                h = hash.resourceHashEnum(hash.resourceHashBytes(h, "text_overflow"), @backingInt(options.overflow));
             }
         } else {
             h = hash.resourceHashU8(h, 0);

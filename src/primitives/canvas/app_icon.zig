@@ -1328,7 +1328,7 @@ test "png decoder undoes sub, average, and paeth filters" {
 test "png decoder expands palette entries with transparency" {
     const gpa = testing.allocator;
     const palette = [_]u8{ 255, 0, 0, 0, 255, 0 };
-    const transparency = [_]u8{ 128 }; // entry 0 half-transparent, entry 1 opaque
+    const transparency = [_]u8{128}; // entry 0 half-transparent, entry 1 opaque
     const raw = [_]u8{ 0, 0, 1 }; // one row: filter 0, indexes 0 and 1
     const encoded = try testBuildPng(gpa, 2, 1, 8, 3, &palette, &transparency, &raw);
     defer gpa.free(encoded);

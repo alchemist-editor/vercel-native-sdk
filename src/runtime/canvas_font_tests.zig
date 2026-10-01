@@ -991,7 +991,7 @@ fn retryFontView(ui: *RetryFontApp.Ui, model: *const RetryFontModel) RetryFontAp
     // lateFontAppView above) so its frame moves when the registered
     // face's advances replace the estimator's.
     return ui.column(.{ .gap = 2 }, .{
-        ui.row(.{ .gap = 8, .padding = 12 }, .{ ui.text(.{}, late_mixed_text) }),
+        ui.row(.{ .gap = 8, .padding = 12 }, .{ui.text(.{}, late_mixed_text)}),
         ui.each(model.rows(ui.arena), retryRowKey, retryRow),
     });
 }

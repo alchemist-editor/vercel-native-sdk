@@ -57,7 +57,7 @@ pub const Filter = enum { all, active };
 
 pub const Habit = struct {
     id: u32,
-    name_storage: [max_habit_name]u8 = [_]u8{0} ** max_habit_name,
+    name_storage: [max_habit_name]u8 = @as([max_habit_name]u8, @splat(0)),
     name_len: usize = 0,
     streak: u32 = 0,
 
@@ -191,7 +191,7 @@ pub const CompiledHabitsView = canvas.CompiledMarkupView(Model, Msg, habits_mark
 /// Debug builds keep the runtime markup engine for hot reload; release
 /// builds compile it out entirely (`zig build` produces a release app —
 /// grep it for parser diagnostics to confirm nothing survived).
-const dev_markup_reload = builtin.mode == .Debug;
+const dev_markup_reload = builtin.mode == .debug;
 
 const HabitsApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = dev_markup_reload });
 

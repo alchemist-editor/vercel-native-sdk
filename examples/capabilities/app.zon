@@ -26,8 +26,8 @@
         .{
             .name = "Native SDK Capability Document",
             .role = "viewer",
-            .extensions = .{ "zncap" },
-            .mime_types = .{ "application/vnd.native-sdk.capability+json" },
+            .extensions = .{"zncap"},
+            .mime_types = .{"application/vnd.native-sdk.capability+json"},
         },
     },
     .url_schemes = .{
@@ -56,7 +56,7 @@
             .allowed_origins = .{ "zero://app", "zero://inline" },
             .external_links = .{
                 .action = "open_system_browser",
-                .allowed_urls = .{ "https://example.com/docs/*" },
+                .allowed_urls = .{"https://example.com/docs/*"},
             },
         },
     },

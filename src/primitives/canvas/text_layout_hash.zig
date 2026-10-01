@@ -47,8 +47,8 @@ fn textLayoutFingerprint(text: DrawText, options: TextLayoutOptions) u64 {
     hash = resourceHashU64(hash, drawTextFingerprint(text));
     hash = resourceHashF32(hash, nonNegative(options.max_width));
     hash = resourceHashF32(hash, nonNegative(options.line_height));
-    hash = resourceHashEnum(hash, @intFromEnum(options.wrap));
-    hash = resourceHashEnum(hash, @intFromEnum(options.alignment));
+    hash = resourceHashEnum(hash, @backingInt(options.wrap));
+    hash = resourceHashEnum(hash, @backingInt(options.alignment));
     hash = hashTextOverflow(hash, options.overflow);
     return hash;
 }
@@ -59,7 +59,7 @@ fn textLayoutFingerprint(text: DrawText, options: TextLayoutOptions) u64 {
 /// clip-opted run still hashes apart from its elided twin.
 fn hashTextOverflow(hash: u64, overflow: text_layout_types.TextOverflow) u64 {
     if (overflow == .ellipsis) return hash;
-    return resourceHashEnum(resourceHashBytes(hash, "text_overflow"), @intFromEnum(overflow));
+    return resourceHashEnum(resourceHashBytes(hash, "text_overflow"), @backingInt(overflow));
 }
 
 fn drawTextFingerprint(text: DrawText) u64 {
@@ -102,8 +102,8 @@ fn resourceHashOptionalTextLayoutOptions(hash: u64, options: ?TextLayoutOptions)
         var next = resourceHashU8(hash, 1);
         next = resourceHashF32(next, nonNegative(value.max_width));
         next = resourceHashF32(next, nonNegative(value.line_height));
-        next = resourceHashEnum(next, @intFromEnum(value.wrap));
-        next = resourceHashEnum(next, @intFromEnum(value.alignment));
+        next = resourceHashEnum(next, @backingInt(value.wrap));
+        next = resourceHashEnum(next, @backingInt(value.alignment));
         next = hashTextOverflow(next, value.overflow);
         return next;
     }

@@ -35,6 +35,7 @@
 //! else. All extern references live in core_abi.zig (staged beside the
 //! output), so ABI ratification cannot touch this emitter.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const sidecar_mod = @import("sidecar.zig");
 
@@ -554,6 +555,7 @@ const Emitter = struct {
             \\
             \\const std = @import("std");
             \\const shim_rt = @import("shim_rt.zig");
+            \\const reflection = shim_rt.reflection;
             \\const core_abi = @import("core_abi.zig");
             \\const abi = core_abi.Bindings("{f}");
             \\
@@ -925,7 +927,7 @@ const Emitter = struct {
             \\    @setEvalBranchQuota({d});
             \\    // The union and the tag table are emitted from one arm list;
             \\    // hold them equal anyway so a hand edit cannot skew dispatch.
-            \\    const fields = @typeInfo({f}).@"union".fields;
+            \\    const fields = reflection.fieldsOf(@typeInfo({f}).@"union");
             \\    if (fields.len != msg_tags.len) @compileError("core_shim: Msg arm count does not match msg_tags");
             \\    for (fields, msg_tags) |field, tag_name| {{
             \\        if (!std.mem.eql(u8, field.name, tag_name)) @compileError("core_shim: Msg arm names do not match msg_tags");
@@ -1753,8 +1755,8 @@ test "u64-attested slots generate the unsigned twin; i64 and f64 slots are untou
     try testing.expect(std.mem.indexOf(u8, generated, "abi.dispatch_number(1, shim_rt.exactF64(payload), &cmd_ptr, &cmd_len)") != null);
     try testing.expect(std.mem.indexOf(u8, generated, "abi.dispatch_number_bytes(2, shim_rt.exactF64Unsigned(payload.status), payload.body.ptr, payload.body.len, &cmd_ptr, &cmd_len)") != null);
     // The generated module stays valid Zig.
-    const source_z = try arena.dupeZ(u8, generated);
-    const tree = try std.zig.Ast.parse(arena, source_z, .zig);
+    const source_z = try arena.dupeSentinel(u8, generated, 0);
+    const tree = try std.zig.Ast.parse(arena, source_z, .{ .mode = .zig });
     try testing.expectEqual(@as(usize, 0), tree.errors.len);
 }
 
@@ -1995,8 +1997,8 @@ test "the emitted shim parses as Zig" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const source = try emitFromJson(arena, sidecar_mod.minimal_valid_json);
-    const source_z = try arena.dupeZ(u8, source);
-    const tree = try std.zig.Ast.parse(arena, source_z, .zig);
+    const source_z = try arena.dupeSentinel(u8, source, 0);
+    const tree = try std.zig.Ast.parse(arena, source_z, .{ .mode = .zig });
     try testing.expectEqual(@as(usize, 0), tree.errors.len);
 }
 
@@ -2073,8 +2075,8 @@ test "exotic strings in names and env entries emit as valid Zig" {
     );
     const parsed = try sidecar_mod.read(arena, source, &diags);
     const generated = try emit(arena, parsed, &diags);
-    const source_z = try arena.dupeZ(u8, generated);
-    const tree = try std.zig.Ast.parse(arena, source_z, .zig);
+    const source_z = try arena.dupeSentinel(u8, generated, 0);
+    const tree = try std.zig.Ast.parse(arena, source_z, .{ .mode = .zig });
     try testing.expectEqual(@as(usize, 0), tree.errors.len);
     try testing.expect(std.mem.indexOf(u8, generated, "APP\\\"MODE\\\\X") != null);
 }
@@ -2102,8 +2104,8 @@ test "channel glue speaks the sidecar's message union name" {
     try testing.expect(std.mem.indexOf(u8, generated, "return msgFromEnvelope(shim_rt.channelEnvelopeBytes(out_ptr, out_len));") != null);
     try testing.expect(std.mem.indexOf(u8, generated, "shim_rt.channelEnvelope(envelope)") != null);
     try testing.expect(std.mem.indexOf(u8, generated, "if (!header.produced) return null;") != null);
-    const source_z = try arena.dupeZ(u8, generated);
-    const tree = try std.zig.Ast.parse(arena, source_z, .zig);
+    const source_z = try arena.dupeSentinel(u8, generated, 0);
+    const tree = try std.zig.Ast.parse(arena, source_z, .{ .mode = .zig });
     try testing.expectEqual(@as(usize, 0), tree.errors.len);
 }
 

@@ -313,7 +313,7 @@ test "division by zero and overflow are loud, defined failures" {
 test "huge literals are rejected at parse time" {
     try expectParseFail("123456789012345678901234567890", expr.integer_literal_overflow_message);
     // A float literal past f32's range never becomes inf.
-    const big = "9" ** 60 ++ ".0";
+    const big = std.mem.asBytes(&@as([60]["9".len]u8, @splat("9".*))) ++ ".0";
     try expectParseFail(big, expr.number_literal_range_message);
 }
 
@@ -334,11 +334,11 @@ test "complexity bounds are taught one past" {
 
     // Depth: 16 nested parens parse, 17 teach.
     {
-        const at = "(" ** (expr.max_expression_depth - 1) ++ "1" ++ ")" ** (expr.max_expression_depth - 1);
+        const at = std.mem.asBytes(&@as([expr.max_expression_depth - 1]["(".len]u8, @splat("(".*))) ++ "1" ++ std.mem.asBytes(&@as([expr.max_expression_depth - 1][")".len]u8, @splat(")".*)));
         var tree: expr.ExprTree = .{};
         var diagnostic: expr.Diagnostic = .{};
         try testing.expect(expr.parse(at, &tree, &diagnostic));
-        const past = "(" ** expr.max_expression_depth ++ "1" ++ ")" ** expr.max_expression_depth;
+        const past = std.mem.asBytes(&@as([expr.max_expression_depth]["(".len]u8, @splat("(".*))) ++ "1" ++ std.mem.asBytes(&@as([expr.max_expression_depth][")".len]u8, @splat(")".*)));
         try expectParseFail(past, expr.expression_too_deep_message);
     }
 
@@ -764,7 +764,7 @@ test "expression bounds hold inside markup attributes end to end" {
 
     // One past the depth bound inside an attribute value, through the
     // validator (what native markup check runs)...
-    const deep = "(" ** expr.max_expression_depth ++ "1" ++ ")" ** expr.max_expression_depth;
+    const deep = std.mem.asBytes(&@as([expr.max_expression_depth]["(".len]u8, @splat("(".*))) ++ "1" ++ std.mem.asBytes(&@as([expr.max_expression_depth][")".len]u8, @splat(")".*)));
     const source = try std.fmt.allocPrint(arena, "<row gap=\"{{{s}}}\" />", .{deep});
     var parser = markup.Parser.init(arena, source);
     const info = markup.validate(try parser.parse()) orelse return error.TestUnexpectedResult;

@@ -310,7 +310,7 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
 
         pub fn applyShellViews(self: *Runtime, window_id: platform.WindowId, views: []const app_manifest.ShellView, bounds: geometry.RectF, mode: ShellApplyMode, tracked_labels: ?*[app_manifest.max_shell_views_per_window][]const u8, tracked_count: ?*usize) anyerror!void {
             var layout = ShellLayout.init(bounds, views);
-            var created: [app_manifest.max_shell_views_per_window]bool = [_]bool{false} ** app_manifest.max_shell_views_per_window;
+            var created: [app_manifest.max_shell_views_per_window]bool = @as([app_manifest.max_shell_views_per_window]bool, @splat(false));
             var created_count: usize = 0;
             while (created_count < views.len) {
                 var progressed = false;

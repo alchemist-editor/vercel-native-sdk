@@ -3,7 +3,7 @@ pub const enabled = false;
 pub const protocol_version: u8 = 3;
 pub const compiler_version = "";
 pub const inproc_symbol_prefix = "nsc_svc_";
-pub const contract_fingerprint = [_]u8{0} ** 32;
+pub const contract_fingerprint = @as([32]u8, @splat(0));
 pub const Operation = struct { name: []const u8, index: u16, deadline_ms: ?u32, cancellable: bool, streaming: bool, in_flight: u8 };
 pub const operations = [_]Operation{};
 pub fn indexOf(name: []const u8) ?u16 {

@@ -14,6 +14,7 @@
 //! conversion shells out to `cwebp` in lossless mode (`brew install
 //! webp`), so bytes are stable for a given cwebp release.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const native_sdk = @import("native_sdk");
 const markup_docs = @import("native-sdk/markup_docs.zig");
@@ -280,8 +281,8 @@ fn writeVocabJson(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !void {
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = body.written() });
 }
 
-fn enumNames(comptime E: type) [@typeInfo(E).@"enum".fields.len][]const u8 {
-    const fields = @typeInfo(E).@"enum".fields;
+fn enumNames(comptime E: type) [reflection.fieldsOf(@typeInfo(E).@"enum").len][]const u8 {
+    const fields = reflection.fieldsOf(@typeInfo(E).@"enum");
     var names: [fields.len][]const u8 = undefined;
     inline for (fields, 0..) |field, index| names[index] = field.name;
     return names;

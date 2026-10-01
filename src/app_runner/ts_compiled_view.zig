@@ -2,6 +2,7 @@
 //! never evaluates bindings or reads the model. Tree data is copied before
 //! scriptc's result arena resets; strings and nodes then live for this native
 //! tree generation. Canonical event envelopes become ordinary journaled Msgs.
+const reflection = @import("reflection");
 const std = @import("std");
 const sdk = @import("native_sdk");
 const core = @import("core.zig");
@@ -154,7 +155,7 @@ fn node(ui: *Ui, records: []const Record, index: usize, parent_end: usize, depth
 }
 
 fn event(ui: *Ui, bytes: []const u8) !core.Msg {
-    if (bytes.len < 2 or bytes[0] != 1 or bytes[1] >= @typeInfo(core.Msg).@"union".fields.len) return error.InvalidView;
+    if (bytes.len < 2 or bytes[0] != 1 or bytes[1] >= reflection.fieldsOf(@typeInfo(core.Msg).@"union").len) return error.InvalidView;
     return core.nativeViewEvent(bytes, ui.arena) orelse error.InvalidView;
 }
 
@@ -169,7 +170,7 @@ fn dragEvent(ui: *Ui, bytes: []const u8) !core.Msg {
 }
 
 fn scrollEvent(tag: u8) !Ui.ScrollMsgFn {
-    inline for (@typeInfo(core.Msg).@"union".fields, 0..) |field, index| {
+    inline for (reflection.fieldsOf(@typeInfo(core.Msg).@"union"), 0..) |field, index| {
         if (comptime sdk.canvas.ui_markup_reflect.declaredScrollStateRecord(field.type)) {
             if (tag == index) return Ui.translatedScrollMsg(@field(std.meta.Tag(core.Msg), field.name), field.type);
         }
@@ -178,7 +179,7 @@ fn scrollEvent(tag: u8) !Ui.ScrollMsgFn {
 }
 
 fn inputEvent(tag: u8) !Ui.InputMsgFn {
-    inline for (@typeInfo(core.Msg).@"union".fields, 0..) |field, index| {
+    inline for (reflection.fieldsOf(@typeInfo(core.Msg).@"union"), 0..) |field, index| {
         if (comptime sdk.canvas.ui_markup_reflect.declaredTextInputUnion(field.type)) {
             if (tag == index) return Ui.translatedInputMsg(@field(std.meta.Tag(core.Msg), field.name), field.type);
         }
@@ -234,7 +235,7 @@ test "compiled view negative integer slot keys match native iteration identities
 
 test "compiled view message bytes belong to the native tree arena" {
     if (comptime enabled) {
-        inline for (@typeInfo(core.Msg).@"union".fields, 0..) |field, tag| {
+        inline for (reflection.fieldsOf(@typeInfo(core.Msg).@"union"), 0..) |field, tag| {
             if (comptime field.type == []const u8) {
                 var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
                 defer arena.deinit();

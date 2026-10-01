@@ -352,13 +352,15 @@ fn buildScriptScene(
     count += 1;
     for (0..message_count) |row| {
         const y: f32 = @as(f32, @floatFromInt(row)) * 28 + 12 - scroll_offset;
-        commands[count] = .{ .fill_rounded_rect = .{
-            .id = @intCast(1_000 + row),
-            .rect = geometry.RectF.init(8, y, patch_surface_width - 16, 24),
-            .radius = canvas.Radius.all(6),
-            // The "toggle": message 0's bubble flips color from step 1 on.
-            .fill = .{ .color = if (row == 0 and step >= 1) canvas.Color.rgb8(37, 99, 235) else canvas.Color.rgb8(30, 41, 59) },
-        } };
+        commands[count] = .{
+            .fill_rounded_rect = .{
+                .id = @intCast(1_000 + row),
+                .rect = geometry.RectF.init(8, y, patch_surface_width - 16, 24),
+                .radius = canvas.Radius.all(6),
+                // The "toggle": message 0's bubble flips color from step 1 on.
+                .fill = .{ .color = if (row == 0 and step >= 1) canvas.Color.rgb8(37, 99, 235) else canvas.Color.rgb8(30, 41, 59) },
+            },
+        };
         count += 1;
         const text = std.fmt.bufPrint(&text_storage[row], "message {d} body{s}", .{
             row,

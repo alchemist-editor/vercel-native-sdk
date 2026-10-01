@@ -1805,9 +1805,9 @@ const CoreSnapshot = struct {
             .saved = m.saved,
             .code = m.code,
             .firedAt = m.firedAt,
-            .status = [_]u8{0} ** 32,
+            .status = @as([32]u8, @splat(0)),
             .statusLen = @min(m.status.len, 32),
-            .lastErr = [_]u8{0} ** 32,
+            .lastErr = @as([32]u8, @splat(0)),
             .lastErrLen = @min(m.lastErr.len, 32),
         };
         @memcpy(snapshot.status[0..snapshot.statusLen], m.status[0..snapshot.statusLen]);
@@ -1994,9 +1994,9 @@ const StreamSnapshot = struct {
             .durMs = @intFromFloat(asF64(m.durMs)),
             .playing = m.playing,
             .audioEvents = @intFromFloat(asF64(m.audioEvents)),
-            .lastLine = [_]u8{0} ** 32,
+            .lastLine = @as([32]u8, @splat(0)),
             .lastLineLen = @min(m.lastLine.len, 32),
-            .lastErr = [_]u8{0} ** 32,
+            .lastErr = @as([32]u8, @splat(0)),
             .lastErrLen = @min(m.lastErr.len, 32),
         };
         @memcpy(snapshot.lastLine[0..snapshot.lastLineLen], m.lastLine[0..snapshot.lastLineLen]);

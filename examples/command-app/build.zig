@@ -1,5 +1,26 @@
 // This example owns its build: it hand-wires the framework modules, src/runner.zig, and the -Dtrace/-Djs-bridge/-Dweb-engine options that the generated app graph does not expose.
 const std = @import("std");
+fn rootPath(b: *std.Build, sub_path: []const u8) []const u8 {
+    if (std.fs.path.isAbsolute(sub_path)) return sub_path;
+    return b.root.joinString(b.allocator, sub_path) catch @panic("OOM");
+}
+
+fn addRunPathDir(run: *std.Build.Step.Run, path: []const u8) void {
+    const b = run.step.owner;
+    const old = run.getEnvMap().get("PATH") orelse "";
+    run.setEnvironmentVariable("PATH", b.fmt("{s}{c}{s}", .{ path, std.fs.path.delimiter, old }));
+}
+
+fn linkMacosFramework(b: *std.Build, mod: *std.Build.Module, name: []const u8, options: std.Build.Module.LinkFrameworkOptions) void {
+    const sdk = macosSdkPath(b) orelse @panic("macOS framework linking requires SDKROOT or xcrun");
+    const stub = b.pathJoin(&.{ sdk, "System/Library/Frameworks", b.fmt("{s}.framework", .{name}), b.fmt("{s}.tbd", .{name}) });
+    const alias = b.fmt("native_sdk_framework_{s}", .{name});
+    const files = b.addWriteFiles();
+    _ = files.addCopyFile(.{ .cwd_relative = stub }, b.fmt("lib{s}.tbd", .{alias}));
+    mod.addLibraryPath(files.getDirectory());
+    mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
+    mod.linkSystemLibrary(alias, .{ .use_pkg_config = .no, .needed = options.needed, .weak = options.weak });
+}
 
 const PlatformOption = enum {
     auto,
@@ -36,6 +57,7 @@ pub fn build(b: *std.Build) void {
     const cef_dir_override = b.option([]const u8, "cef-dir", "Override CEF root directory for Chromium builds");
     const cef_auto_install_override = b.option(bool, "cef-auto-install", "Override app.zon CEF auto-install setting");
     const native_sdk_path = b.option([]const u8, "native-sdk-path", "Path to the Native SDK framework checkout") orelse default_native_sdk_path;
+    _ = b.addModule("reflection", .{ .root_source_file = nativeSdkPath(b, native_sdk_path, "src/compat/reflection.zig") });
     const selected_platform: PlatformOption = switch (platform_option) {
         .auto => if (target.result.os.tag == .macos) .macos else if (target.result.os.tag == .linux) .linux else if (target.result.os.tag == .windows) .windows else .null,
         else => platform_option,
@@ -111,10 +133,6 @@ fn nativeSdkTarget(b: *std.Build) std.Build.ResolvedTarget {
     const target = b.standardTargetOptions(.{});
     if (target.result.os.tag != .macos) return target;
 
-    if (b.sysroot == null) {
-        b.sysroot = macosSdkPath(b) orelse b.sysroot;
-    }
-
     var query = target.query;
     query.os_tag = .macos;
     query.os_version_min = .{ .semver = .{ .major = 11, .minor = 0, .patch = 0 } };
@@ -181,21 +199,23 @@ fn nativeSdkModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: st
 }
 
 fn externalModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, native_sdk_path: []const u8, path: []const u8) *std.Build.Module {
-    return b.createModule(.{
+    const mod = b.createModule(.{
         .root_source_file = nativeSdkPath(b, native_sdk_path, path),
         .target = target,
         .optimize = optimize,
     });
+    mod.addImport("reflection", b.modules.get("reflection").?);
+    return mod;
 }
 
 fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.Build.Module, exe: *std.Build.Step.Compile, platform: PlatformOption, web_engine: WebEngineOption, native_sdk_path: []const u8, cef_dir: []const u8, cef_auto_install: bool) void {
     if (platform == .macos) {
         switch (web_engine) {
             .system => {
-                const sdk_include = if (b.sysroot) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";
-                const flags: []const []const u8 = if (b.sysroot) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0" };
+                const sdk_include = if (macosSdkPath(b)) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";
+                const flags: []const []const u8 = if (macosSdkPath(b)) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0" };
                 app_mod.addCSourceFile(.{ .file = nativeSdkPath(b, native_sdk_path, "src/platform/macos/appkit_host.m"), .flags = flags });
-                app_mod.linkFramework("WebKit", .{});
+                linkMacosFramework(b, app_mod, "WebKit", .{});
             },
             .chromium => {
                 const cef_check = addCefCheck(b, target, cef_dir);
@@ -209,38 +229,38 @@ fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.B
                 // The SDK's usr/include must stay a system include dir (searched after zig's
                 // bundled libc++/libc headers). A plain -I shadows libc++'s <string.h>/<math.h>
                 // wrappers in ObjC++ and surfaces SDK nullability gaps as a diagnostic flood.
-                const sdk_include = if (b.sysroot) |sysroot| b.fmt("-isystem{s}/usr/include", .{sysroot}) else "";
-                const flags: []const []const u8 = if (b.sysroot) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include, include_arg, define_arg } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", include_arg, define_arg };
+                const sdk_include = if (macosSdkPath(b)) |sysroot| b.fmt("-isystem{s}/usr/include", .{sysroot}) else "";
+                const flags: []const []const u8 = if (macosSdkPath(b)) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include, include_arg, define_arg } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", include_arg, define_arg };
                 app_mod.addCSourceFile(.{ .file = nativeSdkPath(b, native_sdk_path, "src/platform/macos/cef_host.mm"), .flags = flags });
                 app_mod.addObjectFile(b.path(b.fmt("{s}/libcef_dll_wrapper/libcef_dll_wrapper.a", .{cef_dir})));
                 app_mod.addFrameworkPath(b.path(b.fmt("{s}/Release", .{cef_dir})));
-                app_mod.linkFramework("Chromium Embedded Framework", .{});
+                app_mod.addObjectFile(b.path(b.fmt("{s}/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{cef_dir})));
                 app_mod.addRPath(.{ .cwd_relative = "@executable_path/Frameworks" });
             },
         }
-        if (b.sysroot) |sysroot| {
+        if (macosSdkPath(b)) |sysroot| {
             app_mod.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
         }
         app_mod.addCSourceFile(.{ .file = nativeSdkPath(b, native_sdk_path, "src/platform/macos/capture_info_plist.c"), .flags = &.{} });
-        app_mod.linkFramework("AppKit", .{});
+        linkMacosFramework(b, app_mod, "AppKit", .{});
         // The audio playback service (the AppKit host's single AVPlayer).
-        app_mod.linkFramework("AVFoundation", .{});
-        app_mod.linkFramework("CoreMedia", .{});
-        app_mod.linkFramework("ScreenCaptureKit", .{ .weak = true });
+        linkMacosFramework(b, app_mod, "AVFoundation", .{});
+        linkMacosFramework(b, app_mod, "CoreMedia", .{});
+        linkMacosFramework(b, app_mod, "ScreenCaptureKit", .{ .weak = true });
         // CVPixelBuffer for the video frame path (the AppKit host's
         // AVPlayerItemVideoOutput frames are real CoreVideo symbols).
-        app_mod.linkFramework("CoreVideo", .{});
+        linkMacosFramework(b, app_mod, "CoreVideo", .{});
         // Spectrum analysis of the app's own playback: the MediaToolbox
         // audio tap hands the player's PCM to the host, and Accelerate
         // (vDSP) turns it into band magnitudes.
-        app_mod.linkFramework("MediaToolbox", .{});
-        app_mod.linkFramework("Accelerate", .{});
-        app_mod.linkFramework("Foundation", .{});
-        app_mod.linkFramework("CoreText", .{});
-        app_mod.linkFramework("UniformTypeIdentifiers", .{});
-        app_mod.linkFramework("Security", .{});
-        app_mod.linkFramework("Metal", .{});
-        app_mod.linkFramework("QuartzCore", .{});
+        linkMacosFramework(b, app_mod, "MediaToolbox", .{});
+        linkMacosFramework(b, app_mod, "Accelerate", .{});
+        linkMacosFramework(b, app_mod, "Foundation", .{});
+        linkMacosFramework(b, app_mod, "CoreText", .{});
+        linkMacosFramework(b, app_mod, "UniformTypeIdentifiers", .{});
+        linkMacosFramework(b, app_mod, "Security", .{});
+        linkMacosFramework(b, app_mod, "Metal", .{});
+        linkMacosFramework(b, app_mod, "QuartzCore", .{});
         app_mod.linkSystemLibrary("c", .{});
         if (web_engine == .chromium) app_mod.linkSystemLibrary("c++", .{});
     } else if (platform == .linux) {
@@ -335,7 +355,7 @@ fn addWebView2RuntimeRunFiles(b: *std.Build, target: std.Build.ResolvedTarget, r
     if (web_engine != .system) return;
     if (target.result.os.tag != .windows) return;
     const loader_dir = std.fs.path.dirname(webView2LoaderSubPath(target)).?;
-    run.addPathDir(b.pathFromRoot(b.pathJoin(&.{ native_sdk_path, loader_dir })));
+    addRunPathDir(run, rootPath(b, b.pathJoin(&.{ native_sdk_path, loader_dir })));
 }
 
 fn addCefRuntimeRunFiles(b: *std.Build, target: std.Build.ResolvedTarget, run: *std.Build.Step.Run, exe: *std.Build.Step.Compile, web_engine: WebEngineOption, cef_dir: []const u8) void {

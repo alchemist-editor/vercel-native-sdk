@@ -83,7 +83,7 @@ pub fn parseManifestConfig(allocator: std.mem.Allocator, source: []const u8) !Ma
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
-    const source_z = try scratch.dupeZ(u8, source);
+    const source_z = try scratch.dupeSentinel(u8, source, 0);
     @setEvalBranchQuota(4000);
     const raw = try std.zon.parse.fromSliceAlloc(raw_manifest.RawManifest, scratch, source_z, null, .{});
     return duplicateManifestConfig(allocator, raw);

@@ -1,3 +1,4 @@
+const reflection = @import("reflection");
 const std = @import("std");
 const geometry = @import("geometry");
 const canvas = @import("root.zig");
@@ -609,7 +610,7 @@ pub const ReferenceRenderSurface = struct {
             .phase_y = phase_y,
             .dst_width_px = panel_width,
             .dst_height_px = panel_height,
-            .sampling = @intFromEnum(value.sampling),
+            .sampling = @backingInt(value.sampling),
         };
         if (memo.findImageScale(key)) |pixels| return .{ .pixels = pixels, .width = panel_width };
         // Fill only when this draw would render the WHOLE panel anyway
@@ -1060,13 +1061,13 @@ fn referenceMemoHashValue(hasher: *std.hash.Wyhash, value: anytype) void {
     const T = @TypeOf(value);
     switch (@typeInfo(T)) {
         .float => {
-            const Bits = std.meta.Int(.unsigned, @bitSizeOf(T));
+            const Bits = @Int(.unsigned, @bitSizeOf(T));
             const bits: Bits = @bitCast(value);
             hasher.update(std.mem.asBytes(&bits));
         },
         .int => hasher.update(std.mem.asBytes(&value)),
         .bool => hasher.update(&[1]u8{@intFromBool(value)}),
-        .@"enum" => referenceMemoHashValue(hasher, @intFromEnum(value)),
+        .@"enum" => referenceMemoHashValue(hasher, @backingInt(value)),
         .optional => {
             if (value) |inner| {
                 hasher.update(&[1]u8{1});
@@ -1076,12 +1077,12 @@ fn referenceMemoHashValue(hasher: *std.hash.Wyhash, value: anytype) void {
             }
         },
         .@"struct" => |info| {
-            inline for (info.fields) |field| referenceMemoHashValue(hasher, @field(value, field.name));
+            inline for (reflection.fieldsOf(info)) |field| referenceMemoHashValue(hasher, @field(value, field.name));
         },
         .@"union" => {
             switch (value) {
                 inline else => |inner, tag| {
-                    referenceMemoHashValue(hasher, @intFromEnum(tag));
+                    referenceMemoHashValue(hasher, @backingInt(tag));
                     referenceMemoHashValue(hasher, inner);
                 },
             }
@@ -1127,7 +1128,6 @@ fn referenceScaleCommand(command: RenderCommand, scale: f32) RenderCommand {
 fn referenceScaleRect(rect: geometry.RectF, scale: f32) geometry.RectF {
     return geometry.RectF.init(rect.x * scale, rect.y * scale, rect.width * scale, rect.height * scale);
 }
-
 
 fn referencePixelCenter(x: usize, y: usize) geometry.PointF {
     return geometry.PointF.init(@as(f32, @floatFromInt(x)) + 0.5, @as(f32, @floatFromInt(y)) + 0.5);

@@ -64,7 +64,7 @@ pub const Store = struct {
     pub fn open(allocator: std.mem.Allocator, data_dir: []const u8) !Store {
         const path_plain = try std.fs.path.join(allocator, &.{ data_dir, "store.db" });
         defer allocator.free(path_plain);
-        const path = try allocator.dupeZ(u8, path_plain);
+        const path = try allocator.dupeSentinel(u8, path_plain, 0);
         errdefer allocator.free(path);
         var write_db = try sqlite.Connection.open(path);
         errdefer write_db.close();
@@ -77,7 +77,7 @@ pub const Store = struct {
     }
 
     pub fn openMemory(allocator: std.mem.Allocator) !Store {
-        const path = try allocator.dupeZ(u8, ":memory:");
+        const path = try allocator.dupeSentinel(u8, ":memory:", 0);
         errdefer allocator.free(path);
         var write_db = try sqlite.Connection.open(path);
         errdefer write_db.close();
@@ -719,7 +719,7 @@ test "record store refuses schema versions newer than the engine" {
     try std.Io.Dir.cwd().createDirPath(std.testing.io, dir);
     const path_plain = try std.fs.path.join(allocator, &.{ dir, "store.db" });
     defer allocator.free(path_plain);
-    const path = try allocator.dupeZ(u8, path_plain);
+    const path = try allocator.dupeSentinel(u8, path_plain, 0);
     defer allocator.free(path);
     var db = try sqlite.Connection.open(path);
     try db.exec("PRAGMA user_version=2;");

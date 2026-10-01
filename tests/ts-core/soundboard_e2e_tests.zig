@@ -942,7 +942,7 @@ test "cover assets register at install and bind the grid avatars by album id" {
     // art is JPEG for real hosts' codecs; the null platform's strict
     // decoder takes the engine's own PNG output — same register path the
     // generated wiring drives from app.zon).
-    const rgba = [_]u8{ 200, 40, 40, 255 } ** 4;
+    const rgba = std.mem.asBytes(&@as([4][4]u8, @splat(.{ 200, 40, 40, 255 }))).*;
     var encoded: [256]u8 = undefined;
     var png_writer = std.Io.Writer.fixed(&encoded);
     try canvas.png.writeRgba8(&png_writer, 2, 2, &rgba);

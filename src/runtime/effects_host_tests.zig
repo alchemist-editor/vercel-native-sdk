@@ -43,7 +43,7 @@ const HostModel = struct {
     // Payload proof: the result slice is drain scratch, so the model
     // copies a bounded prefix of what it keeps.
     bytes_len: usize = 0,
-    bytes_prefix: [max_recorded_bytes]u8 = [_]u8{0} ** max_recorded_bytes,
+    bytes_prefix: [max_recorded_bytes]u8 = @as([max_recorded_bytes]u8, @splat(0)),
     bytes_prefix_len: usize = 0,
 
     fn record(model: *HostModel, result: effects_mod.EffectHostResult) void {

@@ -103,7 +103,7 @@ pub fn resourceHashColor(hash: u64, color: Color) u64 {
 pub fn resourceHashPath(hash: u64, elements: []const PathElement) u64 {
     var next = resourceHashUsize(resourceHashBytes(hash, "path"), elements.len);
     for (elements) |element| {
-        next = resourceHashEnum(next, @intFromEnum(element.verb));
+        next = resourceHashEnum(next, @backingInt(element.verb));
         next = resourceHashPoint(next, element.points[0]);
         next = resourceHashPoint(next, element.points[1]);
         next = resourceHashPoint(next, element.points[2]);

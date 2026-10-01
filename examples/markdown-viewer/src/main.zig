@@ -138,7 +138,7 @@ pub const Model = struct {
     pending_path_len: usize = 0,
     /// Recent files, newest first, persisted via file effects.
     recent_storage: [max_recent][max_path_bytes]u8 = undefined,
-    recent_lens: [max_recent]usize = [_]usize{0} ** max_recent,
+    recent_lens: [max_recent]usize = @as([max_recent]usize, @splat(0)),
     recent_count: usize = 0,
     /// Where the recent list persists (resolved from the per-app data dir
     /// in `main`; empty in tests unless set — persistence then stays off).
@@ -146,7 +146,7 @@ pub const Model = struct {
     recent_path_len: usize = 0,
     /// `<details>` expansion flags, document order. The markup binds this
     /// field directly; `update` toggles it.
-    details_expanded: [max_details]bool = [_]bool{false} ** max_details,
+    details_expanded: [max_details]bool = @as([max_details]bool, @splat(false)),
     /// The sidebar sample currently loaded (0 = none: edited or opened).
     active_sample_id: u32 = 0,
     /// Toolbar sample-picker open state — model-owned (TEA): the anchored
@@ -176,7 +176,7 @@ pub const Model = struct {
     /// Remote Markdown images follow the normal TEA/effect boundary: source
     /// and load state live here; decoded pixels live in the runtime registry.
     /// The view sees only successful source -> ImageId mappings.
-    preview_images: [max_preview_images]PreviewImage = [_]PreviewImage{.{}} ** max_preview_images,
+    preview_images: [max_preview_images]PreviewImage = @as([max_preview_images]PreviewImage, @splat(.{})),
 
     pub const samples = [_]Sample{
         .{ .id = welcome_sample_id, .title = "Welcome", .body = @embedFile("samples/welcome.md") },
@@ -287,7 +287,7 @@ pub const Model = struct {
         model.editor.set(sample.body);
         model.active_sample_id = id;
         model.current_path_len = 0;
-        model.details_expanded = [_]bool{false} ** max_details;
+        model.details_expanded = @as([max_details]bool, @splat(false));
         // A different document starts at its top — the controlled scroll
         // would otherwise echo the old document's offset into the new one.
         model.doc_scroll = 0;
@@ -634,7 +634,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                     model.editor.set(result.bytes);
                     model.active_sample_id = 0;
                     refreshPreviewImages(model, fx);
-                    model.details_expanded = [_]bool{false} ** max_details;
+                    model.details_expanded = @as([max_details]bool, @splat(false));
                     model.doc_scroll = 0;
                     model.adoptPendingPath();
                     model.pushRecent(model.currentPath());
@@ -797,7 +797,7 @@ pub const CompiledViewerView = canvas.CompiledMarkupView(Model, Msg, viewer_mark
 
 /// Debug builds keep the runtime markup engine for hot reload; release
 /// builds compile it out entirely.
-const dev_markup_reload = builtin.mode == .Debug;
+const dev_markup_reload = builtin.mode == .debug;
 
 pub fn initialModel() Model {
     var model = Model{};

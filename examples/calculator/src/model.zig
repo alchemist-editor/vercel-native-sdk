@@ -414,7 +414,7 @@ pub const Model = struct {
     /// are ignored; the model-owned field text never shows them.
     pub fn applyChar(model: *Model, char: u21) void {
         switch (char) {
-            '0'...'9' => model.press(@enumFromInt(@intFromEnum(Key.d0) + (char - '0'))),
+            '0'...'9' => model.press(@fromBackingInt(@intCast(@backingInt(Key.d0) + (char - '0')))),
             '.', ',' => model.press(.dot),
             '+' => model.press(.add),
             '-', '−' => model.press(.subtract),

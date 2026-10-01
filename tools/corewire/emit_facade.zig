@@ -163,7 +163,7 @@ const FacadeEmitter = struct {
     inlined: []const []const u8 = &.{},
     flattened: []const []const u8 = &.{},
     node_stored: []const []const u8 = &.{},
-    used_codec: std.EnumSet(Codec) = .initEmpty(),
+    used_codec: std.EnumSet(Codec) = .empty,
     /// Named types the generated code references in type position (the
     /// import list derives from it).
     referenced: std.ArrayListUnmanaged([]const u8) = .empty,

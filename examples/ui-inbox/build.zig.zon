@@ -2,7 +2,7 @@
     .name = .ui_inbox,
     .fingerprint = 0xda57f7ad8e350129,
     .version = "0.1.0",
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0-dev.2375+d8aab4878",
     .dependencies = .{ .native_sdk = .{ .path = "../.." } },
     .paths = .{ "build.zig", "build.zig.zon", "src", "assets", "app.zon", "README.md" },
 }

@@ -13,13 +13,13 @@
         .{ .id = "app.preview.close", .title = "Close Preview" },
     },
     .shortcuts = .{
-        .{ .id = "app.refresh", .key = "r", .modifiers = .{ "primary" } },
+        .{ .id = "app.refresh", .key = "r", .modifiers = .{"primary"} },
     },
     .menus = .{
         .{
             .title = "View",
             .items = .{
-                .{ .label = "Refresh", .command = "app.refresh", .key = "r", .modifiers = .{ "primary" } },
+                .{ .label = "Refresh", .command = "app.refresh", .key = "r", .modifiers = .{"primary"} },
                 .{ .label = "Open Preview", .command = "app.preview.open" },
                 .{ .label = "Close Preview", .command = "app.preview.close" },
             },

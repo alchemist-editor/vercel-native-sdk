@@ -448,7 +448,7 @@ pub fn spawn(gpa: std.mem.Allocator, options: SpawnOptions) Error!Pty {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const resolved_z = arena.dupeZ(u8, resolved) catch return error.PtyEnvironTooLarge;
+    const resolved_z = arena.dupeSentinel(u8, resolved, 0) catch return error.PtyEnvironTooLarge;
     const argv_z = buildArgvZ(arena, options.argv) catch return error.PtyEnvironTooLarge;
     const envp_z = buildEnvpZ(arena, options.env, options.term) catch return error.PtyEnvironTooLarge;
 
@@ -815,7 +815,7 @@ fn buildArgvZ(arena: std.mem.Allocator, argv: []const []const u8) ![:null]const 
     var out = try arena.allocSentinel(?[*:0]const u8, argv.len, null);
     // argv[0] the program sees is the caller's original arg0 (the name it
     // expects); execve's separate path argument carries the resolved one.
-    for (argv, 0..) |arg, i| out[i] = try arena.dupeZ(u8, arg);
+    for (argv, 0..) |arg, i| out[i] = try arena.dupeSentinel(u8, arg, 0);
     return out;
 }
 

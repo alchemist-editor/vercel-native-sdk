@@ -143,3 +143,13 @@ Native SDK is pre-1.0: APIs still move, and the toolkit is evolving quickly. Bug
 ## License
 
 [Apache-2.0](./LICENSE)
+
+## Compiler
+
+This fork pins Zig `0.17.0-dev.2375+d8aab4878` (the latest official snapshot checked on 2026-10-01). CI verifies repository-pinned SHA-256 checksums before extracting it; `.github/actions/setup-zig/install.sh` also installs it locally without replacing a system compiler. The Native CLI accepts only that exact development version on PATH.
+
+The migration is kept as one commit above upstream main; replay performance changes after that commit. macOS framework stubs use regular library lookup to avoid this snapshot's framework resolver crash, preserving weak framework links. Generated contracts use Zig's standard cached write steps because custom build callbacks were removed; their cache keys include producer paths.
+
+The optional Ghostty-backed terminal/workbench examples are temporarily unsupported: the pinned Ghostty package requires Zig 0.16. The SDK core and ordinary apps do not require it.
+
+This snapshot has two macOS/build-cache defects worked around in `build/app.zig`: framework stubs are linked as library aliases (preserving weak links), and dependency configuration inputs use complete cwd-relative paths. A missing app-root entry forces configuration to rerun because tracking the build-root directory itself fails in this compiler; source compilation can still run incrementally.

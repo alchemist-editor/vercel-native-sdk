@@ -203,7 +203,7 @@ pub const TerminalCellMetrics = struct {
 /// (every mono cell the same), so column N lands where the painter's
 /// backgrounds, cursor, and selection put it.
 const advance_probe_len = 16;
-const advance_probe = "M" ** advance_probe_len;
+const advance_probe = std.mem.asBytes(&@as([advance_probe_len]["M".len]u8, @splat("M".*)));
 
 pub fn cellMetrics(tokens: canvas.DesignTokens) TerminalCellMetrics {
     const font_size = tokens.typography.label_size;

@@ -58,6 +58,7 @@
 //! Editing this file is never core-level work: it carries no app logic and
 //! regenerates from the SDK on every build.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const builtin = @import("builtin");
 const runner = @import("runner");
@@ -78,7 +79,7 @@ pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
 pub const Model = core.Model;
 pub const Msg = core.Msg;
 
-const dev = builtin.mode == .Debug;
+const dev = builtin.mode == .debug;
 const Adapter = native_sdk.TsUiAppWithFeatures(core, .{ .runtime_markup = dev and !ts_view.enabled });
 const App = Adapter.App;
 
@@ -535,7 +536,7 @@ fn persistRouteMatches(comptime name: []const u8, comptime Payload: type) bool {
     @setEvalBranchQuota(Adapter.msg_scan_quota);
     const info = @typeInfo(core.Msg);
     if (info != .@"union") return false;
-    inline for (info.@"union".fields) |field| {
+    inline for (reflection.fieldsOf(info.@"union")) |field| {
         if (std.mem.eql(u8, field.name, name)) return field.type == Payload;
     }
     return false;

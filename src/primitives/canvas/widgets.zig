@@ -723,7 +723,7 @@ pub fn builtinComponentCount() usize {
 }
 
 pub fn builtinComponentName(kind: BuiltinComponentKind) []const u8 {
-    return builtin_component_names[@intFromEnum(kind)];
+    return builtin_component_names[@backingInt(kind)];
 }
 
 pub fn builtinComponentDescriptor(kind: BuiltinComponentKind) BuiltinComponentDescriptor {

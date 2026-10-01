@@ -2,7 +2,7 @@
     .name = .workbench,
     .fingerprint = 0xc23e22069ff7623d,
     .version = "0.1.0",
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0-dev.2375+d8aab4878",
     .dependencies = .{
         .native_sdk = .{ .path = "../.." },
         // libghostty-vt: Ghostty's extracted terminal-state core, the
@@ -10,7 +10,7 @@
         // imports it with simd off and no macOS artifacts) — the
         // consumer-safe seam that keeps scaffolded apps free of
         // ghostty's dependency graph. Same commit as examples/terminal
-        // (the first upstream commit that builds under Zig 0.16.0).
+        // (the first upstream commit that builds under Zig 0.17.0-dev.2375+d8aab4878).
         .ghostty = .{
             .url = "https://github.com/ghostty-org/ghostty/archive/7aa9591746ffa4d2eee458960c76554352832595.tar.gz",
             .hash = "ghostty-1.3.2-dev-5UdBC-edJAVXTdYsgHOzIqgAI7hE8VqpmriEi8zgufw2",

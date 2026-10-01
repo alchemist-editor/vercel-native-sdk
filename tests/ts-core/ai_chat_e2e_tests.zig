@@ -657,11 +657,11 @@ test "a streamed reply paints its visible tail beyond the paragraph page cap" {
     defer h.destroy();
 
     const long_reply =
-        ("The lantern kept watch through the night.\n" ** 150) ++
+        (std.mem.asBytes(&@as([150]["The lantern kept watch through the night.\n".len]u8, @splat("The lantern kept watch through the night.\n".*)))) ++
         "TAIL_SENTINEL";
     const long_reply_event =
         "data: {\"choices\":[{\"delta\":{\"content\":\"" ++
-        ("The lantern kept watch through the night.\\n" ** 150) ++
+        (std.mem.asBytes(&@as([150]["The lantern kept watch through the night.\\n".len]u8, @splat("The lantern kept watch through the night.\\n".*)))) ++
         "TAIL_SENTINEL\"}}]}";
 
     try h.say("tell me a long story");
@@ -703,7 +703,7 @@ test "long visible history sends a recent suffix within the fetch body bound" {
     // Each wire pair decodes to one quote. Two individually valid SSE
     // lines build a 40 KiB visible assistant turn which needs more than
     // 80 KiB when JSON escaping puts it into the next request.
-    const escaped_quotes = "\\\"" ** (20 * 1024);
+    const escaped_quotes = std.mem.asBytes(&@as([20 * 1024]["\\\"".len]u8, @splat("\\\"".*)));
     const quote_event =
         "data: {\"choices\":[{\"delta\":{\"content\":\"" ++
         escaped_quotes ++

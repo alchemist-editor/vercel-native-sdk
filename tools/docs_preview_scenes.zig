@@ -463,7 +463,7 @@ fn buildCombobox(ui: *Ui, model: *const SceneModel) Node {
     var match_indices: [combobox_options.len]u8 = undefined;
     var match_count: usize = 0;
     for (combobox_options, 0..) |option, index| {
-        if (std.ascii.indexOfIgnoreCase(option, query) != null) {
+        if (std.ascii.findIgnoreCase(option, query) != null) {
             match_indices[match_count] = @intCast(index);
             match_count += 1;
         }

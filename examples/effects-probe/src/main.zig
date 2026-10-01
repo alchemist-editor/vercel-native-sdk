@@ -60,7 +60,7 @@ pub const stream_argv = if (builtin.os.tag == .windows) [_][]const u8{
 
 pub const Model = struct {
     line_storage: [max_visible_lines][max_line_bytes]u8 = undefined,
-    line_lens: [max_visible_lines]usize = [_]usize{0} ** max_visible_lines,
+    line_lens: [max_visible_lines]usize = @as([max_visible_lines]usize, @splat(0)),
     visible_count: usize = 0,
     total_lines: u64 = 0,
     dropped_lines: u32 = 0,

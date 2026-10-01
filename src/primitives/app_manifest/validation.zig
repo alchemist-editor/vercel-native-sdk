@@ -274,7 +274,7 @@ const ShellViewVisitState = enum {
 };
 
 fn validateShellViewParentGraph(views: []const ShellView) ValidationError!void {
-    var states = [_]ShellViewVisitState{.unvisited} ** max_shell_views_per_window;
+    var states = @as([max_shell_views_per_window]ShellViewVisitState, @splat(.unvisited));
     for (views, 0..) |_, index| {
         try validateShellViewParentAcyclic(views, index, &states);
     }

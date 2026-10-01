@@ -63,7 +63,7 @@ test "start declares the 1-second timer; pause and reset take it down" {
     try std.testing.expect(g_model.running);
     const timer = declaredTimer() orelse return error.NoTimerDeclared;
     try std.testing.expectEqual(@as(f64, 1000), timer.every_ms);
-    try std.testing.expectEqual(@intFromEnum(std.meta.Tag(core.Msg).tick), timer.msg_tag);
+    try std.testing.expectEqual(@backingInt(std.meta.Tag(core.Msg).tick), timer.msg_tag);
 
     _ = dispatch(.pause);
     try std.testing.expect(!g_model.running);

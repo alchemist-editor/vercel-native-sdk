@@ -365,7 +365,7 @@ test "vm name validation is a directory-name allowlist" {
     try std.testing.expect(!isValidVmName(".hidden"));
     try std.testing.expect(!isValidVmName("-flag"));
     try std.testing.expect(!isValidVmName("a/b"));
-    try std.testing.expect(!isValidVmName("a" ** 65));
+    try std.testing.expect(!isValidVmName(std.mem.asBytes(&@as([65]["a".len]u8, @splat("a".*)))));
 }
 
 test "lease parsing matches zero-stripped octets and lease boundaries" {

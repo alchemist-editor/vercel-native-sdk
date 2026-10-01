@@ -30,6 +30,7 @@
 //!   while an engine resolved to Chromium by flag alone stays a
 //!   configure-time error in the build graph, which does see the flag.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const types = @import("types.zig");
 
@@ -209,7 +210,7 @@ fn anyElement(list: anytype, comptime match: anytype) bool {
             return false;
         },
         .@"struct" => |info| {
-            if (comptime info.fields.len == 0) return false;
+            if (comptime reflection.fieldsOf(info).len == 0) return false;
             inline for (list) |element| {
                 if (match(element)) return true;
             }

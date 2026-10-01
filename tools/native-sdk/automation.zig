@@ -894,7 +894,7 @@ fn snapshotLiveness(bytes: []const u8, alive: *const fn (u32) bool) Liveness {
 fn pidIsAlive(pid: u32) bool {
     if (builtin.os.tag == .windows) return true;
     if (pid == 0) return false;
-    std.posix.kill(@intCast(pid), @enumFromInt(0)) catch |err| return err == error.PermissionDenied;
+    std.posix.kill(@intCast(pid), @fromBackingInt(@intCast(0))) catch |err| return err == error.PermissionDenied;
     return true;
 }
 

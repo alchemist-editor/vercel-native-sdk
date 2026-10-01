@@ -1121,7 +1121,7 @@ test "wrapped editable code preserves syntax after the document exhausts the spa
 }
 
 test "wrapped editable code paints the visible tail of an over-capacity logical line" {
-    const source = ("x" ** (text_spans.max_text_span_lines_per_paragraph * 2 + 8)) ++ "Z";
+    const source = (std.mem.asBytes(&@as([text_spans.max_text_span_lines_per_paragraph * 2 + 8]["x".len]u8, @splat("x".*)))) ++ "Z";
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var ui = Ui.init(arena.allocator());
@@ -1624,7 +1624,7 @@ test "large editable code selection repaints only visible glyphs" {
 }
 
 test "direct tree code emission honors scroll viewports and later layout pages" {
-    const horizontal_source = "x" ** 65_536;
+    const horizontal_source = std.mem.asBytes(&@as([65_536]["x".len]u8, @splat("x".*)));
     const horizontal_spans = [_]canvas.TextSpan{.{
         .text = horizontal_source,
         .monospace = true,
@@ -1652,7 +1652,7 @@ test "direct tree code emission honors scroll viewports and later layout pages" 
     try testing.expect(displayListTextBytes(horizontal_list) <= canvas.max_display_list_text_bytes);
     try testing.expect(displayListTextBytes(horizontal_list) < horizontal_source.len);
 
-    const vertical_source = ("x\n" ** 139) ++ "x";
+    const vertical_source = (std.mem.asBytes(&@as([139]["x\n".len]u8, @splat("x\n".*)))) ++ "x";
     const vertical_spans = [_]canvas.TextSpan{.{
         .text = vertical_source,
         .monospace = true,
@@ -1769,7 +1769,7 @@ test "maximal one-line numbered code adds no retained gutter bytes" {
 }
 
 test "transformed code culling maps the window back into paragraph space" {
-    const source = ("x\n" ** 139) ++ "x";
+    const source = (std.mem.asBytes(&@as([139]["x\n".len]u8, @splat("x\n".*)))) ++ "x";
     const spans = [_]canvas.TextSpan{.{
         .text = source,
         .monospace = true,
@@ -1841,7 +1841,7 @@ test "transformed code culling maps the window back into paragraph space" {
 }
 
 test "scaled code degrades under the display-list command budget" {
-    const source = ("x\n" ** 2999) ++ "x";
+    const source = (std.mem.asBytes(&@as([2999]["x\n".len]u8, @splat("x\n".*)))) ++ "x";
     const spans = [_]canvas.TextSpan{.{
         .text = source,
         .monospace = true,
@@ -1884,8 +1884,8 @@ test "scaled code degrades under the display-list command budget" {
 }
 
 test "scaled long code line degrades under the display-list text budget" {
-    const source = "x" ** 65_536;
-    const preceding_text = "y" ** 20_000;
+    const source = std.mem.asBytes(&@as([65_536]["x".len]u8, @splat("x".*)));
+    const preceding_text = std.mem.asBytes(&@as([20_000]["y".len]u8, @splat("y".*)));
     const spans = [_]canvas.TextSpan{.{
         .text = source,
         .monospace = true,

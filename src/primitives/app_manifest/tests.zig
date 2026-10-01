@@ -389,7 +389,7 @@ test "manifest validates keyboard shortcuts" {
     };
     try std.testing.expectError(error.InvalidShortcut, validateManifest(unmodified_text_key));
 
-    const too_many = [_]Shortcut{.{ .id = "duplicate-ok-for-limit-check", .key = "p" }} ** (max_shortcuts + 1);
+    const too_many = @as([max_shortcuts + 1]Shortcut, @splat(.{ .id = "duplicate-ok-for-limit-check", .key = "p" }));
     const too_many_manifest: Manifest = .{
         .identity = .{ .id = "com.example.app", .name = "example" },
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
@@ -397,7 +397,7 @@ test "manifest validates keyboard shortcuts" {
     };
     try std.testing.expectError(error.InvalidShortcut, validateManifest(too_many_manifest));
 
-    const long_id = [_]u8{'x'} ** (max_shortcut_id_bytes + 1);
+    const long_id = @as([max_shortcut_id_bytes + 1]u8, @splat('x'));
     const long_id_manifest: Manifest = .{
         .identity = .{ .id = "com.example.app", .name = "example" },
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
@@ -443,7 +443,7 @@ test "manifest validates command metadata" {
         .commands = &invalid_control_commands,
     }));
 
-    const long_title = [_]u8{'x'} ** (max_command_title_bytes + 1);
+    const long_title = @as([max_command_title_bytes + 1]u8, @splat('x'));
     const long_title_commands = [_]Command{.{ .id = "app.long-title", .title = long_title[0..] }};
     try std.testing.expectError(error.InvalidName, validateManifest(.{
         .identity = .{ .id = "com.example.app", .name = "example" },
@@ -490,7 +490,7 @@ test "manifest validates native menus" {
         .menus = &invalid_key_menus,
     }));
 
-    const too_many = [_]Menu{.{ .title = "View" }} ** (max_menus + 1);
+    const too_many = @as([max_menus + 1]Menu, @splat(.{ .title = "View" }));
     try std.testing.expectError(error.InvalidLayout, validateManifest(.{
         .identity = .{ .id = "com.example.app", .name = "example" },
         .version = .{ .major = 1, .minor = 0, .patch = 0 },
@@ -653,7 +653,7 @@ test "app id validation" {
     try validateAppId("com.example.app", .reverse_dns);
     try validateAppId("my-tool", .simple);
 
-    const oversized_id = [_]u8{'a'} ** (types.max_app_id_bytes + 1);
+    const oversized_id = @as([types.max_app_id_bytes + 1]u8, @splat('a'));
 
     try std.testing.expectError(error.InvalidId, validateAppId("", .reverse_dns));
     try std.testing.expectError(error.InvalidId, validateAppId(&oversized_id, .simple));
@@ -684,7 +684,7 @@ test "description validation" {
     try std.testing.expectError(error.InvalidDescription, validateDescription(""));
     try std.testing.expectError(error.InvalidDescription, validateDescription("two\nlines"));
     try std.testing.expectError(error.InvalidDescription, validateDescription("tab\tcharacter"));
-    try std.testing.expectError(error.InvalidDescription, validateDescription("x" ** 257));
+    try std.testing.expectError(error.InvalidDescription, validateDescription(std.mem.asBytes(&@as([257]["x".len]u8, @splat("x".*)))));
 }
 
 test "version validation and formatting" {

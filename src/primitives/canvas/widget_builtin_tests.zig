@@ -1,3 +1,4 @@
+const reflection = @import("reflection");
 const support = @import("test_support.zig");
 const widget_metrics = @import("widget_metrics.zig");
 const std = support.std;
@@ -2551,7 +2552,7 @@ test "built-in component catalog covers house component set" {
         "Toggle Group",
         "Tooltip",
     };
-    const enum_len = @typeInfo(BuiltinComponentKind).@"enum".fields.len;
+    const enum_len = reflection.fieldsOf(@typeInfo(BuiltinComponentKind).@"enum").len;
     try std.testing.expectEqual(enum_len, builtinComponentCount());
     try std.testing.expectEqual(enum_len, builtin_component_names.len);
     try std.testing.expectEqual(expected_names.len, builtin_component_names.len);
@@ -2559,14 +2560,14 @@ test "built-in component catalog covers house component set" {
         try std.testing.expectEqualStrings(expected, actual);
     }
 
-    var seen = [_]bool{false} ** enum_len;
+    var seen = @as([enum_len]bool, @splat(false));
     for (builtin_component_kinds, 0..) |kind, index| {
         const descriptor = builtinComponentDescriptor(kind);
         try std.testing.expectEqual(kind, descriptor.kind);
         try std.testing.expectEqualStrings(builtin_component_names[index], descriptor.name);
         try std.testing.expectEqualStrings(builtin_component_names[index], builtinComponentName(kind));
         try std.testing.expectEqual(BuiltinComponentStyle.house, descriptor.style);
-        const ordinal = @intFromEnum(kind);
+        const ordinal = @backingInt(kind);
         try std.testing.expectEqual(index, ordinal);
         try std.testing.expect(!seen[ordinal]);
         seen[ordinal] = true;

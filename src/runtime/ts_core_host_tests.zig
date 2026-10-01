@@ -550,9 +550,9 @@ const mini_core = struct {
                 const headers = [_]FetchHeader{.{ .name = "accept", .value = "text/event-stream" }};
                 return .{ .model = model, .cmd = cmdFetchStream(
                     "events",
-                    @intFromEnum(@as(std.meta.Tag(Msg), .stream_line)),
-                    @intFromEnum(@as(std.meta.Tag(Msg), .stream_done)),
-                    @intFromEnum(@as(std.meta.Tag(Msg), .failed)),
+                    @backingInt(@as(std.meta.Tag(Msg), .stream_line)),
+                    @backingInt(@as(std.meta.Tag(Msg), .stream_done)),
+                    @backingInt(@as(std.meta.Tag(Msg), .failed)),
                     1,
                     60_000,
                     65_536,
@@ -575,9 +575,9 @@ const mini_core = struct {
             .stop_stream => return .{ .model = model, .cmd = cmdCancel("events") },
             .dup_stream => return .{ .model = model, .cmd = cmdFetchStream(
                 "events",
-                @intFromEnum(@as(std.meta.Tag(Msg), .stream_line)),
-                @intFromEnum(@as(std.meta.Tag(Msg), .stream_done)),
-                @intFromEnum(@as(std.meta.Tag(Msg), .failed)),
+                @backingInt(@as(std.meta.Tag(Msg), .stream_line)),
+                @backingInt(@as(std.meta.Tag(Msg), .stream_done)),
+                @backingInt(@as(std.meta.Tag(Msg), .failed)),
                 0,
                 0,
                 0,
@@ -587,9 +587,9 @@ const mini_core = struct {
             ) },
             .stream_over_get => return .{ .model = model, .cmd = cmdFetchStream(
                 "get",
-                @intFromEnum(@as(std.meta.Tag(Msg), .stream_line)),
-                @intFromEnum(@as(std.meta.Tag(Msg), .stream_done)),
-                @intFromEnum(@as(std.meta.Tag(Msg), .failed)),
+                @backingInt(@as(std.meta.Tag(Msg), .stream_line)),
+                @backingInt(@as(std.meta.Tag(Msg), .stream_done)),
+                @backingInt(@as(std.meta.Tag(Msg), .failed)),
                 0,
                 0,
                 0,
@@ -599,8 +599,8 @@ const mini_core = struct {
             ) },
             .get_over_stream => return .{ .model = model, .cmd = cmdFetch(
                 "events",
-                @intFromEnum(@as(std.meta.Tag(Msg), .fetched)),
-                @intFromEnum(@as(std.meta.Tag(Msg), .failed)),
+                @backingInt(@as(std.meta.Tag(Msg), .fetched)),
+                @backingInt(@as(std.meta.Tag(Msg), .failed)),
                 0,
                 0,
                 "https://status.test/collision",
@@ -613,9 +613,9 @@ const mini_core = struct {
                 for (&commands, stream_fill_keys) |*command, key| {
                     command.* = cmdFetchStream(
                         key,
-                        @intFromEnum(@as(std.meta.Tag(Msg), .stream_line)),
-                        @intFromEnum(@as(std.meta.Tag(Msg), .stream_done)),
-                        @intFromEnum(@as(std.meta.Tag(Msg), .failed)),
+                        @backingInt(@as(std.meta.Tag(Msg), .stream_line)),
+                        @backingInt(@as(std.meta.Tag(Msg), .stream_done)),
+                        @backingInt(@as(std.meta.Tag(Msg), .failed)),
                         0,
                         0,
                         0,
@@ -819,7 +819,7 @@ const mini_core = struct {
                 @memcpy(out[first.len..], second);
                 return .{ .model = model, .cmd = out };
             },
-            .start_capture => return .{ .model = model, .cmd = cmdAudioCaptureStart(91, 0, 16_000, 1, @intFromEnum(@as(std.meta.Tag(Msg), .capture_evt))) },
+            .start_capture => return .{ .model = model, .cmd = cmdAudioCaptureStart(91, 0, 16_000, 1, @backingInt(@as(std.meta.Tag(Msg), .capture_evt))) },
             .stop_capture => return .{ .model = model, .cmd = cmdAudioCaptureStop(91) },
             .capture_evt => |event| {
                 const out = frameCreate(model.*);
@@ -2328,7 +2328,7 @@ test "a truncated collect routes err - a cut stdout never parses as whole" {
     Host.dispatch(fx, .run_collect);
     // Overfill the collect buffer past the engine bound; the fake
     // executor mirrors the real truncation flag.
-    const chunk = "x" ** 4096;
+    const chunk = std.mem.asBytes(&@as([4096]["x".len]u8, @splat("x".*)));
     var fed: usize = 0;
     while (fed <= effects_mod.max_effect_collect_bytes) : (fed += chunk.len) {
         try fx.feedOutput(job_spawn_key, chunk);

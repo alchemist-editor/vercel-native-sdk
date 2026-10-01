@@ -242,7 +242,7 @@ test "runtime validates native OS actions before platform dispatch" {
     try std.testing.expectError(error.InvalidDialogOptions, harness.runtime.showOpenDialog(.{}, dialog_paths[0..0]));
     var small_dialog_paths: [4]u8 = undefined;
     try std.testing.expectError(error.NoSpaceLeft, harness.runtime.showOpenDialog(.{}, &small_dialog_paths));
-    const long_dialog_title = [_]u8{'x'} ** (platform.max_dialog_title_bytes + 1);
+    const long_dialog_title = @as([platform.max_dialog_title_bytes + 1]u8, @splat('x'));
     try std.testing.expectError(error.DialogFieldTooLarge, harness.runtime.showOpenDialog(.{ .title = &long_dialog_title }, &dialog_paths));
     const open_result = try harness.runtime.showOpenDialog(.{ .title = "Open" }, &dialog_paths);
     try std.testing.expectEqual(@as(usize, 1), open_result.count);

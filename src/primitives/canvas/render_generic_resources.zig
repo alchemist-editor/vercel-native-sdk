@@ -367,7 +367,7 @@ fn findRenderResourceCacheEntryIndexed(previous_index: *const ResourceCacheIndex
 }
 
 fn renderResourceKeyHash(key: RenderResourceKey) u64 {
-    var hash = plan_key_index.mixHash(key.fingerprint ^ @as(u64, @intFromEnum(key.kind)));
+    var hash = plan_key_index.mixHash(key.fingerprint ^ @as(u64, @backingInt(key.kind)));
     hash = plan_key_index.mixHash(hash ^ @as(u64, key.id orelse 0) ^ @as(u64, @intCast(key.command_index)));
     hash = plan_key_index.mixHash(hash ^ @as(u64, key.image_id) ^ @as(u64, key.font_id) ^ @as(u64, @intFromBool(key.id != null)));
     return hash;

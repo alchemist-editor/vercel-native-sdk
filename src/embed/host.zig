@@ -814,7 +814,7 @@ pub const MobileHostApp = struct {
     /// path as `native_sdk_app_render_pixels`.
     presented: MobilePresentedCanvas = .{},
     present_pixels_chain: ?MobilePresentPixelsFn = null,
-    last_command_name: [max_mobile_command_name_bytes + 1]u8 = [_]u8{0} ** (max_mobile_command_name_bytes + 1),
+    last_command_name: [max_mobile_command_name_bytes + 1]u8 = @as([max_mobile_command_name_bytes + 1]u8, @splat(0)),
 
     pub fn create() !*MobileHostApp {
         const allocator = std.heap.page_allocator;
@@ -877,7 +877,7 @@ pub const MobileHostApp = struct {
         self.chrome_tabs_projected = false;
         self.presented = .{};
         self.present_pixels_chain = null;
-        self.last_command_name = [_]u8{0} ** (max_mobile_command_name_bytes + 1);
+        self.last_command_name = @as([max_mobile_command_name_bytes + 1]u8, @splat(0));
         self.embedded.initInPlace(.{
             .context = self,
             .name = "native-sdk-mobile",

@@ -15,9 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -39,9 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -61,9 +57,7 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -103,9 +97,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
+      - uses: ./.github/actions/setup-zig
         with:
-          version: 0.16.0
       # Percentile perf check: 5 cold launches asserting p90
       # first-frame latency, 5 steady-state widget clicks asserting p90 input
       # latency, then a reset-scoped retained-animation cadence sample.
@@ -132,9 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - name: Install WebKitGTK dependencies
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
       - run: zig build test-webview-system-link -Dplatform=linux
@@ -153,9 +144,8 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
+      - uses: ./.github/actions/setup-zig
         with:
-          version: 0.16.0
       # Builds the WebView example with the system engine, compiling the
       # full embedded-WebView host against the vendored WebView2 SDK
       # header (third_party/webview2). The host refuses to fall back to
@@ -183,9 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -223,9 +211,7 @@ jobs:
             step: test-examples-native-shard-4
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -243,9 +229,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
+      - uses: ./.github/actions/setup-zig
         with:
-          version: 0.16.0
       # Declare-to-use, proven on real Windows executables: the
       # canvas-only ui-inbox cross-compiles without the embedded WebView
       # layer (no WebView2Loader.dll reference, no loader installed) and
@@ -275,9 +260,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
+      - uses: ./.github/actions/setup-zig
         with:
-          version: 0.16.0
       # Deliberately NO libwebkitgtk-6.0-dev: ui-inbox declares no web
       # use, so its host compiles with the WebKitGTK stub seam and this
       # job doubles as the native-only Linux LINK test — the build can
@@ -357,9 +341,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -387,9 +369,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - name: Install Wine, Xvfb, and xdotool
         run: sudo apt-get update && sudo apt-get install -y wine xvfb xdotool
       # The Windows twin of the linux-canvas-smoke stub receipt: the
@@ -423,9 +403,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - name: Install Wine and Xvfb
         run: sudo apt-get update && sudo apt-get install -y wine xvfb
       # Cross-compiles examples/effects-probe for x86_64-windows-gnu and
@@ -442,9 +420,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - run: zig build test-examples-frontends
 
   mobile-examples:
@@ -452,9 +428,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - run: zig build test-examples-mobile
 
   scaffold:
@@ -462,9 +436,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: vercel-labs/setup-zig@v1
-        with:
-          version: 0.16.0
+      - uses: ./.github/actions/setup-zig
       - uses: actions/setup-node@v4
         with:
           node-version: 24

@@ -1005,7 +1005,7 @@ pub fn Markdown(comptime Msg: type) type {
                     if (std.ascii.startsWithIgnoreCase(trimmed, "<summary>")) {
                         _ = lines.next();
                         summary = trimmed["<summary>".len..];
-                        if (std.ascii.indexOfIgnoreCase(summary, "</summary>")) |close| {
+                        if (std.ascii.findIgnoreCase(summary, "</summary>")) |close| {
                             summary = summary[0..close];
                         }
                         summary = std.mem.trim(u8, summary, " \t");
@@ -1959,7 +1959,7 @@ fn collectHtmlBlockImageSource(
 ) bool {
     if (std.ascii.startsWithIgnoreCase(trimmed, "<summary>")) {
         var content = trimmed["<summary>".len..];
-        if (std.ascii.indexOfIgnoreCase(content, "</summary>")) |close| content = content[0..close];
+        if (std.ascii.findIgnoreCase(content, "</summary>")) |close| content = content[0..close];
         appendLeadingImageSource(output, len, std.mem.trim(u8, content, " \t"));
         paragraph_open.* = false;
         return true;

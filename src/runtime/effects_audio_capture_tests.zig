@@ -200,7 +200,7 @@ test "audio capture real-executor path binds and quiesces platform services" {
         .on_event = Fx.audioCaptureMsg(.capture),
     });
     try testing.expectEqual(platform.AudioCaptureSource.system, (try takeCapture(&fx, .started)).source);
-    try testing.expect(host.audio_captures[@intFromEnum(platform.AudioCaptureSource.system)].active);
+    try testing.expect(host.audio_captures[@backingInt(platform.AudioCaptureSource.system)].active);
 
     const pcm = [_]u8{ 1, 0, 2, 0 };
     try testing.expectEqual(platform.AudioCapturePushResult.accepted, host.pushAudioCapture(.system, 5_000_000, &pcm));
@@ -210,7 +210,7 @@ test "audio capture real-executor path binds and quiesces platform services" {
 
     fx.stopAudioCapture(44);
     _ = try takeCapture(&fx, .stopped);
-    const capture = &host.audio_captures[@intFromEnum(platform.AudioCaptureSource.system)];
+    const capture = &host.audio_captures[@backingInt(platform.AudioCaptureSource.system)];
     try testing.expect(!capture.active);
     try testing.expectEqual(@as(usize, 1), capture.stop_count);
 }
@@ -233,8 +233,8 @@ test "audio capture teardown quiesces every platform source exactly once" {
         .source = .system,
         .on_event = Fx.audioCaptureMsg(.capture),
     });
-    try testing.expect(host.audio_captures[@intFromEnum(platform.AudioCaptureSource.microphone)].active);
-    try testing.expect(host.audio_captures[@intFromEnum(platform.AudioCaptureSource.system)].active);
+    try testing.expect(host.audio_captures[@backingInt(platform.AudioCaptureSource.microphone)].active);
+    try testing.expect(host.audio_captures[@backingInt(platform.AudioCaptureSource.system)].active);
 
     fx.deinit();
     for (&host.audio_captures) |*capture| {

@@ -368,7 +368,7 @@ fn widgetChange(
 }
 
 pub fn widgetRenderStateDirtyBounds(layout: anytype, previous: WidgetRenderState, next: WidgetRenderState, tokens: DesignTokens) ?geometry.RectF {
-    var ids: [8]?ObjectId = [_]?ObjectId{null} ** 8;
+    var ids: [8]?ObjectId = @as([8]?ObjectId, @splat(null));
     var id_len: usize = 0;
     if (previous.focused_id != next.focused_id) {
         appendOptionalObjectId(&ids, &id_len, previous.focused_id);

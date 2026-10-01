@@ -627,7 +627,7 @@ test "the wiring channels drive the core: frame, key, appearance, and chrome" {
 test "boot images register and launch env overrides dispatch at install" {
     // A tiny PNG through the engine's own encoder — the register path
     // the wiring's app.zon assets ride, no side door into the registry.
-    const rgba = [_]u8{ 255, 0, 0, 255 } ** 4;
+    const rgba = std.mem.asBytes(&@as([4][4]u8, @splat(.{ 255, 0, 0, 255 }))).*;
     var encoded: [256]u8 = undefined;
     var png_writer = std.Io.Writer.fixed(&encoded);
     try canvas.png.writeRgba8(&png_writer, 2, 2, &rgba);
@@ -751,7 +751,7 @@ const BoardSnapshot = struct {
             .doneCount = m.doneCount,
             .nextId = m.nextId,
             .stampMs = m.stampMs,
-            .banner = [_]u8{0} ** 16,
+            .banner = @as([16]u8, @splat(0)),
             .banner_len = @min(m.banner.len, 16),
         };
         @memcpy(snapshot.banner[0..snapshot.banner_len], m.banner[0..snapshot.banner_len]);

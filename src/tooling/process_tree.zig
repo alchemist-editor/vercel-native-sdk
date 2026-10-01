@@ -18,7 +18,7 @@ const builtin = @import("builtin");
 pub const supported = builtin.os.tag != .windows and builtin.os.tag != .wasi;
 
 const max_groups = 4;
-var group_pids = [_]std.atomic.Value(i32){std.atomic.Value(i32).init(0)} ** max_groups;
+var group_pids = @as([max_groups]std.atomic.Value(i32), @splat(std.atomic.Value(i32).init(0)));
 var signals_installed = false;
 
 /// Value for `std.process.SpawnOptions.pgid`: 0 places the child in a
@@ -92,7 +92,7 @@ fn installSignalHandlers() void {
 fn handleExitSignal(sig: std.posix.SIG) callconv(.c) void {
     killAllOwned();
     // Conventional 128+signal exit code.
-    std.process.exit(128 +| @as(u8, @truncate(@intFromEnum(sig))));
+    std.process.exit(128 +| @as(u8, @truncate(@backingInt(sig))));
 }
 
 test "spawnPgid requests a fresh group on posix" {

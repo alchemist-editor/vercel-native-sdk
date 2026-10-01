@@ -9,6 +9,7 @@
 //! field — the manifest validator accepts the same vocabularies at
 //! `native check` time (validation.zig), so the two surfaces agree.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const types = @import("types.zig");
 
@@ -190,7 +191,7 @@ fn enumField(comptime E: type, comptime value: []const u8, comptime what: []cons
         // enum-mapped manifest field pays a full comptime pdq sort out of
         // the shared budget. A linear name scan is a handful of branches
         // per member (length short-circuit first) and needs no map.
-        for (@typeInfo(E).@"enum".fields) |field| {
+        for (reflection.fieldsOf(@typeInfo(E).@"enum")) |field| {
             if (std.mem.eql(u8, field.name, value)) return @field(E, field.name);
         }
         @compileError("unknown app.zon " ++ what ++ " \"" ++ value ++ "\" - expected one of: " ++ memberList(E));
@@ -200,7 +201,7 @@ fn enumField(comptime E: type, comptime value: []const u8, comptime what: []cons
 fn memberList(comptime E: type) []const u8 {
     comptime {
         var out: []const u8 = "";
-        for (@typeInfo(E).@"enum".fields, 0..) |field, index| {
+        for (reflection.fieldsOf(@typeInfo(E).@"enum"), 0..) |field, index| {
             out = out ++ (if (index == 0) "" else ", ") ++ field.name;
         }
         return out;

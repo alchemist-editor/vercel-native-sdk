@@ -355,7 +355,7 @@ const Snapshot = struct {
             .successes = model.successes,
             .failures = model.failures,
             .failed = model.failed,
-            .bytes = [_]u8{0} ** 256,
+            .bytes = @as([256]u8, @splat(0)),
             .bytes_len = @min(model.bytes.len, 256),
         };
         @memcpy(result.bytes[0..result.bytes_len], model.bytes[0..result.bytes_len]);

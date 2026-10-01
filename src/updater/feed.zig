@@ -133,7 +133,7 @@ fn parseVersionPart(value: []const u8) !u64 {
 
 test "signed envelope verifies and yields its release" {
     const allocator = std.testing.allocator;
-    const key_pair = try Ed25519.KeyPair.generateDeterministic([_]u8{0x42} ** Ed25519.KeyPair.seed_length);
+    const key_pair = try Ed25519.KeyPair.generateDeterministic(@as([Ed25519.KeyPair.seed_length]u8, @splat(0x42)));
     const payload =
         \\{"bundle_id":"com.example.demo","version":"1.2.3","target":"macos-aarch64","archive_url":"https://example.com/demo.tar.gz","archive_bytes":42,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","release_notes":"Better."}
     ;
@@ -155,7 +155,7 @@ test "signed envelope verifies and yields its release" {
 
 test "tampered payload is rejected" {
     const allocator = std.testing.allocator;
-    const key_pair = try Ed25519.KeyPair.generateDeterministic([_]u8{0x24} ** Ed25519.KeyPair.seed_length);
+    const key_pair = try Ed25519.KeyPair.generateDeterministic(@as([Ed25519.KeyPair.seed_length]u8, @splat(0x24)));
     const payload = "{}";
     const signature = try key_pair.sign(payload, null);
     var signature_base64: [std.base64.standard.Encoder.calcSize(Ed25519.Signature.encoded_length)]u8 = undefined;
@@ -185,8 +185,8 @@ test "semantic versions compare numerically" {
 }
 
 test "archive URLs fit the runtime output buffer" {
-    var maximum: [max_archive_url_bytes]u8 = [_]u8{'a'} ** max_archive_url_bytes;
-    @memcpy(maximum[0.."https://".len], "https://");
+    var maximum: [max_archive_url_bytes]u8 = @as([max_archive_url_bytes]u8, @splat('a'));
+    @memcpy(maximum[0.."https://example.com/".len], "https://example.com/");
     try validateRelease(.{
         .bundle_id = "com.example.demo",
         .version = "1.2.3",
@@ -196,8 +196,8 @@ test "archive URLs fit the runtime output buffer" {
         .sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     });
 
-    var oversized: [max_archive_url_bytes + 1]u8 = [_]u8{'a'} ** (max_archive_url_bytes + 1);
-    @memcpy(oversized[0.."https://".len], "https://");
+    var oversized: [max_archive_url_bytes + 1]u8 = @as([max_archive_url_bytes + 1]u8, @splat('a'));
+    @memcpy(oversized[0.."https://example.com/".len], "https://example.com/");
     try std.testing.expectError(error.InvalidUpdatePayload, validateRelease(.{
         .bundle_id = "com.example.demo",
         .version = "1.2.3",

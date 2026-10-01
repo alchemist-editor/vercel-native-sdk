@@ -424,7 +424,7 @@ fn writeCompletionItem(js: *std.json.Stringify, label: []const u8, kind: Complet
     try js.objectField("label");
     try js.write(label);
     try js.objectField("kind");
-    try js.write(@intFromEnum(kind));
+    try js.write(@backingInt(kind));
     try js.objectField("detail");
     try js.write(detail);
     try js.objectField("documentation");

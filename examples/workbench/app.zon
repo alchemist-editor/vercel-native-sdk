@@ -27,7 +27,7 @@
     },
     .security = .{
         .navigation = .{
-            .allowed_origins = .{ "*" },
+            .allowed_origins = .{"*"},
             .external_links = .{ .action = "deny" },
         },
     },

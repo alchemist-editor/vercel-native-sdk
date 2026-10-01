@@ -139,7 +139,7 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, verb: Verb, options: Option
             if (!hasOptimizeFlag(options.forwarded_args)) {
                 // The dev loop is a Debug loop: the markup hot-reload
                 // watcher and the teaching diagnostics are compiled in only
-                // when builtin.mode == .Debug, so a release-mode dev run
+                // when builtin.mode == .debug, so a release-mode dev run
                 // would silently ship a binary that never reloads. Pass an
                 // optimize flag explicitly to override.
                 try argv.append(allocator, "-Doptimize=Debug");

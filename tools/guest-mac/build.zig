@@ -16,13 +16,13 @@ pub fn build(b: *std.Build) void {
     // (VZMacTrackpadConfiguration and friends), so this one file compiles
     // against a 13.0 floor while the framework target stays at 11.0. The
     // sysroot flags mirror the framework's own ObjC compiles (addApp set
-    // b.sysroot from `xcrun --show-sdk-path`).
-    const flags: []const []const u8 = if (b.sysroot) |sysroot|
+    // SDKROOT or `xcrun --show-sdk-path`).
+    const flags: []const []const u8 = if (native_sdk.macosSdkPath(b)) |sysroot|
         &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=13.0", "-isysroot", sysroot, b.fmt("-I{s}/usr/include", .{sysroot}) }
     else
         &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=13.0" };
     app_mod.addCSourceFile(.{ .file = b.path("src/vm_host.m"), .flags = flags });
-    app_mod.linkFramework("Virtualization", .{});
+    native_sdk.linkMacosFramework(b, app_mod, "Virtualization", .{});
 
     // The test binary reaches the engine bindings through the app's real
     // dispatch paths (no VM is ever created in tests), so it links the
@@ -31,14 +31,14 @@ pub fn build(b: *std.Build) void {
     const test_mod = artifacts.tests.root_module;
     if (test_mod != app_mod) {
         test_mod.addCSourceFile(.{ .file = b.path("src/vm_host.m"), .flags = flags });
-        if (b.sysroot) |sysroot| {
+        if (native_sdk.macosSdkPath(b)) |sysroot| {
             test_mod.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
             // -L is sysroot-prefixed when --sysroot is set, so this
             // resolves to <sdk>/usr/lib (where libobjc.tbd lives).
-            test_mod.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+            test_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib" }) });
         }
-        test_mod.linkFramework("Virtualization", .{});
-        test_mod.linkFramework("Foundation", .{});
+        native_sdk.linkMacosFramework(b, test_mod, "Virtualization", .{});
+        native_sdk.linkMacosFramework(b, test_mod, "Foundation", .{});
         test_mod.linkSystemLibrary("objc", .{});
     }
 

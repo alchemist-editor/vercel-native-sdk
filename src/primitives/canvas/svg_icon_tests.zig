@@ -230,7 +230,7 @@ test "every built-in icon is a 24x24 stroke-dialect icon" {
 const grid_size: usize = 24;
 
 const Grid = struct {
-    data: [grid_size * grid_size]u8 = [_]u8{0} ** (grid_size * grid_size),
+    data: [grid_size * grid_size]u8 = @as([grid_size * grid_size]u8, @splat(0)),
 
     pub fn pixel(self: *Grid, x: i32, y: i32, coverage: f32) void {
         if (x < 0 or y < 0) return;

@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = dep.path("src/terminal_session_tests_root.zig"),
             .target = sdk_mod.resolved_target,
-            .optimize = sdk_mod.optimize orelse .Debug,
+            .optimize = sdk_mod.optimize orelse .debug,
         }),
     });
     var imports = sdk_mod.import_table.iterator();

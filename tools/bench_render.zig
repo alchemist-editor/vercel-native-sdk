@@ -1070,7 +1070,7 @@ fn medianOf(values: []u64) u64 {
 }
 
 fn runCheck(init: std.process.Init, budgets_path: []const u8) !void {
-    if (builtin.mode != .ReleaseFast) {
+    if (builtin.mode != .fast) {
         std.debug.print("bench-render --check: budgets are calibrated for ReleaseFast; rebuild with -Doptimize=ReleaseFast (got {s})\n", .{@tagName(builtin.mode)});
         return error.WrongOptimizeMode;
     }

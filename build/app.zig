@@ -7,93 +7,79 @@ const std = @import("std");
 const builtin = @import("builtin");
 const json_to_zon = @import("../src/tooling/json_to_zon.zig");
 
-/// Canonicalize a generated file by its CONTENT before another build step
-/// consumes it. `std.Build.Step.Run` normally places outputs under a cache
-/// directory keyed by every declared input. That is correct for the producer,
-/// but it means an unrelated input can change the output PATH even when the
-/// file's bytes are identical; downstream Run steps hash that path and miss
-/// their own caches. TypeScript's combined frontend is exactly that shape:
-/// service implementation edits re-run the checker while often leaving the
-/// core ABI contract byte-identical.
-///
-/// This narrow adapter gives equal bytes one immutable cache path. Consumers
-/// still invalidate whenever the bytes change, while producer-only churn
-/// stops here. It is public so the repository's fixture graph can exercise
-/// the same boundary as app builds.
-pub fn stabilizeGeneratedFile(b: *std.Build, source: std.Build.LazyPath, basename: []const u8, trace: bool) std.Build.LazyPath {
-    return StableGeneratedFile.create(b, source, basename, trace).lazyPath();
+/// Resolve a source-root path without baking in an installation prefix.
+pub fn rootPath(b: *std.Build, sub_path: []const u8) []const u8 {
+    if (std.fs.path.isAbsolute(sub_path)) return sub_path;
+    return b.root.joinString(b.allocator, sub_path) catch @panic("OOM");
 }
 
-const StableGeneratedFile = struct {
-    step: std.Build.Step,
-    source: std.Build.LazyPath,
-    basename: []const u8,
-    trace: bool,
-    generated: std.Build.GeneratedFile,
+fn rootLazyPath(b: *std.Build, path: []const u8) std.Build.LazyPath {
+    // This snapshot resolves dependency configuration paths relative to the
+    // caller's build root instead of cwd (Maker.confPathDepToCachePath).
+    // Store the complete cwd-relative path so --build-file works as well.
+    return .{ .cwd_relative = rootPath(b, path) };
+}
 
-    fn create(b: *std.Build, source: std.Build.LazyPath, basename: []const u8, trace: bool) *StableGeneratedFile {
-        const stable = b.allocator.create(StableGeneratedFile) catch @panic("OOM");
-        stable.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = b.fmt("stabilize generated {s}", .{basename}),
-                .owner = b,
-                .makeFn = make,
-            }),
-            .source = source.dupe(b),
-            .basename = b.dupePath(basename),
-            .trace = trace,
-            .generated = undefined,
+fn trackMissingPath(b: *std.Build, sub_path: []const u8) void {
+    // Track the nearest existing parent: this snapshot cannot fingerprint a
+    // nonexistent file, but creating any missing ancestor changes its parent.
+    var parent = std.fs.path.dirname(sub_path) orelse ".";
+    while (true) {
+        var dir = b.root.openDir(b.graph.io, parent, .{ .iterate = true }) catch {
+            const next = std.fs.path.dirname(parent) orelse ".";
+            if (std.mem.eql(u8, next, parent)) return;
+            parent = next;
+            continue;
         };
-        stable.generated = .{ .step = &stable.step };
-        source.addStepDependencies(&stable.step);
-        return stable;
-    }
-
-    fn lazyPath(self: *StableGeneratedFile) std.Build.LazyPath {
-        return .{ .generated = .{ .file = &self.generated } };
-    }
-
-    fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) !void {
-        _ = options;
-        const self: *StableGeneratedFile = @fieldParentPtr("step", step);
-        const b = step.owner;
-        const io = b.graph.io;
-        const arena = b.allocator;
-        const source_path = self.source.getPath3(b, step);
-        const bytes = source_path.root_dir.handle.readFileAlloc(io, source_path.sub_path, arena, .limited(64 * 1024 * 1024)) catch |err|
-            return step.fail("cannot stabilize generated {s}: {t}", .{ self.basename, err });
-
-        var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
-        const hex = std.fmt.bytesToHex(digest, .lower);
-        const output_dir = b.pathJoin(&.{ "o", "native-stable", &hex });
-        const output_path = b.pathJoin(&.{ output_dir, self.basename });
-        self.generated.path = try b.cache_root.join(arena, &.{output_path});
-
-        var reused = false;
-        if (b.cache_root.handle.readFileAlloc(io, output_path, arena, .limited(64 * 1024 * 1024))) |existing| {
-            reused = std.mem.eql(u8, existing, bytes);
-        } else |_| {}
-        if (!reused) {
-            b.cache_root.handle.createDirPath(io, output_dir) catch |err|
-                return step.fail("cannot create the stable generated-output directory for {s}: {t}", .{ self.basename, err });
-            var atomic = b.cache_root.handle.createFileAtomic(io, output_path, .{ .replace = true }) catch |err|
-                return step.fail("cannot stage stable generated {s}: {t}", .{ self.basename, err });
-            defer atomic.deinit(io);
-            atomic.file.writeStreamingAll(io, bytes) catch |err|
-                return step.fail("cannot write stable generated {s}: {t}", .{ self.basename, err });
-            atomic.replace(io) catch |err|
-                return step.fail("cannot publish stable generated {s}: {t}", .{ self.basename, err });
+        dir.close(b.graph.io);
+        if (std.mem.eql(u8, parent, ".")) {
+            // A directory dependency equal to a cache prefix becomes an empty
+            // path in this snapshot; opening it fails with FileSystemFailure.
+            // Reconfigure instead, so creating the missing root entry is seen.
+            b.graph.poisonCache();
+            return;
         }
-        step.result_cached = reused;
-        if (self.trace) std.debug.print("native build trace: {s} content {s} {s}\n", .{
-            self.basename,
-            &hex,
-            if (reused) "reused" else "changed",
-        });
+        b.dependOnDirectoryContents(rootLazyPath(b, parent));
+        return;
     }
-};
+}
+
+pub fn openRootDir(b: *std.Build, io: std.Io, sub_path: []const u8, options: std.Io.Dir.OpenOptions) !std.Io.Dir {
+    const dir = b.root.openDir(io, sub_path, options) catch |err| {
+        trackMissingPath(b, sub_path);
+        return err;
+    };
+    b.dependOnDirectoryContents(rootLazyPath(b, sub_path));
+    return dir;
+}
+
+pub fn accessRoot(b: *std.Build, io: std.Io, sub_path: []const u8, options: std.Io.Dir.AccessOptions) !void {
+    b.root.access(io, sub_path, options) catch |err| {
+        trackMissingPath(b, sub_path);
+        return err;
+    };
+    const stat = try b.root.statFile(io, sub_path);
+    if (stat.kind == .directory) b.dependOnDirectoryMetadata(rootLazyPath(b, sub_path)) else b.dependOnFileMetadata(rootLazyPath(b, sub_path));
+}
+
+fn readRootFile(b: *std.Build, io: std.Io, sub_path: []const u8, allocator: std.mem.Allocator, limit: std.Io.Limit) ![]u8 {
+    const contents = std.Io.Dir.cwd().readFileAlloc(io, rootPath(b, sub_path), allocator, limit) catch |err| {
+        trackMissingPath(b, sub_path);
+        return err;
+    };
+    b.dependOnFileContents(rootLazyPath(b, sub_path));
+    return contents;
+}
+
+/// Isolate each generated contract in a standard cached write step. Zig 0.17
+/// serializes the build graph and no longer supports custom make callbacks.
+/// Copying keeps these files immutable and their producer dependencies explicit.
+/// Unlike the old custom step, the cache key also includes the producer path.
+pub fn stabilizeGeneratedFile(b: *std.Build, source: std.Build.LazyPath, basename: []const u8, trace: bool) std.Build.LazyPath {
+    const files = b.addWriteFiles();
+    if (trace) files.step.name = b.fmt("stage generated {s}", .{basename});
+    return files.addCopyFile(source, basename);
+}
 
 /// The shared web-layer inference contract: this build graph is one thin
 /// adapter over it (the CLI's manifest tooling and the app runner are the
@@ -163,7 +149,7 @@ fn detectCoreTree(b: *std.Build, app_root: []const u8) CoreTree {
 }
 
 fn appFileExists(b: *std.Build, app_root: []const u8, sub_path: []const u8) bool {
-    b.build_root.handle.access(b.graph.io, appPath(b, app_root, sub_path), .{}) catch return false;
+    accessRoot(b, b.graph.io, appPath(b, app_root, sub_path), .{}) catch return false;
     return true;
 }
 
@@ -185,7 +171,7 @@ fn appManifestModule(b: *std.Build, app_root: []const u8, manifest_name: []const
     if (!json_to_zon.isJsonPath(path)) {
         return b.createModule(.{ .root_source_file = b.path(path) });
     }
-    const source = b.build_root.handle.readFileAlloc(b.graph.io, path, b.allocator, .limited(1024 * 1024)) catch
+    const source = readRootFile(b, b.graph.io, path, b.allocator, .limited(1024 * 1024)) catch
         @panic("cannot read app.json");
     const zon = json_to_zon.convertAlloc(b.allocator, source) catch |err| switch (err) {
         error.NullNotAllowed => @panic("app.json cannot contain null values; omit optional fields instead"),
@@ -262,7 +248,7 @@ pub fn isRootMarkupSourcePath(path: []const u8) bool {
 /// `windows(model)` owns dynamic liveness.
 fn collectTsWindowViews(b: *std.Build, app_root: []const u8) TsWindowViews {
     const windows_path = appPath(b, app_root, "src/windows");
-    var dir = b.build_root.handle.openDir(b.graph.io, windows_path, .{ .iterate = true }) catch return .{ .views = &.{}, .sources = &.{} };
+    var dir = openRootDir(b, b.graph.io, windows_path, .{ .iterate = true }) catch return .{ .views = &.{}, .sources = &.{} };
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return .{ .views = &.{}, .sources = &.{} };
     defer walker.deinit();
@@ -270,7 +256,7 @@ fn collectTsWindowViews(b: *std.Build, app_root: []const u8) TsWindowViews {
     var sources: std.ArrayList(TsMarkupSource) = .empty;
     while (walker.next(b.graph.io) catch null) |entry| {
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.path, ".native")) continue;
-        const normalized_path = b.dupe(entry.path);
+        const normalized_path = b.allocator.dupe(u8, entry.path) catch @panic("OOM");
         for (normalized_path) |*char| {
             if (char.* == '\\') char.* = '/';
         }
@@ -318,7 +304,7 @@ fn collectTsWindowViews(b: *std.Build, app_root: []const u8) TsWindowViews {
 /// resolver without changing the separate window resolver root.
 fn collectAppMarkupSources(b: *std.Build, app_root: []const u8, window_views: TsWindowViews) TsAppMarkupSources {
     const src_path = appPath(b, app_root, "src");
-    var dir = b.build_root.handle.openDir(b.graph.io, src_path, .{ .iterate = true }) catch
+    var dir = openRootDir(b, b.graph.io, src_path, .{ .iterate = true }) catch
         return .{ .files = &.{}, .sources = &.{} };
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return .{ .files = &.{}, .sources = &.{} };
@@ -327,7 +313,7 @@ fn collectAppMarkupSources(b: *std.Build, app_root: []const u8, window_views: Ts
     var files: std.ArrayList(TsMarkupSource) = .empty;
     while (walker.next(b.graph.io) catch null) |entry| {
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.path, ".native")) continue;
-        const normalized_path = b.dupe(entry.path);
+        const normalized_path = b.allocator.dupe(u8, entry.path) catch @panic("OOM");
         for (normalized_path) |*char| {
             if (char.* == '\\') char.* = '/';
         }
@@ -842,7 +828,7 @@ fn scriptcProfileOptimization(b: *std.Build, dep: *std.Build.Dependency, optimiz
                     continue;
                 };
             };
-            return if (optimize == .Debug) "dev" else "release";
+            return if (optimize == .debug) "dev" else "release";
         }
         dir = std.fs.path.dirname(dir) orelse return null;
     }
@@ -851,7 +837,7 @@ fn scriptcProfileOptimization(b: *std.Build, dep: *std.Build.Dependency, optimiz
 /// The SDK dependency's real root, resolved the way both the toolchain
 /// check and its teaching name it.
 fn tsSdkRoot(allocator: std.mem.Allocator, io: std.Io, dep: *std.Build.Dependency) []const u8 {
-    const raw_root = dep.builder.build_root.path orelse ".";
+    const raw_root = rootPath(dep.builder, ".");
     return std.Io.Dir.cwd().realPathFileAlloc(io, raw_root, allocator) catch raw_root;
 }
 
@@ -861,7 +847,7 @@ const TsToolingConsumer = enum { app_core, sqlite_schema };
 /// frontend and relational schema generator. Keep app-shape assertions out
 /// of this helper: a Zig core may use SQLite without carrying a markup view.
 fn tsToolingPreflight(b: *std.Build, dep: *std.Build.Dependency, consumer: TsToolingConsumer) []const u8 {
-    const node = b.findProgram(&.{"node"}, &.{}) catch switch (consumer) {
+    const node = b.findProgram(.{ .names = &.{"node"} }) orelse switch (consumer) {
         .app_core => @panic("\nbuilding a TypeScript app core needs node on PATH (the @native-sdk/core frontend checks the" ++
             " core at build time; the binary you ship carries no JS runtime).\nInstall Node.js 24+" ++
             " — https://nodejs.org or `brew install node` — and re-run.\n"),
@@ -1029,7 +1015,7 @@ fn tsCoreStage(
         migrations_zig = sqlite_check.addOutputFileArg("migrations.zig");
         sqlite_check.addArg("--metadata-out");
         _ = sqlite_check.addOutputFileArg("sqlite.meta.json");
-        sqlite_check.addArgs(&.{ "--state", b.pathFromRoot(appPath(b, app_root, "src/schema/migrations.lock.json")) });
+        sqlite_check.addArgs(&.{ "--state", rootPath(b, appPath(b, app_root, "src/schema/migrations.lock.json")) });
         if (appFileExists(b, app_root, "src/schema/migrations.lock.json")) {
             sqlite_check.addFileInput(b.path(appPath(b, app_root, "src/schema/migrations.lock.json")));
         }
@@ -1107,7 +1093,7 @@ fn tsCoreStage(
     // corewire, compiled from the SDK dependency for the build host: one
     // invocation projects the generated compile entry and its profile,
     // so the profile's entry spelling and the facade file can never skew.
-    const corewire_exe = @import("corewire.zig").executable(b, dep.builder, node, .Debug, useLlvmWorkaround(b.graph.host));
+    const corewire_exe = @import("corewire.zig").executable(b, dep.builder, node, .debug, useLlvmWorkaround(b.graph.host));
     const project = b.addRunArtifact(corewire_exe);
     project.setName("native corewire (core facade + profile)");
     project.addArg("--sidecar");
@@ -1388,7 +1374,7 @@ fn sqliteMigrationsStage(b: *std.Build, dep: *std.Build.Dependency, app_root: []
     generate.addDirectoryArg(b.path(appPath(b, app_root, "src")));
     generate.addArg("--zig-out");
     const migrations = generate.addOutputFileArg("migrations.zig");
-    generate.addArgs(&.{ "--state", b.pathFromRoot(appPath(b, app_root, "src/schema/migrations.lock.json")) });
+    generate.addArgs(&.{ "--state", rootPath(b, appPath(b, app_root, "src/schema/migrations.lock.json")) });
     if (appFileExists(b, app_root, "src/schema/migrations.lock.json")) {
         generate.addFileInput(b.path(appPath(b, app_root, "src/schema/migrations.lock.json")));
     }
@@ -1399,7 +1385,7 @@ fn sqliteMigrationsStage(b: *std.Build, dep: *std.Build.Dependency, app_root: []
 }
 
 fn addAppSqlDirInputs(b: *std.Build, run: *std.Build.Step.Run, src_path: []const u8) void {
-    var dir = b.build_root.handle.openDir(b.graph.io, src_path, .{ .iterate = true }) catch return;
+    var dir = openRootDir(b, b.graph.io, src_path, .{ .iterate = true }) catch return;
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return;
     defer walker.deinit();
@@ -1413,7 +1399,7 @@ fn addAppSqlDirInputs(b: *std.Build, run: *std.Build.Step.Run, src_path: []const
 /// byte folded to '_'), the -o name the external compile builds under.
 fn externalCoreSymbolName(b: *std.Build, app_name: []const u8) []const u8 {
     const stem = b.fmt("{s}_core", .{app_name});
-    const sanitized = b.dupe(stem);
+    const sanitized = b.allocator.dupe(u8, stem) catch @panic("OOM");
     for (sanitized) |*char| {
         const ok = (char.* >= 'a' and char.* <= 'z') or (char.* >= 'A' and char.* <= 'Z') or
             (char.* >= '0' and char.* <= '9') or char.* == '_';
@@ -1425,7 +1411,7 @@ fn externalCoreSymbolName(b: *std.Build, app_name: []const u8) []const u8 {
 /// Declare every .ts file in an SDK-relative directory as a file input of
 /// the transpile step (the SDK library modules an app may import).
 fn addTsDirInputs(b: *std.Build, sdk_builder: *std.Build, transpile: *std.Build.Step.Run, dir_path: []const u8) void {
-    var dir = sdk_builder.build_root.handle.openDir(b.graph.io, dir_path, .{ .iterate = true }) catch return;
+    var dir = openRootDir(sdk_builder, b.graph.io, dir_path, .{ .iterate = true }) catch return;
     defer dir.close(b.graph.io);
     var it = dir.iterate();
     while (it.next(b.graph.io) catch null) |entry| {
@@ -1438,7 +1424,7 @@ fn addTsDirInputs(b: *std.Build, sdk_builder: *std.Build, transpile: *std.Build.
 /// Declare every .ts file under the app's src/ (recursively — a core may
 /// split into subdirectories) as a file input of the transpile step.
 fn addAppTsDirInputs(b: *std.Build, transpile: *std.Build.Step.Run, src_path: []const u8) void {
-    var dir = b.build_root.handle.openDir(b.graph.io, src_path, .{ .iterate = true }) catch return;
+    var dir = openRootDir(b, b.graph.io, src_path, .{ .iterate = true }) catch return;
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return;
     defer walker.deinit();
@@ -1453,13 +1439,13 @@ fn addAppTsDirInputs(b: *std.Build, transpile: *std.Build.Step.Run, src_path: []
 /// scratch tree. `src/services/` is a separate compiler class and `.d.ts`
 /// files are declarations for editor/provider use, not scriptc source inputs.
 fn addAppCoreTsDirInputs(b: *std.Build, stage: *std.Build.Step.Run, src_path: []const u8) void {
-    var dir = b.build_root.handle.openDir(b.graph.io, src_path, .{ .iterate = true }) catch return;
+    var dir = openRootDir(b, b.graph.io, src_path, .{ .iterate = true }) catch return;
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return;
     defer walker.deinit();
     while (walker.next(b.graph.io) catch null) |entry| {
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.basename, ".ts") or std.mem.endsWith(u8, entry.basename, ".d.ts")) continue;
-        const normalized = b.dupe(entry.path);
+        const normalized = b.allocator.dupe(u8, entry.path) catch @panic("OOM");
         for (normalized) |*char| if (char.* == '\\') {
             char.* = '/';
         };
@@ -1482,7 +1468,7 @@ pub fn addStagedCoreSdkInputs(b: *std.Build, sdk_builder: *std.Build, stage: *st
 
 fn appHasServiceFiles(b: *std.Build, app_root: []const u8) bool {
     const services_path = appPath(b, app_root, "src/services");
-    var dir = b.build_root.handle.openDir(b.graph.io, services_path, .{ .iterate = true }) catch return false;
+    var dir = openRootDir(b, b.graph.io, services_path, .{ .iterate = true }) catch return false;
     defer dir.close(b.graph.io);
     var walker = dir.walk(b.allocator) catch return false;
     defer walker.deinit();
@@ -1612,7 +1598,7 @@ pub const MobileTsCore = struct {
 pub fn addMobileLib(b: *std.Build, dep: *std.Build.Dependency, options: MobileLibOptions) void {
     const target = nativeSdkTarget(b);
     const optimize_request = b.option(std.builtin.OptimizeMode, "optimize", "Prioritize performance, safety, or binary size");
-    const optimize = exampleOptimizeMode(b, optimize_request, .Debug);
+    const optimize = exampleOptimizeMode(b, optimize_request, .debug);
     addMobileLibWithTarget(b, dep, target, optimize, options);
 }
 
@@ -1638,6 +1624,7 @@ fn addMobileLibWithTarget(b: *std.Build, dep: *std.Build.Dependency, target: std
         .optimize = optimize,
         .pic = pic,
     });
+    exports_mod.addImport("reflection", dep.module("reflection"));
     exports_mod.addImport("native_sdk", native_sdk_mod);
     if (options.scene == .canvas) {
         const mobile_options = b.addOptions();
@@ -1671,6 +1658,7 @@ fn addMobileLibWithTarget(b: *std.Build, dep: *std.Build.Dependency, target: std
             }));
             break :ts_app mod;
         } else localModule(b, target, optimize, options.main);
+        app_mod.addImport("reflection", dep.module("reflection"));
         app_mod.addImport("native_sdk", native_sdk_mod);
         exports_mod.addImport("app", app_mod);
     }
@@ -1727,7 +1715,7 @@ fn addMobileLibWithTarget(b: *std.Build, dep: *std.Build.Dependency, target: std
 /// Rebuild a TypeScript embed library from its object members. Android
 /// needs flattening; iOS needs Darwin archive member alignment.
 fn mergeMobileArchive(b: *std.Build, dep: *std.Build.Dependency, lib: *std.Build.Step.Compile, name: []const u8, format: []const u8) std.Build.LazyPath {
-    const node = b.findProgram(&.{"node"}, &.{}) catch
+    const node = b.findProgram(.{ .names = &.{"node"} }) orelse
         @panic("\nmerging the mobile TypeScript archives needs node on PATH (the TypeScript core lane already requires it).\n");
     const merge = b.addSystemCommand(&.{node});
     merge.addFileArg(dep.path("packages/core/scripts/merge_static_archives.mjs"));
@@ -1758,8 +1746,8 @@ pub fn addApp(b: *std.Build, dep: *std.Build.Dependency, app_options: AppOptions
 pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: AppOptions) AppArtifacts {
     const target = nativeSdkTarget(b);
     const optimize_request = b.option(std.builtin.OptimizeMode, "optimize", "Prioritize performance, safety, or binary size");
-    const optimize = exampleOptimizeMode(b, optimize_request, .Debug);
-    const app_optimize = exampleOptimizeMode(b, optimize_request, .ReleaseFast);
+    const optimize = exampleOptimizeMode(b, optimize_request, .debug);
+    const app_optimize = exampleOptimizeMode(b, optimize_request, .fast);
     const build_trace = b.option(bool, "build-trace", "Trace generated TypeScript ABI artifacts and cache reuse") orelse false;
     const scriptc_optimization = scriptcProfileOptimization(b, dep, app_optimize);
 
@@ -1928,7 +1916,7 @@ pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: A
         });
         const link_mod = b.createModule(.{ .target = target, .optimize = app_optimize });
         link_mod.addObject(app_code);
-        if (app_optimize == .Debug) link_mod.addObject(markupDataObject(b, target, app_optimize, stage.markup_c));
+        if (app_optimize == .debug) link_mod.addObject(markupDataObject(b, target, app_optimize, stage.markup_c));
         // Object dependencies propagate framework/system-library NAMES, but
         // Zig does not propagate the search paths or rpaths recorded on the
         // module that produced an object. Restate those path-only facts on
@@ -1962,7 +1950,7 @@ pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: A
     // on GUI exes (handles inherit; only console AUTO-allocation is
     // gated by the subsystem), so automation harnesses that pipe
     // `app.exe > log 2>&1` keep their logs either way.
-    if (target.result.os.tag == .windows and app_optimize != .Debug) {
+    if (target.result.os.tag == .windows and app_optimize != .debug) {
         exe.subsystem = .windows;
     }
     linkPlatform(b, dep, target, app_mod, exe, selected_platform, web_engine, web_layer, cef_dir, cef_auto_install);
@@ -1981,7 +1969,7 @@ pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: A
     // the direct cached-artifact fast path.
     const run = if (service_install != null) run: {
         const suffix = if (target.result.os.tag == .windows) ".exe" else "";
-        const value = b.addSystemCommand(&.{b.getInstallPath(.bin, b.fmt("{s}{s}", .{ app_options.name, suffix }))});
+        const value = b.addRunFile(b.graph.path(.install_bin, b.fmt("{s}{s}", .{ app_options.name, suffix })));
         value.step.dependOn(&install.step);
         value.step.dependOn(&service_install.?.step);
         break :run value;
@@ -1999,7 +1987,7 @@ pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: A
     else
         app_mod;
     if (ts_stage) |stage| {
-        if (optimize == .Debug) test_app_mod.addObject(markupDataObject(b, target, optimize, stage.markup_c));
+        if (optimize == .debug) test_app_mod.addObject(markupDataObject(b, target, optimize, stage.markup_c));
     }
     const tests = b.addTest(.{ .root_module = test_app_mod, .use_llvm = useLlvmWorkaround(target) });
     const test_step = b.step("test", "Run tests");
@@ -2126,7 +2114,7 @@ pub fn addAppArtifacts(b: *std.Build, dep: *std.Build.Dependency, app_options: A
         // The CLI resolves SDK-owned package inputs (the vendored
         // WebView2 loader) from the framework root; the cached artifact's
         // own location cannot derive it, so hand it over explicitly.
-        package_run.setEnvironmentVariable("NATIVE_SDK_PATH", dep.builder.pathFromRoot("."));
+        package_run.setEnvironmentVariable("NATIVE_SDK_PATH", rootPath(dep.builder, "."));
         package_run.addArgs(&.{ "package", "--target", package_target_name, "--manifest", manifest_name, "--output" });
         package_run.addArg(if (host_os == .macos)
             b.fmt("zig-out/package/{s}.app", .{app_options.name})
@@ -2197,11 +2185,11 @@ pub fn useLlvmWorkaround(target: std.Build.ResolvedTarget) ?bool {
 
 fn exampleOptimizeMode(b: *std.Build, requested: ?std.builtin.OptimizeMode, default_mode: std.builtin.OptimizeMode) std.builtin.OptimizeMode {
     if (requested) |mode| return mode;
-    return switch (b.release_mode) {
+    return switch (b.graph.release_mode) {
         .off => default_mode,
-        .any, .fast => .ReleaseFast,
-        .safe => .ReleaseSafe,
-        .small => .ReleaseSmall,
+        .any, .fast => .fast,
+        .safe => .safe,
+        .small => .small,
     };
 }
 
@@ -2231,6 +2219,7 @@ fn appModule(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Resolv
         })
     else
         localModule(b, target, optimize, appPath(b, app_options.app_root, app_options.main));
+    app_mod.addImport("reflection", dep.module("reflection"));
     app_mod.addImport("native_sdk", native_sdk_mod);
     app_mod.addImport("runner", runner_mod);
     if (ts_stage != null) {
@@ -2246,7 +2235,7 @@ fn appModule(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Resolv
         // data object. Supplying this generated module in Debug would put
         // the authored root back into the app-code dependency graph even
         // though the runner's comptime branch never imports it.
-        if (optimize != .Debug) {
+        if (optimize != .debug) {
             app_mod.addImport("app_markup_root", b.createModule(.{
                 .root_source_file = stage.app_markup_root,
                 .target = target,
@@ -2318,10 +2307,6 @@ fn nativeSdkTarget(b: *std.Build) std.Build.ResolvedTarget {
     const target = b.standardTargetOptions(.{});
     if (target.result.os.tag != .macos) return target;
 
-    if (b.sysroot == null) {
-        b.sysroot = macosSdkPath(b) orelse b.sysroot;
-    }
-
     var query = target.query;
     query.os_tag = .macos;
     query.os_version_min = .{ .semver = .{ .major = 11, .minor = 0, .patch = 0 } };
@@ -2347,8 +2332,8 @@ const sqlite_c_defines = [_][]const u8{
 /// configure under a mobile -Dtarget (the mobile e2e battery).
 pub fn sqliteCFlags(b: *std.Build, target: std.Build.ResolvedTarget) []const []const u8 {
     if (target.result.os.tag == .ios) {
-        const sysroot = b.sysroot orelse iosSdkPath(b, target.result.abi == .simulator) orelse
-            std.debug.panic("a store-capable iOS library needs the Apple SDK; install Xcode or pass --sysroot <iphone SDK path>", .{});
+        const sysroot = b.option([]const u8, "sdk-root", "Platform SDK root for C compilation") orelse iosSdkPath(b, target.result.abi == .simulator) orelse
+            std.debug.panic("a store-capable iOS library needs the Apple SDK; install Xcode or pass -Dsdk-root=<iphone SDK path>", .{});
         return b.dupeStrings(&.{
             sqlite_c_defines[0],
             sqlite_c_defines[1],
@@ -2364,8 +2349,8 @@ pub fn sqliteCFlags(b: *std.Build, target: std.Build.ResolvedTarget) []const []c
         });
     }
     if (target.result.abi.isAndroid()) {
-        const sysroot = b.sysroot orelse androidNdkSysrootPath(b) orelse
-            std.debug.panic("a store-capable Android library needs the NDK; set ANDROID_NDK_ROOT or ANDROID_HOME, or pass --sysroot <NDK sysroot>", .{});
+        const sysroot = b.option([]const u8, "sdk-root", "Platform SDK root for C compilation") orelse androidNdkSysrootPath(b) orelse
+            std.debug.panic("a store-capable Android library needs the NDK; set ANDROID_NDK_ROOT or ANDROID_HOME, or pass -Dsdk-root=<NDK sysroot>", .{});
         const triple = target.result.linuxTriple(b.allocator) catch @panic("out of memory");
         return b.dupeStrings(&.{
             sqlite_c_defines[0],
@@ -2528,7 +2513,13 @@ fn buildDirExists(b: *std.Build, path: []const u8) bool {
     return true;
 }
 
-fn macosSdkPath(b: *std.Build) ?[]const u8 {
+pub fn addRunPathDir(run: *std.Build.Step.Run, path: []const u8) void {
+    const b = run.step.owner;
+    const old = run.getEnvMap().get("PATH") orelse "";
+    run.setEnvironmentVariable("PATH", b.fmt("{s}{c}{s}", .{ path, std.fs.path.delimiter, old }));
+}
+
+pub fn macosSdkPath(b: *std.Build) ?[]const u8 {
     if (b.graph.environ_map.get("SDKROOT")) |sdkroot| {
         if (sdkroot.len > 0) return sdkroot;
     }
@@ -2544,6 +2535,21 @@ fn macosSdkPath(b: *std.Build) ?[]const u8 {
         return null;
     }
     return std.mem.trimEnd(u8, result.stdout, "\r\n");
+}
+
+/// Zig 0.17.0-dev.2375's framework resolver calls appendAssumeCapacity without
+/// reserving linker-input storage. Route SDK stubs through ordinary library
+/// lookup, which reserves storage and retains needed/weak linkage semantics.
+/// The stub's install-name still names the original system framework.
+pub fn linkMacosFramework(b: *std.Build, mod: *std.Build.Module, name: []const u8, options: std.Build.Module.LinkFrameworkOptions) void {
+    const sdk = macosSdkPath(b) orelse @panic("macOS framework linking requires SDKROOT or xcrun");
+    const stub = b.pathJoin(&.{ sdk, "System/Library/Frameworks", b.fmt("{s}.framework", .{name}), b.fmt("{s}.tbd", .{name}) });
+    const alias = b.fmt("native_sdk_framework_{s}", .{name});
+    const files = b.addWriteFiles();
+    _ = files.addCopyFile(.{ .cwd_relative = stub }, b.fmt("lib{s}.tbd", .{alias}));
+    mod.addLibraryPath(files.getDirectory());
+    mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "usr/lib" }) });
+    mod.linkSystemLibrary(alias, .{ .use_pkg_config = .no, .needed = options.needed, .weak = options.weak });
 }
 
 fn localModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, path: []const u8) *std.Build.Module {
@@ -2622,11 +2628,13 @@ fn nativeSdkModuleWithTerminal(b: *std.Build, dep: *std.Build.Dependency, target
 }
 
 fn externalModule(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, path: []const u8) *std.Build.Module {
-    return b.createModule(.{
+    const mod = b.createModule(.{
         .root_source_file = dep.path(path),
         .target = target,
         .optimize = optimize,
     });
+    mod.addImport("reflection", dep.module("reflection"));
+    return mod;
 }
 
 // -fno-sanitize=builtin on every ObjC compile: Zig 0.16.0's Debug UBSan
@@ -2643,10 +2651,10 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
     if (platform == .macos) {
         switch (web_engine) {
             .system => {
-                const sdk_include = if (b.sysroot) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";
-                const flags: []const []const u8 = if (b.sysroot) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0" };
+                const sdk_include = if (macosSdkPath(b)) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";
+                const flags: []const []const u8 = if (macosSdkPath(b)) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC", "-mmacosx-version-min=11.0" };
                 app_mod.addCSourceFile(.{ .file = dep.path("src/platform/macos/appkit_host.m"), .flags = flags });
-                app_mod.linkFramework("WebKit", .{});
+                linkMacosFramework(b, app_mod, "WebKit", .{});
             },
             .chromium => {
                 const cef_check = addCefCheck(b, target, cef_dir);
@@ -2660,33 +2668,33 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
                 // The SDK's usr/include must stay a system include dir (searched after zig's
                 // bundled libc++/libc headers). A plain -I shadows libc++'s <string.h>/<math.h>
                 // wrappers in ObjC++ and surfaces SDK nullability gaps as a diagnostic flood.
-                const sdk_include = if (b.sysroot) |sysroot| b.fmt("-isystem{s}/usr/include", .{sysroot}) else "";
-                const flags: []const []const u8 = if (b.sysroot) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include, include_arg, define_arg } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", include_arg, define_arg };
+                const sdk_include = if (macosSdkPath(b)) |sysroot| b.fmt("-isystem{s}/usr/include", .{sysroot}) else "";
+                const flags: []const []const u8 = if (macosSdkPath(b)) |sysroot| &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include, include_arg, define_arg } else &.{ "-fobjc-arc", "-fno-sanitize=builtin", "-ObjC++", "-std=c++17", "-stdlib=libc++", "-mmacosx-version-min=11.0", include_arg, define_arg };
                 app_mod.addCSourceFile(.{ .file = dep.path("src/platform/macos/cef_host.mm"), .flags = flags });
                 app_mod.addObjectFile(b.path(b.fmt("{s}/libcef_dll_wrapper/libcef_dll_wrapper.a", .{cef_dir})));
-                app_mod.linkFramework("Chromium Embedded Framework", .{});
+                app_mod.addObjectFile(b.path(b.fmt("{s}/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{cef_dir})));
             },
         }
-        app_mod.linkFramework("AppKit", .{});
+        linkMacosFramework(b, app_mod, "AppKit", .{});
         // The audio playback service (the AppKit host's single AVPlayer).
-        app_mod.linkFramework("AVFoundation", .{});
-        app_mod.linkFramework("CoreMedia", .{});
-        app_mod.linkFramework("ScreenCaptureKit", .{ .weak = true });
+        linkMacosFramework(b, app_mod, "AVFoundation", .{});
+        linkMacosFramework(b, app_mod, "CoreMedia", .{});
+        linkMacosFramework(b, app_mod, "ScreenCaptureKit", .{ .weak = true });
         // CVPixelBuffer for the video frame path (the video player's
         // AVPlayerItemVideoOutput frames). CoreMedia's CMTime use stays
         // header-only, but the pixel-buffer calls are real symbols.
-        app_mod.linkFramework("CoreVideo", .{});
+        linkMacosFramework(b, app_mod, "CoreVideo", .{});
         // Spectrum analysis of the app's own playback: the MediaToolbox
         // audio tap hands the player's PCM to the host, and Accelerate
         // (vDSP) turns it into band magnitudes.
-        app_mod.linkFramework("MediaToolbox", .{});
-        app_mod.linkFramework("Accelerate", .{});
-        app_mod.linkFramework("Foundation", .{});
-        app_mod.linkFramework("CoreText", .{});
-        app_mod.linkFramework("UniformTypeIdentifiers", .{});
-        app_mod.linkFramework("Security", .{});
-        app_mod.linkFramework("Metal", .{});
-        app_mod.linkFramework("QuartzCore", .{});
+        linkMacosFramework(b, app_mod, "MediaToolbox", .{});
+        linkMacosFramework(b, app_mod, "Accelerate", .{});
+        linkMacosFramework(b, app_mod, "Foundation", .{});
+        linkMacosFramework(b, app_mod, "CoreText", .{});
+        linkMacosFramework(b, app_mod, "UniformTypeIdentifiers", .{});
+        linkMacosFramework(b, app_mod, "Security", .{});
+        linkMacosFramework(b, app_mod, "Metal", .{});
+        linkMacosFramework(b, app_mod, "QuartzCore", .{});
         app_mod.linkSystemLibrary("c", .{});
         if (web_engine == .chromium) app_mod.linkSystemLibrary("c++", .{});
     } else if (platform == .linux) {
@@ -2824,7 +2832,7 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
 /// framework/library lookup and runtime-search policy.
 fn addPlatformLinkSearchPaths(b: *std.Build, platform: PlatformOption, web_engine: WebEngineOption, cef_dir: []const u8, mod: *std.Build.Module) void {
     if (platform == .macos) {
-        if (b.sysroot) |sysroot| {
+        if (macosSdkPath(b)) |sysroot| {
             mod.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
         }
         if (web_engine == .chromium) {
@@ -2856,7 +2864,7 @@ fn addWebView2RuntimeRunFiles(dep: *std.Build.Dependency, target: std.Build.Reso
     if (!web_layer) return;
     if (target.result.os.tag != .windows) return;
     const loader_dir = std.fs.path.dirname(webView2LoaderSubPath(target)).?;
-    run.addPathDir(dep.builder.pathFromRoot(loader_dir));
+    addRunPathDir(run, rootPath(dep.builder, loader_dir));
 }
 
 fn addCefRuntimeRunFiles(b: *std.Build, target: std.Build.ResolvedTarget, run: *std.Build.Step.Run, exe: *std.Build.Step.Compile, web_engine: WebEngineOption, cef_dir: []const u8) void {
@@ -3013,12 +3021,12 @@ fn appManifestBuildConfig(b: *std.Build, app_root: []const u8, manifest_name: []
     // the web layer (see AppManifestBuildConfig): a shape mismatch here
     // is not proof the app declares no web use.
     const fallback: AppManifestBuildConfig = .{ .web_declaration = .unreadable_manifest };
-    const source = b.build_root.handle.readFileAlloc(b.graph.io, appPath(b, app_root, manifest_name), b.allocator, .limited(1024 * 1024)) catch return fallback;
+    const source = readRootFile(b, b.graph.io, appPath(b, app_root, manifest_name), b.allocator, .limited(1024 * 1024)) catch return fallback;
     @setEvalBranchQuota(2000);
     const raw = if (std.ascii.eqlIgnoreCase(std.fs.path.extension(manifest_name), ".json"))
         std.json.parseFromSliceLeaky(InferenceManifest, b.allocator, source, .{ .ignore_unknown_fields = true }) catch return fallback
     else zon: {
-        const source_z = b.allocator.dupeZ(u8, source) catch return fallback;
+        const source_z = b.allocator.dupeSentinel(u8, source, 0) catch return fallback;
         break :zon std.zon.parse.fromSliceAlloc(InferenceManifest, b.allocator, source_z, null, .{ .ignore_unknown_fields = true }) catch return fallback;
     };
     // `.core_compiler` names the one lane there is; validated here so
@@ -3086,7 +3094,7 @@ fn resolveWebLayer(config: AppManifestBuildConfig, web_engine: WebEngineOption, 
 
 /// One explicit discovery convention, shared with run_native_tests.mjs.
 fn hasTypeScriptTests(b: *std.Build, app_root: []const u8) bool {
-    var dir = std.Io.Dir.cwd().openDir(b.graph.io, b.pathFromRoot(appPath(b, app_root, "tests")), .{ .iterate = true }) catch |err| switch (err) {
+    var dir = std.Io.Dir.cwd().openDir(b.graph.io, rootPath(b, appPath(b, app_root, "tests")), .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => return false,
         else => @panic("cannot read app tests directory"),
     };

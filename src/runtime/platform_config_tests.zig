@@ -162,7 +162,7 @@ test "runtime rejects invalid keyboard shortcuts" {
         }
     };
 
-    const long_id = [_]u8{'x'} ** (platform.max_shortcut_id_bytes + 1);
+    const long_id = @as([platform.max_shortcut_id_bytes + 1]u8, @splat('x'));
     const shortcuts = [_]platform.Shortcut{.{ .id = long_id[0..], .key = "p" }};
     const harness = try TestHarness().create(std.testing.allocator, .{});
     defer harness.destroy(std.testing.allocator);
@@ -193,7 +193,7 @@ test "runtime rejects invalid command catalog" {
 
 test "runtime rejects oversized webview source" {
     const TestApp = struct {
-        bytes: [platform.max_window_source_bytes + 1]u8 = [_]u8{'x'} ** (platform.max_window_source_bytes + 1),
+        bytes: [platform.max_window_source_bytes + 1]u8 = @as([platform.max_window_source_bytes + 1]u8, @splat('x')),
 
         fn app(self: *@This()) App {
             return .{ .context = self, .name = "oversized-source", .source = platform.WebViewSource.html(&self.bytes) };

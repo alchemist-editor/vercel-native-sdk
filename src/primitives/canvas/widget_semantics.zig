@@ -25,7 +25,7 @@ const max_widget_depth: usize = 32;
 
 pub fn collectWidgetSemantics(layout: anytype, output: []WidgetSemanticsNode, scroll_semantics_fn: anytype) Error![]const WidgetSemanticsNode {
     var len: usize = 0;
-    var semantic_stack: [max_widget_depth]?usize = [_]?usize{null} ** max_widget_depth;
+    var semantic_stack: [max_widget_depth]?usize = @as([max_widget_depth]?usize, @splat(null));
     var hidden_depth: ?usize = null;
     var concealed_depth: ?usize = null;
 

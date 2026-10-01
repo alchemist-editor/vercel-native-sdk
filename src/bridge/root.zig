@@ -407,8 +407,7 @@ test "bridge writes success and error responses" {
 
 test "bridge validates and writes JSON result values" {
     var buffer: [256]u8 = undefined;
-    try std.testing.expectEqualStrings("\"hello \\\"user\\\"\"",
-        writeJsonStringValue(&buffer, "hello \"user\""));
+    try std.testing.expectEqualStrings("\"hello \\\"user\\\"\"", writeJsonStringValue(&buffer, "hello \"user\""));
     try std.testing.expect(isValidJsonValue("{\"pong\":true}"));
     try std.testing.expect(isValidJsonValue("{\"escaped\\\"key\":true}"));
     try std.testing.expect(isValidJsonValue("\"hello\""));

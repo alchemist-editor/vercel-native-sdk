@@ -1,3 +1,4 @@
+const reflection = @import("reflection");
 const std = @import("std");
 const geometry = @import("geometry");
 const canvas = @import("root.zig");
@@ -10,7 +11,7 @@ pub const Filter = enum { all, active, done };
 
 pub const Task = struct {
     id: u32,
-    title_storage: [24]u8 = [_]u8{0} ** 24,
+    title_storage: [24]u8 = @as([24]u8, @splat(0)),
     title_len: usize = 0,
     done: bool = false,
 
@@ -536,12 +537,12 @@ test "explicit style values win over token references" {
 
 test "the style token name lists match the canvas token structs and the interpreter table" {
     // Every ColorTokens field is listed, and every listed name is a field.
-    const color_fields = @typeInfo(canvas.ColorTokens).@"struct".fields;
+    const color_fields = reflection.fieldsOf(@typeInfo(canvas.ColorTokens).@"struct");
     try testing.expectEqual(color_fields.len, canvas.ui_markup.known_color_token_names.len);
     inline for (color_fields) |field| {
         try testing.expect(nameListed(field.name, &canvas.ui_markup.known_color_token_names));
     }
-    const radius_fields = @typeInfo(canvas.RadiusTokens).@"struct".fields;
+    const radius_fields = reflection.fieldsOf(@typeInfo(canvas.RadiusTokens).@"struct");
     try testing.expectEqual(radius_fields.len, canvas.ui_markup.known_radius_token_names.len);
     inline for (radius_fields) |field| {
         try testing.expect(nameListed(field.name, &canvas.ui_markup.known_radius_token_names));
@@ -553,7 +554,7 @@ test "the style token name lists match the canvas token structs and the interpre
     }
     // Every color entry targets a StyleTokenRefs field, and every color
     // field of StyleTokenRefs is reachable from markup.
-    inline for (@typeInfo(canvas.StyleTokenRefs).@"struct".fields) |field| {
+    inline for (reflection.fieldsOf(@typeInfo(canvas.StyleTokenRefs).@"struct")) |field| {
         if (comptime std.mem.eql(u8, field.name, "radius")) continue;
         var found = false;
         for (markup_view.color_style_attr_fields) |entry| {
@@ -813,7 +814,7 @@ test "axis and value-x stamp the region's scroll axes and horizontal offset" {
 test "axis value vocabulary mirrors the live ScrollAxes enum" {
     // The validator's std-only mirror of the enum's member names; a new
     // member cannot ship without its markup spelling.
-    const fields = @typeInfo(canvas.ScrollAxes).@"enum".fields;
+    const fields = reflection.fieldsOf(@typeInfo(canvas.ScrollAxes).@"enum");
     try testing.expectEqual(fields.len, canvas.ui_markup.axis_value_names.len);
     inline for (fields, 0..) |field, index| {
         try testing.expectEqualStrings(field.name, canvas.ui_markup.axis_value_names[index]);
@@ -823,7 +824,7 @@ test "axis value vocabulary mirrors the live ScrollAxes enum" {
 test "overscroll value vocabulary mirrors the live WidgetOverscroll enum" {
     // The validator's std-only mirror of the enum's member names; a new
     // member cannot ship without its markup spelling.
-    const fields = @typeInfo(canvas.WidgetOverscroll).@"enum".fields;
+    const fields = reflection.fieldsOf(@typeInfo(canvas.WidgetOverscroll).@"enum");
     try testing.expectEqual(fields.len, canvas.ui_markup.overscroll_value_names.len);
     inline for (fields, 0..) |field, index| {
         try testing.expectEqualStrings(field.name, canvas.ui_markup.overscroll_value_names[index]);
@@ -833,7 +834,7 @@ test "overscroll value vocabulary mirrors the live WidgetOverscroll enum" {
 test "overflow value vocabulary mirrors the live TextOverflow enum" {
     // The validator's std-only mirror of the enum's member names; a new
     // member cannot ship without its markup spelling.
-    const fields = @typeInfo(canvas.TextOverflow).@"enum".fields;
+    const fields = reflection.fieldsOf(@typeInfo(canvas.TextOverflow).@"enum");
     try testing.expectEqual(fields.len, canvas.ui_markup.overflow_value_names.len);
     inline for (fields, 0..) |field, index| {
         try testing.expectEqualStrings(field.name, canvas.ui_markup.overflow_value_names[index]);
@@ -942,7 +943,7 @@ test "tooltip-delay model binding past i32 max fails the build instead of trappi
 test "resize-easing value vocabulary mirrors the live Easing enum" {
     // The validator's std-only mirror of the enum's member names; a new
     // member cannot ship without its markup spelling.
-    const fields = @typeInfo(canvas.Easing).@"enum".fields;
+    const fields = reflection.fieldsOf(@typeInfo(canvas.Easing).@"enum");
     try testing.expectEqual(fields.len, canvas.ui_markup.resize_easing_value_names.len);
     inline for (fields, 0..) |field, index| {
         try testing.expectEqualStrings(field.name, canvas.ui_markup.resize_easing_value_names[index]);
@@ -952,7 +953,7 @@ test "resize-easing value vocabulary mirrors the live Easing enum" {
 test "span weight vocabulary mirrors the live TextSpanWeight enum" {
     // The validator's std-only mirror of the enum's member names; a new
     // member cannot ship without its markup spelling.
-    const fields = @typeInfo(canvas.TextSpanWeight).@"enum".fields;
+    const fields = reflection.fieldsOf(@typeInfo(canvas.TextSpanWeight).@"enum");
     try testing.expectEqual(fields.len, canvas.ui_markup.span_weight_value_names.len);
     inline for (fields, 0..) |field, index| {
         try testing.expectEqualStrings(field.name, canvas.ui_markup.span_weight_value_names[index]);
@@ -1041,7 +1042,7 @@ test "the registry's size vocabulary matches the live WidgetSize enum" {
     // canvas.WidgetSize; the registry's std-only mirrors (control scale +
     // text-only typography rungs) must list exactly the same names so the
     // validator and the engines accept identically.
-    const fields = std.meta.fields(canvas.WidgetSize);
+    const fields = reflection.fields(canvas.WidgetSize);
     try testing.expectEqual(
         fields.len,
         canvas.ui_markup.schema.control_size_value_names.len + canvas.ui_markup.schema.text_size_value_names.len,
@@ -1518,7 +1519,7 @@ test "the registry's role vocabulary matches the live WidgetRole enum" {
     // role="..." values resolve through std.meta.stringToEnum on
     // canvas.WidgetRole; the registry's std-only mirror must list exactly
     // the same names so the validator and the engines accept identically.
-    const fields = std.meta.fields(canvas.WidgetRole);
+    const fields = reflection.fields(canvas.WidgetRole);
     try testing.expectEqual(fields.len, canvas.ui_markup.schema.role_names.len);
     inline for (fields) |field| {
         try testing.expect(nameListed(field.name, &canvas.ui_markup.schema.role_names));

@@ -357,5 +357,5 @@ test "screenshot file names stay inside the automation directory" {
     try std.testing.expectEqualStrings("screenshot-..-evil.png", try screenshotFileName("../evil", &buffer));
     try std.testing.expectEqualStrings("screenshot-a-b.png", try screenshotFileName("a/b", &buffer));
     try std.testing.expectError(error.InvalidCommand, screenshotFileName("", &buffer));
-    try std.testing.expectError(error.CommandTooLarge, screenshotFileName("x" ** 65, &buffer));
+    try std.testing.expectError(error.CommandTooLarge, screenshotFileName(std.mem.asBytes(&@as([65]["x".len]u8, @splat("x".*))), &buffer));
 }

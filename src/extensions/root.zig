@@ -194,4 +194,3 @@ test "registry validates dependencies and routes targeted commands" {
     const missing = [_]Module{.{ .info = .{ .id = 1, .name = "bad", .dependencies = &.{42} }, .context = &first }};
     try std.testing.expectError(error.MissingDependency, (ModuleRegistry{ .modules = &missing }).validate());
 }
-

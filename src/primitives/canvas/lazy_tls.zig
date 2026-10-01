@@ -24,6 +24,7 @@
 //! render at all — the old static-TLS commit would have failed thread
 //! creation under the same pressure.
 
+const reflection = @import("reflection");
 const std = @import("std");
 
 pub fn LazyTls(comptime T: type) type {
@@ -46,7 +47,7 @@ pub fn LazyTls(comptime T: type) type {
         fn create() *T {
             const ptr = std.heap.page_allocator.create(T) catch
                 @panic("out of memory allocating per-thread canvas scratch");
-            inline for (@typeInfo(T).@"struct".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(T).@"struct")) |field| {
                 if (comptime field.defaultValue()) |value| @field(ptr, field.name) = value;
             }
             instance = ptr;

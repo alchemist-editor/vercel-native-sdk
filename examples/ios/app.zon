@@ -3,7 +3,7 @@
     .name = "ios-example",
     .display_name = "iOS Example",
     .version = "0.1.0",
-    .platforms = .{ "ios" },
+    .platforms = .{"ios"},
     .permissions = .{},
     .capabilities = .{ "webview", "native_views", "native_module" },
     .commands = .{

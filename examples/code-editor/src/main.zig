@@ -99,9 +99,9 @@ const secondary_canvas_labels = [_][]const u8{
 pub const EntryKind = enum { directory, file };
 
 pub const Entry = struct {
-    name_storage: [max_name_bytes]u8 = [_]u8{0} ** max_name_bytes,
+    name_storage: [max_name_bytes]u8 = @as([max_name_bytes]u8, @splat(0)),
     name_len: usize = 0,
-    relative_storage: [max_relative_path_bytes]u8 = [_]u8{0} ** max_relative_path_bytes,
+    relative_storage: [max_relative_path_bytes]u8 = @as([max_relative_path_bytes]u8, @splat(0)),
     relative_len: usize = 0,
     kind: EntryKind = .file,
     depth: u8 = 1,
@@ -318,13 +318,13 @@ fn utf8PrefixBeforeIncompleteTail(bytes: []const u8) ?usize {
 }
 
 pub const Model = struct {
-    root_storage: [max_root_path_bytes]u8 = [_]u8{0} ** max_root_path_bytes,
+    root_storage: [max_root_path_bytes]u8 = @as([max_root_path_bytes]u8, @splat(0)),
     root_len: usize = 0,
     entries: [max_entries]Entry = undefined,
     entry_count: usize = 0,
     tree_selected_entry: ?u16 = null,
     selected_entry: ?u16 = null,
-    pinned_entries: [max_open_tabs]u16 = [_]u16{0} ** max_open_tabs,
+    pinned_entries: [max_open_tabs]u16 = @as([max_open_tabs]u16, @splat(0)),
     pinned_count: usize = 0,
     preview_entry: ?u16 = null,
     hovered_tab: ?u16 = null,
@@ -345,7 +345,7 @@ pub const Model = struct {
     documents: [max_documents]Document = @splat(.{}),
     document_count: usize = 0,
 
-    status_storage: [max_status_bytes]u8 = [_]u8{0} ** max_status_bytes,
+    status_storage: [max_status_bytes]u8 = @as([max_status_bytes]u8, @splat(0)),
     status_len: usize = 0,
 
     /// Backing storage and effect-only state are intentionally hidden
@@ -710,7 +710,7 @@ pub const Msg = union(enum) {
     };
 };
 
-const dev_markup_reload = builtin.mode == .Debug;
+const dev_markup_reload = builtin.mode == .debug;
 pub const BrowserSession = struct {
     open: bool = false,
     handled_picker_serial: u64 = 0,

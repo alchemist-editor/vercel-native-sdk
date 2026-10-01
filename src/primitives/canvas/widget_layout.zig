@@ -899,7 +899,7 @@ fn logAxisChildrenOverflow(output: []const WidgetLayoutNode, parent_index: usize
     if (axis == .vertical and widgetInsideVerticalScrollScope(output, parent_index)) return;
     if (axis == .horizontal and widgetInsideHorizontalScrollScope(output, parent_index)) return;
     if (builtin.is_test) test_axis_overflow_diagnostics += 1;
-    if (builtin.mode != .Debug) return;
+    if (builtin.mode != .debug) return;
     var path_buffer: [256]u8 = undefined;
     layout_log.debug(
         "{s} children overflow the {s} axis by {d:.1}px (need {d:.1}px, have {d:.1}px): intrinsic/min sizes exceed the container - shrink the content, or give siblings grow factors or definite width/height that fit",

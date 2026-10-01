@@ -29,6 +29,7 @@
 //! false })` so the watch machinery compiles out too). Setting both keeps
 //! the compiled view until the watched file first changes on disk.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const builtin = @import("builtin");
 const geometry = @import("geometry");
@@ -114,7 +115,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         /// engine (the interpreter that builds reloaded fragments) and a
         /// Debug build (the dev loop) are present; everywhere else its
         /// state, polling, and registration collapse to nothing.
-        const fragment_watch_enabled = features.runtime_markup and builtin.mode == .Debug;
+        const fragment_watch_enabled = features.runtime_markup and builtin.mode == .debug;
 
         /// Fixed budget of watched fragments per app. Registrations past
         /// it are not watched (a teaching warning names the budget when
@@ -1060,14 +1061,14 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         effects: Effects,
         /// Applied webview-pane state (`Options.web_panes`), keyed by
         /// shell label.
-        web_pane_states: [max_web_panes]WebPaneState = [_]WebPaneState{.{}} ** max_web_panes,
+        web_pane_states: [max_web_panes]WebPaneState = @as([max_web_panes]WebPaneState, @splat(.{})),
         web_pane_state_count: usize = 0,
         /// Exactly-once guard for `Options.status_item`/`status_item_fn`.
         status_item_installed: bool = false,
         /// Last successfully created status-item identities and their
         /// applied channel hashes. Each channel patches independently;
         /// menu changes never replace the native item.
-        applied_status_items: [platform.max_status_items]AppliedStatusItem = [_]AppliedStatusItem{.{}} ** platform.max_status_items,
+        applied_status_items: [platform.max_status_items]AppliedStatusItem = @as([platform.max_status_items]AppliedStatusItem, @splat(.{})),
         applied_status_item_count: usize = 0,
         /// Scratch handed to `status_item_fn`; on the app struct so the
         /// returned slices outlive the apply.
@@ -1115,7 +1116,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         /// ownership from chain position so retained entries never need
         /// their captures moved or re-taken.
         hover_msg_slots: [canvas.max_widget_depth]u8 = undefined,
-        hover_msg_slot_used: [hover_msg_slot_count]bool = [_]bool{false} ** hover_msg_slot_count,
+        hover_msg_slot_used: [hover_msg_slot_count]bool = @as([hover_msg_slot_count]bool, @splat(false)),
         /// Captured leave Msgs BY SLOT (see `hover_msg_slots`).
         hover_msg_leave_msgs: [hover_msg_slot_count]?MsgT = undefined,
         /// Per-SLOT arenas owning the captured leave Msgs' payload
@@ -1217,16 +1218,16 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         /// re-derive the view even without an app `on_scroll` binding,
         /// and the coverage check re-runs a build whose fresh geometry
         /// proved a window too small.
-        virtual_windows: [canvas.max_virtual_windows]canvas.VirtualWindowRecord = [_]canvas.VirtualWindowRecord{.{}} ** canvas.max_virtual_windows,
+        virtual_windows: [canvas.max_virtual_windows]canvas.VirtualWindowRecord = @as([canvas.max_virtual_windows]canvas.VirtualWindowRecord, @splat(.{})),
         virtual_window_count: usize = 0,
         /// Scroll regions whose `on_reach_end` fired and has not re-armed
         /// (the approach-end hysteresis state, keyed by widget id AND the
         /// axis the reach was measured on: a region whose primary axis
         /// changes — content growing sideways after a vertical fire —
         /// must not have the stale axis's latch suppress the fresh one).
-        reach_end_fired: [max_reach_latches]ReachLatch = [_]ReachLatch{.{}} ** max_reach_latches,
+        reach_end_fired: [max_reach_latches]ReachLatch = @as([max_reach_latches]ReachLatch, @splat(.{})),
         /// The approach-START mirror (`on_reach_start` hysteresis).
-        reach_start_fired: [max_reach_latches]ReachLatch = [_]ReachLatch{.{}} ** max_reach_latches,
+        reach_start_fired: [max_reach_latches]ReachLatch = @as([max_reach_latches]ReachLatch, @splat(.{})),
         /// Retained offset tables for VARIABLE-extent virtual lists,
         /// claimed per list identity during builds (`Ui.virtualWindow`
         /// through the extent source) and patched by the post-layout
@@ -1234,7 +1235,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         /// declarable window; a build declaring more variable lists than
         /// slots drops the excess to estimate-only math with a debug
         /// warning.
-        virtual_extent_tables: [canvas.max_virtual_windows]canvas.VirtualExtentTable = [_]canvas.VirtualExtentTable{.{}} ** canvas.max_virtual_windows,
+        virtual_extent_tables: [canvas.max_virtual_windows]canvas.VirtualExtentTable = @as([canvas.max_virtual_windows]canvas.VirtualExtentTable, @splat(.{})),
         /// The `<video src>` declaration the LAST main-canvas build
         /// recorded (`Ui.video_declaration`), captured by the build pass
         /// for the post-rebuild reconcile; the src slice lives in that
@@ -1377,7 +1378,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         /// `destroy`.
         pub fn create(backing: std.mem.Allocator, options: Options) error{OutOfMemory}!*Self {
             comptime {
-                for (@typeInfo(ModelT).@"struct".fields) |field| {
+                for (reflection.fieldsOf(@typeInfo(ModelT).@"struct")) |field| {
                     if (field.default_value_ptr == null) @compileError(
                         "UiApp.create default-initializes the Model in place, but Model field '" ++ field.name ++
                             "' has no default value - give every Model field a default, or use initInPlace and assign app.model through the pointer yourself",
@@ -4848,7 +4849,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             hasher.update(std.mem.asBytes(&presentation.width));
             hasher.update(std.mem.asBytes(&presentation.icon_opacity));
             hasher.update(std.mem.asBytes(&presentation.font_size));
-            hasher.update(&.{ @intFromEnum(presentation.tone), @intFromBool(presentation.monospaced), @intFromEnum(presentation.font_weight) });
+            hasher.update(&.{ @backingInt(presentation.tone), @intFromBool(presentation.monospaced), @backingInt(presentation.font_weight) });
             return hasher.final();
         }
 
@@ -4895,7 +4896,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 hasher.update(&.{
                     @intFromBool(item.separator),
                     @intFromBool(item.enabled),
-                    @intFromEnum(item.role),
+                    @backingInt(item.role),
                     @intFromBool(item.modifiers.primary),
                     @intFromBool(item.modifiers.command),
                     @intFromBool(item.modifiers.control),
@@ -5356,7 +5357,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 },
                 .@"struct" => |info| blk: {
                     var out = value;
-                    inline for (info.fields) |field| {
+                    inline for (reflection.fieldsOf(info)) |field| {
                         @field(out, field.name) = try deepCopyMsgValue(field.type, @field(value, field.name), allocator, indirections);
                     }
                     break :blk out;
@@ -5372,7 +5373,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                     // (`[]align(64) const u8`) and sentinel slices
                     // type-check and round-trip.
                     const alignment: ?std.mem.Alignment = comptime align_blk: {
-                        const declared = info.alignment orelse break :align_blk null;
+                        const declared = info.attrs.@"align" orelse break :align_blk null;
                         if (declared == @alignOf(info.child)) break :align_blk null;
                         break :align_blk std.mem.Alignment.fromByteUnits(declared);
                     };

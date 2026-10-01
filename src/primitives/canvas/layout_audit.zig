@@ -141,7 +141,7 @@ pub fn auditWidgetLayout(
 
     // Escape findings attribute to the outermost offender: once a widget
     // is reported, its descendants stay quiet about the same damage.
-    var escape_flagged = [_]bool{false} ** max_layout_audit_nodes;
+    var escape_flagged = @as([max_layout_audit_nodes]bool, @splat(false));
 
     var index: usize = 0;
     while (index < node_count) : (index += 1) {

@@ -431,7 +431,7 @@ test "server acks undispatchable command entries instead of stranding the queue"
 
     // Same for a line larger than the caller's buffer.
     var oversized_buffer: [64]u8 = undefined;
-    const oversized = "widget-key canvas " ++ "x" ** 256 ++ "\n";
+    const oversized = "widget-key canvas " ++ std.mem.asBytes(&@as([256]["x".len]u8, @splat("x".*))) ++ "\n";
     try writeQueueEntry(std.testing.io, server, 3, oversized);
     try std.testing.expectError(error.CommandTooLarge, server.takeCommand(&oversized_buffer));
     try std.testing.expect(!queueEntryExists(std.testing.io, server, 3));

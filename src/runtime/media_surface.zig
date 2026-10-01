@@ -221,7 +221,7 @@ const MediaSurfaceSlot = struct {
 };
 
 var media_surface_slots: [max_media_surface_channels]MediaSurfaceSlot =
-    [_]MediaSurfaceSlot{.{}} ** max_media_surface_channels;
+    @as([max_media_surface_channels]MediaSurfaceSlot, @splat(.{}));
 
 /// Process-wide monotonic runtime tags: unique per runtime instance for
 /// the life of the process, so slot ownership survives allocator

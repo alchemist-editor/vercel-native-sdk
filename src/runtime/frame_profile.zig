@@ -109,7 +109,7 @@ pub const FrameProfile = struct {
     /// arrive as nanoseconds on the frame event).
     pub fn recordNs(self: *FrameProfile, stage: FrameProfileStage, elapsed_ns: u64) void {
         if (!self.enabled) return;
-        const index = @intFromEnum(stage);
+        const index = @backingInt(stage);
         const us = elapsed_ns / std.time.ns_per_us;
         const sample: u32 = @intCast(@min(us, std.math.maxInt(u32)));
         self.samples_us[index][self.heads[index]] = sample;
@@ -138,7 +138,7 @@ pub const FrameProfile = struct {
     /// sorts up to `max_frame_profile_samples` u32s — snapshot-path
     /// cost, never frame-path.
     pub fn stats(self: *const FrameProfile, stage: FrameProfileStage) FrameProfileStageStats {
-        const index = @intFromEnum(stage);
+        const index = @backingInt(stage);
         const len: usize = self.lens[index];
         if (len == 0) return .{ .total = self.totals[index] };
         var sorted: [max_frame_profile_samples]u32 = undefined;

@@ -496,9 +496,9 @@ const Snapshot = struct {
             .phase = model.phase,
             .items_len = model.items.len,
             .total_items = model.totalItems,
-            .feed_title = [_]u8{0} ** 128,
+            .feed_title = @as([128]u8, @splat(0)),
             .feed_title_len = @min(model.feedTitle.len, 128),
-            .last_link = [_]u8{0} ** 128,
+            .last_link = @as([128]u8, @splat(0)),
             .last_link_len = 0,
         };
         @memcpy(self.feed_title[0..self.feed_title_len], model.feedTitle[0..self.feed_title_len]);

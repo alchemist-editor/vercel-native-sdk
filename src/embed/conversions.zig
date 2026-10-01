@@ -57,7 +57,7 @@ pub fn mobileGpuFrameStateFromFrame(frame: platform.GpuFrame) MobileGpuFrameStat
         .first_frame_latency_budget_ok = if (frame.first_frame_latency_budget_ok) 1 else 0,
         .nonblank = if (frame.nonblank) 1 else 0,
         .sample_color = frame.sample_color,
-        .status = @intFromEnum(frame.status),
+        .status = @backingInt(frame.status),
         .vsync = if (frame.vsync) 1 else 0,
         .canvas_revision = frame.canvas_revision,
         .canvas_command_count = frame.canvas_command_count,
@@ -129,20 +129,20 @@ pub fn mobileModifiersFromMask(mask: u32) platform.ShortcutModifiers {
 
 pub fn mobileWidgetActionKindFromInt(value: c_int) anyerror!runtime.CanvasWidgetAccessibilityActionKind {
     return switch (value) {
-        @intFromEnum(MobileWidgetActionKind.focus) => .focus,
-        @intFromEnum(MobileWidgetActionKind.press) => .press,
-        @intFromEnum(MobileWidgetActionKind.toggle) => .toggle,
-        @intFromEnum(MobileWidgetActionKind.increment) => .increment,
-        @intFromEnum(MobileWidgetActionKind.decrement) => .decrement,
-        @intFromEnum(MobileWidgetActionKind.set_text) => .set_text,
-        @intFromEnum(MobileWidgetActionKind.set_selection) => .set_selection,
-        @intFromEnum(MobileWidgetActionKind.set_composition) => .set_composition,
-        @intFromEnum(MobileWidgetActionKind.commit_composition) => .commit_composition,
-        @intFromEnum(MobileWidgetActionKind.cancel_composition) => .cancel_composition,
-        @intFromEnum(MobileWidgetActionKind.select) => .select,
-        @intFromEnum(MobileWidgetActionKind.drag) => .drag,
-        @intFromEnum(MobileWidgetActionKind.drop_files) => .drop_files,
-        @intFromEnum(MobileWidgetActionKind.dismiss) => .dismiss,
+        @backingInt(MobileWidgetActionKind.focus) => .focus,
+        @backingInt(MobileWidgetActionKind.press) => .press,
+        @backingInt(MobileWidgetActionKind.toggle) => .toggle,
+        @backingInt(MobileWidgetActionKind.increment) => .increment,
+        @backingInt(MobileWidgetActionKind.decrement) => .decrement,
+        @backingInt(MobileWidgetActionKind.set_text) => .set_text,
+        @backingInt(MobileWidgetActionKind.set_selection) => .set_selection,
+        @backingInt(MobileWidgetActionKind.set_composition) => .set_composition,
+        @backingInt(MobileWidgetActionKind.commit_composition) => .commit_composition,
+        @backingInt(MobileWidgetActionKind.cancel_composition) => .cancel_composition,
+        @backingInt(MobileWidgetActionKind.select) => .select,
+        @backingInt(MobileWidgetActionKind.drag) => .drag,
+        @backingInt(MobileWidgetActionKind.drop_files) => .drop_files,
+        @backingInt(MobileWidgetActionKind.dismiss) => .dismiss,
         else => error.InvalidCommand,
     };
 }
@@ -180,7 +180,7 @@ pub fn mobileWidgetSemanticsFromNode(nodes: []const canvas.WidgetSemanticsNode, 
     return .{
         .id = node.id,
         .parent_id = mobileWidgetSemanticParentId(nodes, node.parent_index),
-        .role = @intFromEnum(mobileWidgetRole(node.role)),
+        .role = @backingInt(mobileWidgetRole(node.role)),
         .flags = mobileWidgetFlags(node),
         .actions = mobileWidgetActions(node.actions),
         .x = node.bounds.x,
@@ -301,34 +301,34 @@ pub fn mobileWidgetRole(role: canvas.WidgetRole) MobileWidgetRole {
 
 pub fn mobileWidgetFlags(node: canvas.WidgetSemanticsNode) u32 {
     var flags: u32 = 0;
-    if (node.state.focused) flags |= @intFromEnum(MobileWidgetFlag.focused);
-    if (node.state.hovered) flags |= @intFromEnum(MobileWidgetFlag.hovered);
-    if (node.state.pressed) flags |= @intFromEnum(MobileWidgetFlag.pressed);
-    if (node.state.selected) flags |= @intFromEnum(MobileWidgetFlag.selected);
-    if (node.state.disabled) flags |= @intFromEnum(MobileWidgetFlag.disabled);
-    if (node.focusable) flags |= @intFromEnum(MobileWidgetFlag.focusable);
+    if (node.state.focused) flags |= @backingInt(MobileWidgetFlag.focused);
+    if (node.state.hovered) flags |= @backingInt(MobileWidgetFlag.hovered);
+    if (node.state.pressed) flags |= @backingInt(MobileWidgetFlag.pressed);
+    if (node.state.selected) flags |= @backingInt(MobileWidgetFlag.selected);
+    if (node.state.disabled) flags |= @backingInt(MobileWidgetFlag.disabled);
+    if (node.focusable) flags |= @backingInt(MobileWidgetFlag.focusable);
     if (node.state.expanded) |expanded| {
-        flags |= @intFromEnum(if (expanded) MobileWidgetFlag.expanded else MobileWidgetFlag.collapsed);
+        flags |= @backingInt(if (expanded) MobileWidgetFlag.expanded else MobileWidgetFlag.collapsed);
     }
-    if (node.state.required) flags |= @intFromEnum(MobileWidgetFlag.required);
-    if (node.state.read_only) flags |= @intFromEnum(MobileWidgetFlag.read_only);
-    if (node.state.invalid) flags |= @intFromEnum(MobileWidgetFlag.invalid);
+    if (node.state.required) flags |= @backingInt(MobileWidgetFlag.required);
+    if (node.state.read_only) flags |= @backingInt(MobileWidgetFlag.read_only);
+    if (node.state.invalid) flags |= @backingInt(MobileWidgetFlag.invalid);
     return flags;
 }
 
 pub fn mobileWidgetActions(actions: canvas.WidgetActions) u32 {
     var flags: u32 = 0;
-    if (actions.focus) flags |= @intFromEnum(MobileWidgetAction.focus);
-    if (actions.press) flags |= @intFromEnum(MobileWidgetAction.press);
-    if (actions.toggle) flags |= @intFromEnum(MobileWidgetAction.toggle);
-    if (actions.increment) flags |= @intFromEnum(MobileWidgetAction.increment);
-    if (actions.decrement) flags |= @intFromEnum(MobileWidgetAction.decrement);
-    if (actions.set_text) flags |= @intFromEnum(MobileWidgetAction.set_text);
-    if (actions.set_selection) flags |= @intFromEnum(MobileWidgetAction.set_selection);
-    if (actions.select) flags |= @intFromEnum(MobileWidgetAction.select);
-    if (actions.drag) flags |= @intFromEnum(MobileWidgetAction.drag);
-    if (actions.drop_files) flags |= @intFromEnum(MobileWidgetAction.drop_files);
-    if (actions.dismiss) flags |= @intFromEnum(MobileWidgetAction.dismiss);
+    if (actions.focus) flags |= @backingInt(MobileWidgetAction.focus);
+    if (actions.press) flags |= @backingInt(MobileWidgetAction.press);
+    if (actions.toggle) flags |= @backingInt(MobileWidgetAction.toggle);
+    if (actions.increment) flags |= @backingInt(MobileWidgetAction.increment);
+    if (actions.decrement) flags |= @backingInt(MobileWidgetAction.decrement);
+    if (actions.set_text) flags |= @backingInt(MobileWidgetAction.set_text);
+    if (actions.set_selection) flags |= @backingInt(MobileWidgetAction.set_selection);
+    if (actions.select) flags |= @backingInt(MobileWidgetAction.select);
+    if (actions.drag) flags |= @backingInt(MobileWidgetAction.drag);
+    if (actions.drop_files) flags |= @backingInt(MobileWidgetAction.drop_files);
+    if (actions.dismiss) flags |= @backingInt(MobileWidgetAction.dismiss);
     return flags;
 }
 

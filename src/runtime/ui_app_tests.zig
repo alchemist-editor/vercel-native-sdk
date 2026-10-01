@@ -7145,7 +7145,7 @@ const CaptureModel = struct {
     two_entered: u32 = 0,
     two_left: u32 = 0,
     field: canvas.TextBuffer(16) = .{},
-    left_storage: [32]u8 = [_]u8{0} ** 32,
+    left_storage: [32]u8 = @as([32]u8, @splat(0)),
     left_len: usize = 0,
 
     fn leftText(model: *const CaptureModel) []const u8 {
@@ -7511,10 +7511,10 @@ test "a failed build keeps the still-matching pair live: edges flow through it" 
 // -------------------------------------------- over-aligned payload probe
 
 const AlignedModel = struct {
-    bytes: [64]u8 align(64) = [_]u8{'a'} ** 64,
+    bytes: [64]u8 align(64) = @as([64]u8, @splat('a')),
     show_row: bool = true,
     left_len: usize = 0,
-    z_payload: [4]u8 = [_]u8{0} ** 4,
+    z_payload: [4]u8 = @as([4]u8, @splat(0)),
 
     fn payload(model: *const AlignedModel) []align(64) const u8 {
         return @alignCast(model.bytes[0..8]);

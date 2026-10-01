@@ -2,8 +2,8 @@
 //! Zig pair, so `native dev|build|test` can bootstrap a machine that has
 //! no (or the wrong) Zig. Resolution order:
 //!   1. NATIVE_SDK_ZIG environment variable (explicit override, trusted)
-//!   2. `zig` on PATH when its version is compatible with the pin (same
-//!      major.minor, at least the pinned patch)
+//!   2. `zig` on PATH when its version is compatible with the pin (exact identity for a
+//!      development snapshot; same major.minor and at least the patch for a release)
 //!   3. a managed toolchain at ~/.native/toolchains/zig-<version>/
 //!   4. offer to download the official build from ziglang.org into (3) —
 //!      explicit consent in interactive mode, --yes for automation, and
@@ -17,7 +17,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const pinned_zig_version = "0.16.0";
+pub const pinned_zig_version = "0.17.0-dev.2375+d8aab4878";
 
 pub const Error = error{
     ZigUnavailable,
@@ -37,33 +37,33 @@ const Download = struct {
     extracted_root: []const u8,
 };
 
-/// Official Zig 0.16.0 release archives (ziglang.org/download/index.json).
+/// Official Zig 0.17.0-dev.2375+d8aab4878 development archives (ziglang.org/download/index.json).
 /// Update together with pinned_zig_version.
 fn currentDownload() ?Download {
     return switch (builtin.target.os.tag) {
         .macos => switch (builtin.target.cpu.arch) {
             .aarch64 => .{
-                .archive = "zig-aarch64-macos-0.16.0.tar.xz",
-                .sha256 = "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
-                .extracted_root = "zig-aarch64-macos-0.16.0",
+                .archive = "zig-aarch64-macos-0.17.0-dev.2375+d8aab4878.tar.xz",
+                .sha256 = "251ef0c623e52896f7e946dc104ec752f0dee4f0a17e4dc56d9afbee939aaab2",
+                .extracted_root = "zig-aarch64-macos-0.17.0-dev.2375+d8aab4878",
             },
             .x86_64 => .{
-                .archive = "zig-x86_64-macos-0.16.0.tar.xz",
-                .sha256 = "0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7",
-                .extracted_root = "zig-x86_64-macos-0.16.0",
+                .archive = "zig-x86_64-macos-0.17.0-dev.2375+d8aab4878.tar.xz",
+                .sha256 = "3b60e1c0345578ee83e80c94646fd2615ddb13e64fa979b7bd5bd5d476072d1a",
+                .extracted_root = "zig-x86_64-macos-0.17.0-dev.2375+d8aab4878",
             },
             else => null,
         },
         .linux => switch (builtin.target.cpu.arch) {
             .aarch64 => .{
-                .archive = "zig-aarch64-linux-0.16.0.tar.xz",
-                .sha256 = "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17",
-                .extracted_root = "zig-aarch64-linux-0.16.0",
+                .archive = "zig-aarch64-linux-0.17.0-dev.2375+d8aab4878.tar.xz",
+                .sha256 = "13681511ba44779f9c9c6340286f8933b356cd70858472a43668dfafc4b91c67",
+                .extracted_root = "zig-aarch64-linux-0.17.0-dev.2375+d8aab4878",
             },
             .x86_64 => .{
-                .archive = "zig-x86_64-linux-0.16.0.tar.xz",
-                .sha256 = "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
-                .extracted_root = "zig-x86_64-linux-0.16.0",
+                .archive = "zig-x86_64-linux-0.17.0-dev.2375+d8aab4878.tar.xz",
+                .sha256 = "f10e0586afb4a57912b92ec271f6cf5de5adb507635d53101c7b3a2713f9db27",
+                .extracted_root = "zig-x86_64-linux-0.17.0-dev.2375+d8aab4878",
             },
             else => null,
         },
@@ -170,6 +170,7 @@ fn pathZigVersion(allocator: std.mem.Allocator, io: std.Io) ?[]const u8 {
 /// least the pinned one. Dev builds ("0.17.0-dev.123+abc") never match a
 /// release pin: their behavior drifts from the pinned framework pair.
 pub fn versionCompatible(actual: []const u8, pinned: []const u8) bool {
+    if (std.mem.indexOf(u8, pinned, "-dev.") != null) return std.mem.eql(u8, actual, pinned);
     const actual_version = std.SemanticVersion.parse(actual) catch return false;
     const pinned_version = std.SemanticVersion.parse(pinned) catch return false;
     if (actual_version.pre != null) return false;
@@ -232,7 +233,7 @@ fn install(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Envir
 
     const archive_path = try std.fs.path.join(allocator, &.{ downloads_dir, download.archive });
     defer allocator.free(archive_path);
-    const url = try std.fmt.allocPrint(allocator, "https://ziglang.org/download/{s}/{s}", .{ pinned_zig_version, download.archive });
+    const url = try std.fmt.allocPrint(allocator, "https://ziglang.org/builds/{s}", .{download.archive});
     defer allocator.free(url);
 
     std.debug.print("downloading {s}\n", .{url});
@@ -368,4 +369,11 @@ test "NATIVE_SDK_ZIG overrides resolution" {
     defer std.testing.allocator.free(resolution.zig);
     try std.testing.expectEqualStrings("/opt/zig/zig", resolution.zig);
     try std.testing.expectEqual(Source.env, resolution.source);
+}
+
+test "development pins require the exact snapshot including build metadata" {
+    try std.testing.expect(versionCompatible(pinned_zig_version, pinned_zig_version));
+    try std.testing.expect(!versionCompatible("0.17.0-dev.813+2153f8143", pinned_zig_version));
+    try std.testing.expect(!versionCompatible("0.17.0", pinned_zig_version));
+    try std.testing.expect(!versionCompatible("0.17.0-dev.2375+different", pinned_zig_version));
 }

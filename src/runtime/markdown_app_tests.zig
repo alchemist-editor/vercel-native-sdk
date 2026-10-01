@@ -38,7 +38,7 @@ const note_source =
 ;
 
 const NotesModel = struct {
-    opened_url: [128]u8 = [_]u8{0} ** 128,
+    opened_url: [128]u8 = @as([128]u8, @splat(0)),
     opened_len: usize = 0,
     details_expanded: [4]bool = .{ false, false, false, false },
 

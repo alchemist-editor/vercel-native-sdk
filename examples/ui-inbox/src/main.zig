@@ -32,7 +32,6 @@ const max_task_title = 32;
 /// standard chrome, tests).
 pub const header_natural_height: f32 = 52;
 
-
 const app_permissions = [_][]const u8{ native_sdk.security.permission_command, native_sdk.security.permission_view };
 const shell_views = [_]native_sdk.ShellView{
     .{ .label = canvas_label, .kind = .gpu_surface, .fill = true, .role = "Task inbox canvas", .accessibility_label = "Task inbox", .gpu_backend = .metal, .gpu_pixel_format = .bgra8_unorm, .gpu_present_mode = .timer, .gpu_alpha_mode = .@"opaque", .gpu_color_space = .srgb, .gpu_vsync = true },
@@ -60,7 +59,7 @@ pub const Filter = enum { all, active, done };
 
 pub const Task = struct {
     id: u32,
-    title_storage: [max_task_title]u8 = [_]u8{0} ** max_task_title,
+    title_storage: [max_task_title]u8 = @as([max_task_title]u8, @splat(0)),
     title_len: usize = 0,
     done: bool = false,
 
@@ -162,7 +161,6 @@ pub const Model = struct {
         return model.task_count - model.openCount();
     }
 
-
     pub fn visible(model: *const Model, arena: std.mem.Allocator) []const Task {
         const out = arena.alloc(Task, model.task_count) catch return &.{};
         var count: usize = 0;
@@ -223,7 +221,7 @@ pub const CompiledInboxView = canvas.CompiledMarkupView(Model, Msg, inbox_markup
 
 /// Debug builds keep the interpreter for .native hot reload; release builds
 /// ship the comptime-compiled view with no parser in the binary.
-const dev_markup_reload = builtin.mode == .Debug;
+const dev_markup_reload = builtin.mode == .debug;
 
 // -------------------------------------------------------------------- app
 //

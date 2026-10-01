@@ -329,7 +329,7 @@ fn renderBuildZonWithManifest(allocator: std.mem.Allocator, app_name: []const u8
     try out.appendSlice(allocator,
         \\,
         \\    .version = "0.1.0",
-        \\    .minimum_zig_version = "0.16.0",
+        \\    .minimum_zig_version = "0.17.0-dev.2375+d8aab4878",
         \\    .dependencies = .{ .native_sdk = .{ .path =
     );
     try out.appendSlice(allocator, " ");

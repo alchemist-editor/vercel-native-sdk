@@ -111,9 +111,9 @@ fn countMatches(query: []const u8) usize {
     var count: usize = 0;
     for (&model_mod.tracks) |*track| {
         const album = model_mod.albumById(track.album);
-        if (std.ascii.indexOfIgnoreCase(track.title, query) != null or
-            std.ascii.indexOfIgnoreCase(album.artist, query) != null or
-            std.ascii.indexOfIgnoreCase(album.title, query) != null) count += 1;
+        if (std.ascii.findIgnoreCase(track.title, query) != null or
+            std.ascii.findIgnoreCase(album.artist, query) != null or
+            std.ascii.findIgnoreCase(album.title, query) != null) count += 1;
     }
     return count;
 }

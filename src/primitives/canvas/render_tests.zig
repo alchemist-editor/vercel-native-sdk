@@ -2317,9 +2317,10 @@ test "gpu packet preserves authoritative text glyph positions" {
     // advance=11 — the compact v5 record DirectWrite consumes.
     const positioned_glyph_wire = [_]u8{
         0x41, 0x00, 0x00,
-        0x00, 0x00, 0x80, 0x40,
-        0x00, 0x00, 0xe8, 0x41,
-        0x00, 0x00, 0x30, 0x41,
+        0x00, 0x00, 0x80,
+        0x40, 0x00, 0x00,
+        0xe8, 0x41, 0x00,
+        0x00, 0x30, 0x41,
     };
     try std.testing.expect(std.mem.indexOf(u8, binary_writer.buffered(), &positioned_glyph_wire) != null);
 }
@@ -2364,7 +2365,7 @@ test "canvas gpu packet text serializes engine measured line breaks" {
     const tight_width = estimateTextWidth("Songs", 12);
     // 70 explicit lines exceed the packet line budget (64): the serializer
     // must fall back to `null` so the host keeps its wrapping fallback.
-    const overflow_text = "a\n" ** 70;
+    const overflow_text = std.mem.asBytes(&@as([70]["a\n".len]u8, @splat("a\n".*)));
     const commands = [_]CanvasGpuCommand{
         .{
             .command_index = 0,

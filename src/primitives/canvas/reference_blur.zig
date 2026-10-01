@@ -18,7 +18,7 @@ pub fn referenceBlurSampleWithKernel(source: []const u8, width: usize, height: u
     const width_i: i64 = @intCast(width);
     const height_i: i64 = @intCast(height);
     const kernel_width: usize = @intCast(kernel_radius * 2 + 1);
-    var premultiplied = [_]f32{0} ** 3;
+    var premultiplied = @as([3]f32, @splat(0));
     var alpha_total: f32 = 0;
     var weight_total: f32 = 0;
 
@@ -51,7 +51,7 @@ pub fn referenceBlurSampleWithKernel(source: []const u8, width: usize, height: u
 pub fn referenceBlurSample(source: []const u8, width: usize, height: usize, x: i64, y: i64, kernel_radius: i64, radius: f32) [4]u8 {
     const width_i: i64 = @intCast(width);
     const height_i: i64 = @intCast(height);
-    var premultiplied = [_]f32{0} ** 3;
+    var premultiplied = @as([3]f32, @splat(0));
     var alpha_total: f32 = 0;
     var weight_total: f32 = 0;
 

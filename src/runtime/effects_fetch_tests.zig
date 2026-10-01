@@ -44,7 +44,7 @@ const FetchModel = struct {
     last_line_len: usize = 0,
     last_line_hash: u64 = 0,
     line_storage: [max_recorded_stream_lines][max_recorded_stream_line_bytes]u8 = undefined,
-    line_lens: [max_recorded_stream_lines]usize = [_]usize{0} ** max_recorded_stream_lines,
+    line_lens: [max_recorded_stream_lines]usize = @as([max_recorded_stream_lines]usize, @splat(0)),
 
     /// Copy what we keep: the body slice is drain scratch and dies with
     /// the update call that delivers it.
@@ -487,12 +487,12 @@ fn rejectFetchUpdate(model: *RejectModel, msg: RejectMsg, fx: *RejectEffects) vo
         .bad_url => fx.fetch(.{ .key = 1, .url = "not a url at all", .on_response = on_response }),
         .bad_scheme => fx.fetch(.{ .key = 2, .url = "ftp://example.test/file", .on_response = on_response }),
         .long_url => {
-            const long = [_]u8{'a'} ** (effects_mod.max_effect_url_bytes + 1);
+            const long = @as([effects_mod.max_effect_url_bytes + 1]u8, @splat('a'));
             fx.fetch(.{ .key = 3, .url = &long, .on_response = on_response });
         },
         .many_headers => {
             const header: std.http.Header = .{ .name = "x-h", .value = "v" };
-            const headers = [_]std.http.Header{header} ** (effects_mod.max_effect_fetch_headers + 1);
+            const headers = @as([effects_mod.max_effect_fetch_headers + 1]std.http.Header, @splat(header));
             fx.fetch(.{ .key = 4, .url = "http://example.test/", .headers = &headers, .on_response = on_response });
         },
         .bad_header => fx.fetch(.{
@@ -502,7 +502,7 @@ fn rejectFetchUpdate(model: *RejectModel, msg: RejectMsg, fx: *RejectEffects) vo
             .on_response = on_response,
         }),
         .huge_payload => {
-            const huge = [_]u8{'p'} ** (effects_mod.max_effect_fetch_payload_bytes + 1);
+            const huge = @as([effects_mod.max_effect_fetch_payload_bytes + 1]u8, @splat('p'));
             fx.fetch(.{ .key = 6, .url = "http://example.test/", .body = &huge, .on_response = on_response });
         },
         .duplicate => {

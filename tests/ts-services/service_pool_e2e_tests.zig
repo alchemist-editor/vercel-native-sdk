@@ -721,7 +721,7 @@ test "the pool refuses an archive built from a different registry" {
     const SkewedRegistry = struct {
         pub const protocol_version = registry.protocol_version;
         pub const inproc_symbol_prefix = registry.inproc_symbol_prefix;
-        pub const contract_fingerprint = [_]u8{0xff} ** registry.contract_fingerprint.len;
+        pub const contract_fingerprint = @as([registry.contract_fingerprint.len]u8, @splat(0xff));
 
         pub fn indexOf(name: []const u8) ?u16 {
             return registry.indexOf(name);
@@ -779,7 +779,7 @@ const Snapshot = struct {
             .successes = model.successes,
             .failures = model.failures,
             .failed = model.failed,
-            .bytes = [_]u8{0} ** 256,
+            .bytes = @as([256]u8, @splat(0)),
             .bytes_len = @min(model.bytes.len, 256),
         };
         @memcpy(result.bytes[0..result.bytes_len], model.bytes[0..result.bytes_len]);

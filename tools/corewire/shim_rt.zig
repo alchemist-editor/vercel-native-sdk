@@ -43,6 +43,7 @@
 //! Buffers carry no alignment guarantee: every multi-byte read below is
 //! an unaligned little-endian load.
 
+pub const reflection = @import("reflection");
 const std = @import("std");
 
 // ---------------------------------------------------------- the arena
@@ -99,9 +100,9 @@ var model_arena_index: u1 = 0;
 /// has to raise a quota for generated shim work.
 fn typeScanQuota(comptime T: type) u32 {
     const fields = switch (@typeInfo(T)) {
-        .@"struct" => |info| info.fields,
-        .@"union" => |info| info.fields,
-        .@"enum" => |info| info.fields,
+        .@"struct" => |info| reflection.fieldsOf(info),
+        .@"union" => |info| reflection.fieldsOf(info),
+        .@"enum" => |info| reflection.fieldsOf(info),
         else => return 2_000,
     };
     var name_bytes: u64 = 0;
@@ -151,7 +152,7 @@ fn encodeInto(comptime T: type, value: T, allocator: std.mem.Allocator, out: *st
             // member INDEX, never the enum's numeric value (mirror
             // enums make them equal; the codec must not rely on it).
             const member_index: u32 = blk: {
-                inline for (info.fields, 0..) |field, field_index| {
+                inline for (reflection.fieldsOf(info), 0..) |field, field_index| {
                     if (value == @field(T, field.name)) break :blk @intCast(field_index);
                 }
                 unreachable;
@@ -180,7 +181,7 @@ fn encodeInto(comptime T: type, value: T, allocator: std.mem.Allocator, out: *st
             else => @compileError("the canonical value encoding has no form for " ++ @typeName(T)),
         },
         .@"struct" => |info| {
-            inline for (info.fields) |field| {
+            inline for (reflection.fieldsOf(info)) |field| {
                 try encodeInto(field.type, @field(value, field.name), allocator, out);
             }
         },
@@ -192,7 +193,7 @@ fn encodeInto(comptime T: type, value: T, allocator: std.mem.Allocator, out: *st
                     // index rides the wire, never the tag's numeric
                     // value.
                     const arm_index: u8 = comptime blk: {
-                        for (info.fields, 0..) |field, field_index| {
+                        for (reflection.fieldsOf(info), 0..) |field, field_index| {
                             if (std.mem.eql(u8, field.name, @tagName(tag))) break :blk @intCast(field_index);
                         }
                         unreachable;
@@ -261,12 +262,12 @@ pub fn decode(comptime T: type, reader: *Reader, allocator: std.mem.Allocator) T
         },
         .@"enum" => |info| {
             const member_index = reader.int(u32);
-            if (member_index >= info.fields.len) {
+            if (member_index >= reflection.fieldsOf(info).len) {
                 @panic("a core buffer carries an enum member index past the declared members — the compiled core and the generated shim disagree about the contract; rebuild the app");
             }
             // Positional: index into declaration order, never the
             // enum's numeric value.
-            inline for (info.fields, 0..) |field, field_index| {
+            inline for (reflection.fieldsOf(info), 0..) |field, field_index| {
                 if (member_index == field_index) return @field(T, field.name);
             }
             unreachable;
@@ -300,7 +301,7 @@ pub fn decode(comptime T: type, reader: *Reader, allocator: std.mem.Allocator) T
         },
         .@"struct" => |info| {
             var out: T = undefined;
-            inline for (info.fields) |field| {
+            inline for (reflection.fieldsOf(info)) |field| {
                 @field(out, field.name) = decode(field.type, reader, allocator);
             }
             return out;
@@ -308,7 +309,7 @@ pub fn decode(comptime T: type, reader: *Reader, allocator: std.mem.Allocator) T
         .@"union" => |info| {
             comptime std.debug.assert(info.tag_type != null);
             const arm = reader.take(1)[0];
-            inline for (info.fields, 0..) |field, index| {
+            inline for (reflection.fieldsOf(info), 0..) |field, index| {
                 if (arm == index) {
                     if (field.type == void) return @unionInit(T, field.name, {});
                     return @unionInit(T, field.name, decode(field.type, reader, allocator));

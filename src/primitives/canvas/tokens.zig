@@ -1,3 +1,4 @@
+const reflection = @import("reflection");
 const std = @import("std");
 const geometry = @import("geometry");
 const canvas = @import("root.zig");
@@ -86,7 +87,7 @@ pub const ThemePack = enum {
     /// unknown names so callers can raise their own teaching error with
     /// the offending string and the valid list.
     pub fn fromName(name: []const u8) ?ThemePack {
-        inline for (@typeInfo(ThemePack).@"enum".fields) |field| {
+        inline for (reflection.fieldsOf(@typeInfo(ThemePack).@"enum")) |field| {
             if (std.mem.eql(u8, name, field.name)) return @field(ThemePack, field.name);
         }
         return null;
@@ -1958,7 +1959,7 @@ pub const DesignTokens = struct {
 
 fn applyFlatTokenOverrides(comptime Token: type, base: Token, overrides: anytype) Token {
     var next = base;
-    inline for (@typeInfo(@TypeOf(overrides)).@"struct".fields) |field| {
+    inline for (reflection.fieldsOf(@typeInfo(@TypeOf(overrides)).@"struct")) |field| {
         if (@field(overrides, field.name)) |value| {
             @field(next, field.name) = value;
         }

@@ -232,17 +232,37 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     // platform stop path and the only trace is a bare
                     // `app.stop` right after `start` — which reads like a
                     // clean exit while the main window sits blank.
-                    errdefer |err| recordDispatchError(self, "app_start", err);
                     launch_timing.lap("app_start");
-                    try reservePrimaryStartupWindow(self);
-                    try app.start(self);
-                    if (self.options.extensions) |registry| try registry.startAll(extensionContext(self));
-                    try dispatchEvent(self, app, .{ .lifecycle = .start });
+                    reservePrimaryStartupWindow(self) catch |err| {
+                        recordDispatchError(self, "app_start", err);
+                        return err;
+                    };
+                    app.start(self) catch |err| {
+                        recordDispatchError(self, "app_start", err);
+                        return err;
+                    };
+                    if (self.options.extensions) |registry| registry.startAll(extensionContext(self)) catch |err| {
+                        recordDispatchError(self, "app_start", err);
+                        return err;
+                    };
+                    dispatchEvent(self, app, .{ .lifecycle = .start }) catch |err| {
+                        recordDispatchError(self, "app_start", err);
+                        return err;
+                    };
                     launch_timing.lap("app_started");
-                    if (try app.scene()) |scene| {
-                        try loadScene(self, app, scene);
+                    if (app.scene() catch |err| {
+                        recordDispatchError(self, "app_start", err);
+                        return err;
+                    }) |scene| {
+                        loadScene(self, app, scene) catch |err| {
+                            recordDispatchError(self, "app_start", err);
+                            return err;
+                        };
                     } else {
-                        try loadStartupWindows(self, app);
+                        loadStartupWindows(self, app) catch |err| {
+                            recordDispatchError(self, "app_start", err);
+                            return err;
+                        };
                     }
                     launch_timing.lap("scene_loaded");
                     self.invalidateFor(.startup, null);

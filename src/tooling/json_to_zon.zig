@@ -125,7 +125,7 @@ test "JSON-to-ZON conversion preserves numeric tokens exactly" {
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const source_z = try arena.allocator().dupeZ(u8, converted);
+    const source_z = try arena.allocator().dupeSentinel(u8, converted, 0);
     const Parsed = struct {
         assets: struct { images: []const struct { id: u64, path: []const u8 } },
         frontend: struct { dev: struct { url: []const u8, timeout_ms: u32 } },

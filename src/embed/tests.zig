@@ -539,7 +539,7 @@ test "mobile C ABI exposes GPU frame state" {
     try std.testing.expectEqual(@as(c_int, 0), state.input_latency_budget_ok);
     try std.testing.expectEqual(@as(c_int, 1), state.nonblank);
     try std.testing.expectEqual(@as(u32, 0xff3366ff), state.sample_color);
-    try std.testing.expectEqual(@intFromEnum(platform.GpuSurfaceStatus.ready), state.status);
+    try std.testing.expectEqual(@backingInt(platform.GpuSurfaceStatus.ready), state.status);
     try std.testing.expectEqual(@as(c_int, 1), state.vsync);
     try std.testing.expect(state.canvas_revision > 0);
     try std.testing.expectEqual(@as(usize, 2), state.widget_node_count);
@@ -673,17 +673,17 @@ test "mobile C ABI exposes GPU widget accessibility semantics" {
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_semantics_at(app, 0, &root_node));
     try std.testing.expectEqual(@as(u64, 1), root_node.id);
     try std.testing.expectEqual(@as(u64, 0), root_node.parent_id);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.group), root_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.group), root_node.role);
     try std.testing.expectEqualStrings("Mobile canvas widgets", root_node.label.?[0..root_node.label_len]);
 
     var button_node: MobileWidgetSemantics = .{};
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_semantics_at(app, 1, &button_node));
     try std.testing.expectEqual(@as(u64, 2), button_node.id);
     try std.testing.expectEqual(@as(u64, 1), button_node.parent_id);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.button), button_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.button), button_node.role);
     try std.testing.expectEqualStrings("Run report", button_node.label.?[0..button_node.label_len]);
-    try std.testing.expect((button_node.flags & @intFromEnum(MobileWidgetFlag.focusable)) != 0);
-    try std.testing.expect((button_node.actions & @intFromEnum(MobileWidgetAction.press)) != 0);
+    try std.testing.expect((button_node.flags & @backingInt(MobileWidgetFlag.focusable)) != 0);
+    try std.testing.expect((button_node.actions & @backingInt(MobileWidgetAction.press)) != 0);
     try std.testing.expectEqual(@as(f32, 12), button_node.x);
     try std.testing.expectEqual(@as(f32, 16), button_node.y);
     try std.testing.expectEqual(@as(f32, 96), button_node.width);
@@ -692,24 +692,24 @@ test "mobile C ABI exposes GPU widget accessibility semantics" {
     var text_node: MobileWidgetSemantics = .{};
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_semantics_at(app, 2, &text_node));
     try std.testing.expectEqual(@as(u64, 3), text_node.id);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.textbox), text_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.textbox), text_node.role);
     try std.testing.expectEqualStrings("Report title", text_node.label.?[0..text_node.label_len]);
     try std.testing.expectEqualStrings("Draft", text_node.text.?[0..text_node.text_len]);
     try std.testing.expectEqualStrings("Report title placeholder", text_node.placeholder.?[0..text_node.placeholder_len]);
     try std.testing.expectEqual(@as(isize, 1), text_node.text_selection_start);
     try std.testing.expectEqual(@as(isize, 4), text_node.text_selection_end);
-    try std.testing.expect((text_node.flags & @intFromEnum(MobileWidgetFlag.focused)) != 0);
-    try std.testing.expect((text_node.actions & @intFromEnum(MobileWidgetAction.set_text)) != 0);
-    try std.testing.expect((text_node.actions & @intFromEnum(MobileWidgetAction.set_selection)) != 0);
+    try std.testing.expect((text_node.flags & @backingInt(MobileWidgetFlag.focused)) != 0);
+    try std.testing.expect((text_node.actions & @backingInt(MobileWidgetAction.set_text)) != 0);
+    try std.testing.expect((text_node.actions & @backingInt(MobileWidgetAction.set_selection)) != 0);
 
     const scroll_node = try mobileWidgetSemanticsByIdForTest(app, 4);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.group), scroll_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.group), scroll_node.role);
     try std.testing.expectEqual(@as(c_int, 1), scroll_node.has_scroll);
     try std.testing.expectEqual(@as(f32, 20), scroll_node.scroll_offset);
     try std.testing.expectEqual(@as(f32, 48), scroll_node.scroll_viewport_extent);
     try std.testing.expectEqual(@as(f32, 116), scroll_node.scroll_content_extent);
-    try std.testing.expect((scroll_node.actions & @intFromEnum(MobileWidgetAction.increment)) != 0);
-    try std.testing.expect((scroll_node.actions & @intFromEnum(MobileWidgetAction.decrement)) != 0);
+    try std.testing.expect((scroll_node.actions & @backingInt(MobileWidgetAction.increment)) != 0);
+    try std.testing.expect((scroll_node.actions & @backingInt(MobileWidgetAction.decrement)) != 0);
 
     native_sdk_app_scroll(app, 11, 24, 112, 0, 14);
     const scrolled_node = try mobileWidgetSemanticsByIdForTest(app, 4);
@@ -721,30 +721,30 @@ test "mobile C ABI exposes GPU widget accessibility semantics" {
     try std.testing.expectEqual(@as(f32, 116), scrolled_node.scroll_content_extent);
 
     const list_node = try mobileWidgetSemanticsByIdForTest(app, 7);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.list), list_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.list), list_node.role);
     try std.testing.expectEqualStrings("Mailboxes", list_node.label.?[0..list_node.label_len]);
     const archive_node = try mobileWidgetSemanticsByIdForTest(app, 9);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.listitem), archive_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.listitem), archive_node.role);
     try std.testing.expectEqual(@as(u64, 7), archive_node.parent_id);
     try std.testing.expectEqual(@as(isize, 1), archive_node.list_item_index);
     try std.testing.expectEqual(@as(isize, 2), archive_node.list_item_count);
-    try std.testing.expect((archive_node.actions & @intFromEnum(MobileWidgetAction.select)) != 0);
+    try std.testing.expect((archive_node.actions & @backingInt(MobileWidgetAction.select)) != 0);
 
     const grid_node = try mobileWidgetSemanticsByIdForTest(app, 10);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.grid), grid_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.grid), grid_node.role);
     try std.testing.expectEqual(@as(isize, 1), grid_node.grid_row_count);
     try std.testing.expectEqual(@as(isize, 2), grid_node.grid_column_count);
     const status_cell = try mobileWidgetSemanticsByIdForTest(app, 13);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.gridcell), status_cell.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.gridcell), status_cell.role);
     try std.testing.expectEqual(@as(u64, 11), status_cell.parent_id);
     try std.testing.expectEqual(@as(isize, 0), status_cell.grid_row_index);
     try std.testing.expectEqual(@as(isize, 1), status_cell.grid_column_index);
     try std.testing.expectEqual(@as(isize, 1), status_cell.grid_row_count);
     try std.testing.expectEqual(@as(isize, 2), status_cell.grid_column_count);
-    try std.testing.expect((status_cell.actions & @intFromEnum(MobileWidgetAction.select)) != 0);
+    try std.testing.expect((status_cell.actions & @backingInt(MobileWidgetAction.select)) != 0);
 
     const radio_group_node = try mobileWidgetSemanticsByIdForTest(app, 14);
-    try std.testing.expectEqual(@intFromEnum(MobileWidgetRole.radiogroup), radio_group_node.role);
+    try std.testing.expectEqual(@backingInt(MobileWidgetRole.radiogroup), radio_group_node.role);
     try std.testing.expectEqualStrings("Density", radio_group_node.label.?[0..radio_group_node.label_len]);
 
     var text_geometry: MobileWidgetTextGeometry = .{};
@@ -779,13 +779,13 @@ test "mobile C ABI maps widget state and dismiss action flags" {
         .state = .{ .expanded = true, .required = true, .read_only = true, .invalid = true },
         .actions = .{ .dismiss = true },
     };
-    try std.testing.expect((mobileWidgetFlags(expanded_node) & @intFromEnum(MobileWidgetFlag.expanded)) != 0);
-    try std.testing.expect((mobileWidgetFlags(expanded_node) & @intFromEnum(MobileWidgetFlag.collapsed)) == 0);
-    try std.testing.expect((mobileWidgetFlags(expanded_node) & @intFromEnum(MobileWidgetFlag.required)) != 0);
-    try std.testing.expect((mobileWidgetFlags(expanded_node) & @intFromEnum(MobileWidgetFlag.read_only)) != 0);
-    try std.testing.expect((mobileWidgetFlags(expanded_node) & @intFromEnum(MobileWidgetFlag.invalid)) != 0);
-    try std.testing.expect((mobileWidgetActions(expanded_node.actions) & @intFromEnum(MobileWidgetAction.dismiss)) != 0);
-    try std.testing.expectEqual(runtime.CanvasWidgetAccessibilityActionKind.dismiss, try mobileWidgetActionKindFromInt(@intFromEnum(MobileWidgetActionKind.dismiss)));
+    try std.testing.expect((mobileWidgetFlags(expanded_node) & @backingInt(MobileWidgetFlag.expanded)) != 0);
+    try std.testing.expect((mobileWidgetFlags(expanded_node) & @backingInt(MobileWidgetFlag.collapsed)) == 0);
+    try std.testing.expect((mobileWidgetFlags(expanded_node) & @backingInt(MobileWidgetFlag.required)) != 0);
+    try std.testing.expect((mobileWidgetFlags(expanded_node) & @backingInt(MobileWidgetFlag.read_only)) != 0);
+    try std.testing.expect((mobileWidgetFlags(expanded_node) & @backingInt(MobileWidgetFlag.invalid)) != 0);
+    try std.testing.expect((mobileWidgetActions(expanded_node.actions) & @backingInt(MobileWidgetAction.dismiss)) != 0);
+    try std.testing.expectEqual(runtime.CanvasWidgetAccessibilityActionKind.dismiss, try mobileWidgetActionKindFromInt(@backingInt(MobileWidgetActionKind.dismiss)));
 
     const collapsed_node = canvas.WidgetSemanticsNode{
         .id = 2,
@@ -794,8 +794,8 @@ test "mobile C ABI maps widget state and dismiss action flags" {
         .bounds = geometry.RectF.init(0, 0, 120, 32),
         .state = .{ .expanded = false },
     };
-    try std.testing.expect((mobileWidgetFlags(collapsed_node) & @intFromEnum(MobileWidgetFlag.collapsed)) != 0);
-    try std.testing.expect((mobileWidgetFlags(collapsed_node) & @intFromEnum(MobileWidgetFlag.expanded)) == 0);
+    try std.testing.expect((mobileWidgetFlags(collapsed_node) & @backingInt(MobileWidgetFlag.collapsed)) != 0);
+    try std.testing.expect((mobileWidgetFlags(collapsed_node) & @backingInt(MobileWidgetFlag.expanded)) == 0);
 }
 
 test "mobile C ABI dispatches GPU widget accessibility actions" {
@@ -871,7 +871,7 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     }, geometry.RectF.init(0, 0, 360, 220), &nodes);
     _ = try self.embedded.runtime.setCanvasWidgetLayout(1, mobile_gpu_surface_label, layout);
 
-    var action = MobileWidgetActionRequest{ .id = 2, .action = @intFromEnum(MobileWidgetActionKind.press) };
+    var action = MobileWidgetActionRequest{ .id = 2, .action = @backingInt(MobileWidgetActionKind.press) };
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_action(app, &action));
     try std.testing.expectEqual(@as(usize, 1), native_sdk_app_last_command_count(app));
     try std.testing.expectEqualStrings("widget.run", std.mem.span(native_sdk_app_last_command_name(app)));
@@ -883,14 +883,14 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     try std.testing.expectEqual(platform.GpuSurfaceInputKind.key_down, self.last_input_kind);
     try std.testing.expectEqualStrings("enter", self.last_input_key[0..self.last_input_key_len]);
 
-    action = .{ .id = 3, .action = @intFromEnum(MobileWidgetActionKind.toggle) };
+    action = .{ .id = 3, .action = @backingInt(MobileWidgetActionKind.toggle) };
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_action(app, &action));
     const checkbox = try mobileWidgetSemanticsByIdForTest(app, 3);
     try std.testing.expectEqual(@as(c_int, 1), checkbox.has_value);
     try std.testing.expectEqual(@as(f32, 1), checkbox.value);
-    try std.testing.expect((checkbox.flags & @intFromEnum(MobileWidgetFlag.selected)) != 0);
+    try std.testing.expect((checkbox.flags & @backingInt(MobileWidgetFlag.selected)) != 0);
 
-    action = .{ .id = 4, .action = @intFromEnum(MobileWidgetActionKind.increment) };
+    action = .{ .id = 4, .action = @backingInt(MobileWidgetActionKind.increment) };
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_action(app, &action));
     const slider = try mobileWidgetSemanticsByIdForTest(app, 4);
     try std.testing.expectApproxEqAbs(@as(f32, 0.55), slider.value, 0.001);
@@ -898,7 +898,7 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     const title = "Hello world";
     action = .{
         .id = 5,
-        .action = @intFromEnum(MobileWidgetActionKind.set_text),
+        .action = @backingInt(MobileWidgetActionKind.set_text),
         .text = title,
         .text_len = title.len,
     };
@@ -911,7 +911,7 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     const composition = "!";
     action = .{
         .id = 5,
-        .action = @intFromEnum(MobileWidgetActionKind.set_composition),
+        .action = @backingInt(MobileWidgetActionKind.set_composition),
         .text = composition,
         .text_len = composition.len,
     };
@@ -921,7 +921,7 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     try std.testing.expectEqual(@as(isize, @intCast(title.len)), text_field.text_composition_start);
     try std.testing.expectEqual(@as(isize, @intCast(title.len + composition.len)), text_field.text_composition_end);
 
-    action = .{ .id = 5, .action = @intFromEnum(MobileWidgetActionKind.commit_composition) };
+    action = .{ .id = 5, .action = @backingInt(MobileWidgetActionKind.commit_composition) };
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_action(app, &action));
     text_field = try mobileWidgetSemanticsByIdForTest(app, 5);
     try std.testing.expectEqualStrings("Hello world!", text_field.text.?[0..text_field.text_len]);
@@ -930,7 +930,7 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
 
     action = .{
         .id = 5,
-        .action = @intFromEnum(MobileWidgetActionKind.set_selection),
+        .action = @backingInt(MobileWidgetActionKind.set_selection),
         .selection_anchor = 0,
         .selection_focus = 5,
         .has_selection = 1,
@@ -940,17 +940,17 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     try std.testing.expectEqual(@as(isize, 0), text_field.text_selection_start);
     try std.testing.expectEqual(@as(isize, 5), text_field.text_selection_end);
 
-    action = .{ .id = 6, .action = @intFromEnum(MobileWidgetActionKind.select) };
+    action = .{ .id = 6, .action = @backingInt(MobileWidgetActionKind.select) };
     try std.testing.expectEqual(@as(c_int, 1), native_sdk_app_widget_action(app, &action));
     const list_item = try mobileWidgetSemanticsByIdForTest(app, 6);
     try std.testing.expectEqual(@as(c_int, 1), list_item.has_value);
     try std.testing.expectEqual(@as(f32, 1), list_item.value);
-    try std.testing.expect((list_item.flags & @intFromEnum(MobileWidgetFlag.selected)) != 0);
+    try std.testing.expect((list_item.flags & @backingInt(MobileWidgetFlag.selected)) != 0);
 
     const drag_delta = "6 2";
     action = .{
         .id = 7,
-        .action = @intFromEnum(MobileWidgetActionKind.drag),
+        .action = @backingInt(MobileWidgetActionKind.drag),
         .text = drag_delta,
         .text_len = drag_delta.len,
     };
@@ -964,7 +964,7 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     const drop_paths = "/tmp/mobile-report.csv";
     action = .{
         .id = 8,
-        .action = @intFromEnum(MobileWidgetActionKind.drop_files),
+        .action = @backingInt(MobileWidgetActionKind.drop_files),
         .text = drop_paths,
         .text_len = drop_paths.len,
     };
@@ -972,11 +972,11 @@ test "mobile C ABI dispatches GPU widget accessibility actions" {
     try std.testing.expectEqualStrings("drop:files", self.null_platform.lastWindowEventName());
     try std.testing.expect(std.mem.indexOf(u8, self.null_platform.lastWindowEventDetail(), "\"paths\":[\"/tmp/mobile-report.csv\"]") != null);
 
-    action = .{ .id = 99, .action = @intFromEnum(MobileWidgetActionKind.press) };
+    action = .{ .id = 99, .action = @backingInt(MobileWidgetActionKind.press) };
     try std.testing.expectEqual(@as(c_int, 0), native_sdk_app_widget_action(app, &action));
     try std.testing.expectEqualStrings("InvalidCommand", std.mem.span(native_sdk_app_last_error_name(app)));
 
-    action = .{ .id = 5, .action = @intFromEnum(MobileWidgetActionKind.set_selection) };
+    action = .{ .id = 5, .action = @backingInt(MobileWidgetActionKind.set_selection) };
     try std.testing.expectEqual(@as(c_int, 0), native_sdk_app_widget_action(app, &action));
     try std.testing.expectEqualStrings("InvalidCommand", std.mem.span(native_sdk_app_last_error_name(app)));
 
@@ -1191,7 +1191,7 @@ fn findMobileSemanticsByRole(app: ?*anyopaque, role: MobileWidgetRole) !MobileWi
     while (index < count) : (index += 1) {
         var node: MobileWidgetSemantics = .{};
         try std.testing.expectEqual(@as(c_int, 1), MobileCounterApi.native_sdk_app_widget_semantics_at(app, index, &node));
-        if (node.role == @intFromEnum(role)) return node;
+        if (node.role == @backingInt(role)) return node;
     }
     return error.TestUnexpectedResult;
 }
@@ -1669,7 +1669,7 @@ fn mobileChromeSemanticsByRole(app: ?*anyopaque, role: MobileWidgetRole) !Mobile
     while (index < count) : (index += 1) {
         var node: MobileWidgetSemantics = .{};
         try std.testing.expectEqual(@as(c_int, 1), MobileChromeApi.native_sdk_app_widget_semantics_at(app, index, &node));
-        if (node.role == @intFromEnum(role)) return node;
+        if (node.role == @backingInt(role)) return node;
     }
     return error.TestUnexpectedResult;
 }
@@ -1733,7 +1733,7 @@ fn measureTestTextWidth(app: ?*anyopaque) !f32 {
     while (index < count) : (index += 1) {
         var node: MobileWidgetSemantics = .{};
         try std.testing.expectEqual(@as(c_int, 1), MobileMeasureApi.native_sdk_app_widget_semantics_at(app, index, &node));
-        if (node.role == @intFromEnum(MobileWidgetRole.text)) return node.width;
+        if (node.role == @backingInt(MobileWidgetRole.text)) return node.width;
     }
     return error.TestUnexpectedResult;
 }
@@ -2009,7 +2009,7 @@ fn pressAudioButton(app: ?*anyopaque, label: []const u8) !void {
     while (index < count) : (index += 1) {
         var node: MobileWidgetSemantics = .{};
         try std.testing.expectEqual(@as(c_int, 1), MobileAudioApi.native_sdk_app_widget_semantics_at(app, index, &node));
-        if (node.role != @intFromEnum(MobileWidgetRole.button)) continue;
+        if (node.role != @backingInt(MobileWidgetRole.button)) continue;
         const node_label = if (node.label) |ptr| ptr[0..node.label_len] else "";
         if (!std.mem.eql(u8, node_label, label)) continue;
         // A synthesized tap at the button's center — the same touch path
@@ -2309,7 +2309,7 @@ fn pressRegisterButton(app: ?*anyopaque) !void {
     while (index < count) : (index += 1) {
         var node: MobileWidgetSemantics = .{};
         try std.testing.expectEqual(@as(c_int, 1), MobileImageApi.native_sdk_app_widget_semantics_at(app, index, &node));
-        if (node.role != @intFromEnum(MobileWidgetRole.button)) continue;
+        if (node.role != @backingInt(MobileWidgetRole.button)) continue;
         const node_label = if (node.label) |ptr| ptr[0..node.label_len] else "";
         if (!std.mem.eql(u8, node_label, "Register")) continue;
         const x = node.x + node.width / 2;
@@ -2885,7 +2885,7 @@ fn findDamageSemanticsByRole(app: ?*anyopaque, role: MobileWidgetRole) !MobileWi
     while (index < count) : (index += 1) {
         var node: MobileWidgetSemantics = .{};
         try std.testing.expectEqual(@as(c_int, 1), MobileDamageApi.native_sdk_app_widget_semantics_at(app, index, &node));
-        if (node.role == @intFromEnum(role)) return node;
+        if (node.role == @backingInt(role)) return node;
     }
     return error.TestUnexpectedResult;
 }

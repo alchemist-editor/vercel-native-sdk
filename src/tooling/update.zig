@@ -312,7 +312,7 @@ fn readZipEntryAlloc(
     const flags = std.mem.readInt(u16, local_header[6..8], .little);
     if (flags & 1 != 0) return error.InvalidArchive;
     const method = std.mem.readInt(u16, local_header[8..10], .little);
-    if (method != @intFromEnum(entry.compression_method)) return error.InvalidArchive;
+    if (method != @backingInt(entry.compression_method)) return error.InvalidArchive;
     const local_crc = std.mem.readInt(u32, local_header[14..18], .little);
     if (local_crc != 0 and local_crc != entry.crc32) return error.InvalidArchive;
     const filename_len = std.mem.readInt(u16, local_header[26..28], .little);
@@ -366,7 +366,7 @@ fn readZipEntryPrefix(
     const flags = std.mem.readInt(u16, local_header[6..8], .little);
     if (flags & 1 != 0) return error.InvalidArchive;
     const method = std.mem.readInt(u16, local_header[8..10], .little);
-    if (method != @intFromEnum(entry.compression_method)) return error.InvalidArchive;
+    if (method != @backingInt(entry.compression_method)) return error.InvalidArchive;
     const filename_len = std.mem.readInt(u16, local_header[26..28], .little);
     const extra_len = std.mem.readInt(u16, local_header[28..30], .little);
     if (filename_len != expected_filename.len) return error.InvalidArchive;
@@ -434,7 +434,7 @@ fn plistStringValueEquals(plist: []const u8, key: []const u8, expected: []const 
 }
 
 test "generated key is private and public key is derivable" {
-    const key_pair = try Ed25519.KeyPair.generateDeterministic([_]u8{0x61} ** Ed25519.KeyPair.seed_length);
+    const key_pair = try Ed25519.KeyPair.generateDeterministic(@as([Ed25519.KeyPair.seed_length]u8, @splat(0x61)));
     const recovered = try Ed25519.KeyPair.generateDeterministic(key_pair.secret_key.seed());
     try std.testing.expectEqualSlices(u8, &key_pair.public_key.toBytes(), &recovered.public_key.toBytes());
 }
@@ -457,7 +457,7 @@ fn storedZipAlloc(allocator: std.mem.Allocator, entries: []const StoredZipEntry)
         try writer.writeAll(&std.zip.local_file_header_sig);
         try writer.writeInt(u16, 20, .little);
         try writer.writeInt(u16, 0, .little);
-        try writer.writeInt(u16, @intFromEnum(std.zip.CompressionMethod.store), .little);
+        try writer.writeInt(u16, @backingInt(std.zip.CompressionMethod.store), .little);
         try writer.writeInt(u16, 0, .little);
         try writer.writeInt(u16, 0, .little);
         try writer.writeInt(u32, crc, .little);
@@ -476,7 +476,7 @@ fn storedZipAlloc(allocator: std.mem.Allocator, entries: []const StoredZipEntry)
         try writer.writeInt(u16, 20, .little);
         try writer.writeInt(u16, 20, .little);
         try writer.writeInt(u16, 0, .little);
-        try writer.writeInt(u16, @intFromEnum(std.zip.CompressionMethod.store), .little);
+        try writer.writeInt(u16, @backingInt(std.zip.CompressionMethod.store), .little);
         try writer.writeInt(u16, 0, .little);
         try writer.writeInt(u16, 0, .little);
         try writer.writeInt(u32, crc, .little);
@@ -516,14 +516,14 @@ fn updateInfoPlist(bundle_id: []const u8, version: []const u8, executable: []con
 }
 
 fn thinMachO64(cpu_type: u32) [32]u8 {
-    var bytes = [_]u8{0} ** 32;
+    var bytes = @as([32]u8, @splat(0));
     @memcpy(bytes[0..4], "\xcf\xfa\xed\xfe");
     std.mem.writeInt(u32, bytes[4..8], cpu_type, .little);
     return bytes;
 }
 
 fn fatMachO64(first_cpu_type: u32, second_cpu_type: u32) [72]u8 {
-    var bytes = [_]u8{0} ** 72;
+    var bytes = @as([72]u8, @splat(0));
     @memcpy(bytes[0..4], "\xca\xfe\xba\xbf");
     std.mem.writeInt(u32, bytes[4..8], 2, .big);
     std.mem.writeInt(u32, bytes[8..12], first_cpu_type, .big);

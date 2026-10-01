@@ -91,7 +91,7 @@ pub fn parseHttpUrl(url: []const u8) Error!UrlParts {
         443
     else
         return error.InvalidUrl;
-    const rest = url[if (default_port == 80) "http://".len else "https://".len ..];
+    const rest = url[if (default_port == 80) "http://".len else "https://".len..];
     const slash_index = std.mem.indexOfScalar(u8, rest, '/') orelse rest.len;
     const host_port = rest[0..slash_index];
     if (host_port.len == 0) return error.InvalidUrl;

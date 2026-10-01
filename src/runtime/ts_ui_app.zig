@@ -74,6 +74,7 @@
 //! markup interpreter out of release and mobile artifacts while preserving
 //! `TsUiApp` as the full-featured default for hand wiring and tests.
 
+const reflection = @import("reflection");
 const std = @import("std");
 const canvas = @import("canvas");
 const platform = @import("../platform/root.zig");
@@ -90,9 +91,9 @@ const ts_ui_app_log = std.log.scoped(.zero_ts_ui_app);
 /// `std.mem.eql`'s comptime scalar path scales with the compared names.
 fn typeScanQuota(comptime T: type) u32 {
     const fields = switch (@typeInfo(T)) {
-        .@"struct" => |info| info.fields,
-        .@"union" => |info| info.fields,
-        .@"enum" => |info| info.fields,
+        .@"struct" => |info| reflection.fieldsOf(info),
+        .@"union" => |info| reflection.fieldsOf(info),
+        .@"enum" => |info| reflection.fieldsOf(info),
         else => return 2_000,
     };
     var name_bytes: u64 = 0;
@@ -268,7 +269,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn validatePersistRoute(comptime route: []const u8, comptime Payload: type, comptime role: []const u8) void {
             @setEvalBranchQuota(msg_scan_quota);
-            inline for (@typeInfo(Msg).@"union".fields) |arm| {
+            inline for (reflection.fieldsOf(@typeInfo(Msg).@"union")) |arm| {
                 if (comptime std.mem.eql(u8, arm.name, route)) {
                     if (arm.type != Payload) {
                         @compileError(std.fmt.comptimePrint(
@@ -540,12 +541,12 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const helper_info = @typeInfo(@TypeOf(Model.themePack));
             if (helper_info != .@"fn") @compileError(teaching);
             const function = helper_info.@"fn";
-            if (function.params.len != 1 or function.params[0].type == null or function.params[0].type.? != *const Model) {
+            if (function.param_types.len != 1 or function.param_types[0] == null or function.param_types[0].? != *const Model) {
                 @compileError(teaching);
             }
             const Pack = function.return_type orelse @compileError(teaching);
             const pack_info = @typeInfo(Pack);
-            if (pack_info != .@"enum" or pack_info.@"enum".fields.len != 2 or
+            if (pack_info != .@"enum" or reflection.fieldsOf(pack_info.@"enum").len != 2 or
                 !@hasField(Pack, "house") or !@hasField(Pack, "geist"))
             {
                 @compileError(teaching);
@@ -553,7 +554,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         }
 
         fn themeStateAdapter(model: *const Model) App.ThemeState {
-            const params = @typeInfo(@TypeOf(Model.themeState)).@"fn".params;
+            const params = @typeInfo(@TypeOf(Model.themeState)).@"fn".param_types;
             const raw_state = if (comptime params.len == 1)
                 model.themeState()
             else
@@ -570,8 +571,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn themeColorScheme(value: anytype) App.ThemeColorScheme {
             const name = @tagName(value);
-            inline for (std.meta.fields(App.ThemeColorScheme)) |field| {
-                if (std.mem.eql(u8, name, field.name)) return @enumFromInt(field.value);
+            inline for (reflection.fields(App.ThemeColorScheme)) |field| {
+                if (std.mem.eql(u8, name, field.name)) return @fromBackingInt(@intCast(field.value));
             }
             unreachable;
         }
@@ -604,11 +605,11 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const helper_info = @typeInfo(@TypeOf(Model.themeState));
             if (helper_info != .@"fn") @compileError(teaching);
             const function = helper_info.@"fn";
-            if ((function.params.len != 1 and function.params.len != 2) or function.params[0].type == null or function.params[0].type.? != *const Model) {
+            if ((function.param_types.len != 1 and function.param_types.len != 2) or function.param_types[0] == null or function.param_types[0].? != *const Model) {
                 @compileError(teaching);
             }
-            if (function.params.len == 2) {
-                if (function.params[1].type == null or function.params[1].type.? != std.mem.Allocator or
+            if (function.param_types.len == 2) {
+                if (function.param_types[1] == null or function.param_types[1].? != std.mem.Allocator or
                     !@hasDecl(core, "rt") or !@hasDecl(core.rt, "frameAllocator"))
                 {
                     @compileError(teaching);
@@ -617,7 +618,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const RawState = function.return_type orelse @compileError(teaching);
             const State = statusItemRecordType(RawState, teaching);
             const info = @typeInfo(State).@"struct";
-            if (info.fields.len != 3 or !@hasField(State, "pack") or !@hasField(State, "colorScheme") or !@hasField(State, "accent")) {
+            if (reflection.fieldsOf(info).len != 3 or !@hasField(State, "pack") or !@hasField(State, "colorScheme") or !@hasField(State, "accent")) {
                 @compileError(teaching);
             }
             if (!optionalEnumType(@FieldType(State, "pack"), &.{ "house", "geist" }) or
@@ -634,7 +635,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// by pointer; value records are accepted too so hand-assembled
         /// compiler fixtures exercise the same seam.
         fn statusItemAdapter(model: *const Model, scratch: *App.StatusItemScratch) App.StatusItemState {
-            const params = @typeInfo(@TypeOf(Model.statusItem)).@"fn".params;
+            const params = @typeInfo(@TypeOf(Model.statusItem)).@"fn".param_types;
             const raw_state = if (comptime params.len == 1)
                 model.statusItem()
             else
@@ -662,7 +663,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         }
 
         fn statusItemsAdapter(model: *const Model, scratch: *App.StatusItemsScratch) []const App.StatusItemDescriptor {
-            const params = @typeInfo(@TypeOf(Model.statusItems)).@"fn".params;
+            const params = @typeInfo(@TypeOf(Model.statusItems)).@"fn".param_types;
             const raw_states = if (comptime params.len == 1)
                 model.statusItems()
             else
@@ -705,7 +706,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         }
 
         fn windowsAdapter(model: *const Model, scratch: *App.WindowsScratch) []const App.WindowDescriptor {
-            const params = @typeInfo(@TypeOf(Model.windows)).@"fn".params;
+            const params = @typeInfo(@TypeOf(Model.windows)).@"fn".param_types;
             const raw_windows = if (comptime params.len == 1)
                 model.windows()
             else
@@ -756,24 +757,24 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn windowTitlebar(value: anytype) @import("app_manifest").WindowTitlebarStyle {
             const Target = @import("app_manifest").WindowTitlebarStyle;
-            inline for (std.meta.fields(Target)) |field| {
-                if (std.mem.eql(u8, @tagName(value), field.name)) return @enumFromInt(field.value);
+            inline for (reflection.fields(Target)) |field| {
+                if (std.mem.eql(u8, @tagName(value), field.name)) return @fromBackingInt(@intCast(field.value));
             }
             unreachable;
         }
 
         fn windowRestorePolicy(value: anytype) @import("app_manifest").WindowRestorePolicy {
             const Target = @import("app_manifest").WindowRestorePolicy;
-            inline for (std.meta.fields(Target)) |field| {
-                if (std.mem.eql(u8, @tagName(value), field.name)) return @enumFromInt(field.value);
+            inline for (reflection.fields(Target)) |field| {
+                if (std.mem.eql(u8, @tagName(value), field.name)) return @fromBackingInt(@intCast(field.value));
             }
             unreachable;
         }
 
         fn windowClosePolicy(value: anytype) @import("app_manifest").WindowClosePolicy {
             const Target = @import("app_manifest").WindowClosePolicy;
-            inline for (std.meta.fields(Target)) |field| {
-                if (std.mem.eql(u8, @tagName(value), field.name)) return @enumFromInt(field.value);
+            inline for (reflection.fields(Target)) |field| {
+                if (std.mem.eql(u8, @tagName(value), field.name)) return @fromBackingInt(@intCast(field.value));
             }
             unreachable;
         }
@@ -907,24 +908,24 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn statusItemTone(value: anytype) platform.TrayTone {
             const name = @tagName(value);
-            inline for (std.meta.fields(platform.TrayTone)) |field| {
-                if (std.mem.eql(u8, name, field.name)) return @enumFromInt(field.value);
+            inline for (reflection.fields(platform.TrayTone)) |field| {
+                if (std.mem.eql(u8, name, field.name)) return @fromBackingInt(@intCast(field.value));
             }
             unreachable;
         }
 
         fn statusItemFontWeight(value: anytype) platform.TrayFontWeight {
             const name = @tagName(value);
-            inline for (std.meta.fields(platform.TrayFontWeight)) |field| {
-                if (std.mem.eql(u8, name, field.name)) return @enumFromInt(field.value);
+            inline for (reflection.fields(platform.TrayFontWeight)) |field| {
+                if (std.mem.eql(u8, name, field.name)) return @fromBackingInt(@intCast(field.value));
             }
             unreachable;
         }
 
         fn statusItemRole(value: anytype) platform.TrayItemRole {
             const name = @tagName(value);
-            inline for (std.meta.fields(platform.TrayItemRole)) |field| {
-                if (std.mem.eql(u8, name, field.name)) return @enumFromInt(field.value);
+            inline for (reflection.fields(platform.TrayItemRole)) |field| {
+                if (std.mem.eql(u8, name, field.name)) return @fromBackingInt(@intCast(field.value));
             }
             unreachable;
         }
@@ -937,11 +938,11 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const helper_info = @typeInfo(@TypeOf(Model.statusItem));
             if (helper_info != .@"fn") @compileError(teaching);
             const function = helper_info.@"fn";
-            if ((function.params.len != 1 and function.params.len != 2) or function.params[0].type == null or function.params[0].type.? != *const Model) {
+            if ((function.param_types.len != 1 and function.param_types.len != 2) or function.param_types[0] == null or function.param_types[0].? != *const Model) {
                 @compileError(teaching);
             }
-            if (function.params.len == 2) {
-                if (function.params[1].type == null or function.params[1].type.? != std.mem.Allocator or
+            if (function.param_types.len == 2) {
+                if (function.param_types[1] == null or function.param_types[1].? != std.mem.Allocator or
                     !@hasDecl(core, "rt") or !@hasDecl(core.rt, "frameAllocator"))
                 {
                     @compileError(teaching);
@@ -950,7 +951,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const RawState = function.return_type orelse @compileError(teaching);
             const State = statusItemRecordType(RawState, teaching);
             const state_info = @typeInfo(State).@"struct";
-            if (state_info.fields.len != 7 or !@hasField(State, "iconPath") or !@hasField(State, "tooltip") or
+            if (state_info.field_names.len != 7 or !@hasField(State, "iconPath") or !@hasField(State, "tooltip") or
                 !@hasField(State, "activationCommand") or !@hasField(State, "alternateActivationCommand") or
                 !@hasField(State, "openCommand") or !@hasField(State, "presentation") or !@hasField(State, "items"))
             {
@@ -964,7 +965,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             }
             const Presentation = statusItemRecordType(@FieldType(State, "presentation"), teaching);
             const presentation_info = @typeInfo(Presentation).@"struct";
-            if (presentation_info.fields.len != 7 or !@hasField(Presentation, "title") or !@hasField(Presentation, "width") or
+            if (presentation_info.field_names.len != 7 or !@hasField(Presentation, "title") or !@hasField(Presentation, "width") or
                 !@hasField(Presentation, "tone") or !@hasField(Presentation, "iconOpacity") or !@hasField(Presentation, "monospaced") or
                 !@hasField(Presentation, "fontSize") or !@hasField(Presentation, "fontWeight"))
             {
@@ -979,10 +980,10 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 @compileError(teaching);
             }
             const items_info = @typeInfo(@FieldType(State, "items"));
-            if (items_info != .pointer or items_info.pointer.size != .slice or !items_info.pointer.is_const) @compileError(teaching);
+            if (items_info != .pointer or items_info.pointer.size != .slice or !items_info.pointer.attrs.@"const") @compileError(teaching);
             const Item = statusItemRecordType(items_info.pointer.child, teaching);
             const item_info = @typeInfo(Item).@"struct";
-            if (item_info.fields.len != 12 or !@hasField(Item, "id") or !@hasField(Item, "label") or
+            if (item_info.field_names.len != 12 or !@hasField(Item, "id") or !@hasField(Item, "label") or
                 !@hasField(Item, "command") or !@hasField(Item, "separator") or !@hasField(Item, "enabled") or
                 !@hasField(Item, "detail") or !@hasField(Item, "role") or !@hasField(Item, "key") or !@hasField(Item, "modifiers") or
                 !@hasField(Item, "segmented") or !@hasField(Item, "metric") or !@hasField(Item, "chart"))
@@ -1000,7 +1001,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             }
             const Modifiers = statusItemRecordType(@FieldType(Item, "modifiers"), teaching);
             const modifiers_info = @typeInfo(Modifiers).@"struct";
-            if (modifiers_info.fields.len != 5 or !@hasField(Modifiers, "primary") or !@hasField(Modifiers, "command") or
+            if (modifiers_info.field_names.len != 5 or !@hasField(Modifiers, "primary") or !@hasField(Modifiers, "command") or
                 !@hasField(Modifiers, "control") or !@hasField(Modifiers, "option") or !@hasField(Modifiers, "shift") or
                 @FieldType(Modifiers, "primary") != bool or @FieldType(Modifiers, "command") != bool or
                 @FieldType(Modifiers, "control") != bool or @FieldType(Modifiers, "option") != bool or @FieldType(Modifiers, "shift") != bool)
@@ -1015,11 +1016,11 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const helper_info = @typeInfo(@TypeOf(Model.statusItems));
             if (helper_info != .@"fn") @compileError(teaching);
             const function = helper_info.@"fn";
-            if ((function.params.len != 1 and function.params.len != 2) or function.params[0].type == null or function.params[0].type.? != *const Model) {
+            if ((function.param_types.len != 1 and function.param_types.len != 2) or function.param_types[0] == null or function.param_types[0].? != *const Model) {
                 @compileError(teaching);
             }
-            if (function.params.len == 2) {
-                if (function.params[1].type == null or function.params[1].type.? != std.mem.Allocator or
+            if (function.param_types.len == 2) {
+                if (function.param_types[1] == null or function.param_types[1].? != std.mem.Allocator or
                     !@hasDecl(core, "rt") or !@hasDecl(core.rt, "frameAllocator"))
                 {
                     @compileError(teaching);
@@ -1027,10 +1028,10 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             }
             const Return = function.return_type orelse @compileError(teaching);
             const return_info = @typeInfo(Return);
-            if (return_info != .pointer or return_info.pointer.size != .slice or !return_info.pointer.is_const) @compileError(teaching);
+            if (return_info != .pointer or return_info.pointer.size != .slice or !return_info.pointer.attrs.@"const") @compileError(teaching);
             const State = statusItemRecordType(return_info.pointer.child, teaching);
             const info = @typeInfo(State).@"struct";
-            if (info.fields.len != 9 or !@hasField(State, "id") or !@hasField(State, "visible") or
+            if (reflection.fieldsOf(info).len != 9 or !@hasField(State, "id") or !@hasField(State, "visible") or
                 !@hasField(State, "iconPath") or !@hasField(State, "tooltip") or !@hasField(State, "activationCommand") or
                 !@hasField(State, "alternateActivationCommand") or !@hasField(State, "openCommand") or
                 !@hasField(State, "presentation") or !@hasField(State, "items") or
@@ -1043,7 +1044,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             }
             const Presentation = statusItemRecordType(@FieldType(State, "presentation"), teaching);
             const presentation_info = @typeInfo(Presentation).@"struct";
-            if (presentation_info.fields.len != 7 or !@hasField(Presentation, "title") or !@hasField(Presentation, "width") or
+            if (presentation_info.field_names.len != 7 or !@hasField(Presentation, "title") or !@hasField(Presentation, "width") or
                 !@hasField(Presentation, "tone") or !@hasField(Presentation, "iconOpacity") or !@hasField(Presentation, "monospaced") or
                 !@hasField(Presentation, "fontSize") or !@hasField(Presentation, "fontWeight") or
                 @FieldType(Presentation, "title") != []const u8 or !statusItemNumericType(@FieldType(Presentation, "width")) or
@@ -1055,10 +1056,10 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 @compileError(teaching);
             }
             const items_info = @typeInfo(@FieldType(State, "items"));
-            if (items_info != .pointer or items_info.pointer.size != .slice or !items_info.pointer.is_const) @compileError(teaching);
+            if (items_info != .pointer or items_info.pointer.size != .slice or !items_info.pointer.attrs.@"const") @compileError(teaching);
             const Item = statusItemRecordType(items_info.pointer.child, teaching);
             const item_info = @typeInfo(Item).@"struct";
-            if (item_info.fields.len != 12 or !@hasField(Item, "id") or !@hasField(Item, "label") or
+            if (item_info.field_names.len != 12 or !@hasField(Item, "id") or !@hasField(Item, "label") or
                 !@hasField(Item, "command") or !@hasField(Item, "separator") or !@hasField(Item, "enabled") or
                 !@hasField(Item, "detail") or !@hasField(Item, "role") or !@hasField(Item, "key") or
                 !@hasField(Item, "modifiers") or !@hasField(Item, "segmented") or !@hasField(Item, "metric") or !@hasField(Item, "chart") or
@@ -1074,7 +1075,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             validateStatusItemRichTypes(Item, teaching);
             const Modifiers = statusItemRecordType(@FieldType(Item, "modifiers"), teaching);
             const modifiers_info = @typeInfo(Modifiers).@"struct";
-            if (modifiers_info.fields.len != 5 or !@hasField(Modifiers, "primary") or !@hasField(Modifiers, "command") or
+            if (modifiers_info.field_names.len != 5 or !@hasField(Modifiers, "primary") or !@hasField(Modifiers, "command") or
                 !@hasField(Modifiers, "control") or !@hasField(Modifiers, "option") or !@hasField(Modifiers, "shift") or
                 @FieldType(Modifiers, "primary") != bool or @FieldType(Modifiers, "command") != bool or
                 @FieldType(Modifiers, "control") != bool or @FieldType(Modifiers, "option") != bool or
@@ -1089,17 +1090,17 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const helper_info = @typeInfo(@TypeOf(Model.windows));
             if (helper_info != .@"fn") @compileError(teaching);
             const function = helper_info.@"fn";
-            if ((function.params.len != 1 and function.params.len != 2) or function.params[0].type == null or function.params[0].type.? != *const Model) @compileError(teaching);
-            if (function.params.len == 2) {
-                if (function.params[1].type == null or function.params[1].type.? != std.mem.Allocator or
+            if ((function.param_types.len != 1 and function.param_types.len != 2) or function.param_types[0] == null or function.param_types[0].? != *const Model) @compileError(teaching);
+            if (function.param_types.len == 2) {
+                if (function.param_types[1] == null or function.param_types[1].? != std.mem.Allocator or
                     !@hasDecl(core, "rt") or !@hasDecl(core.rt, "frameAllocator")) @compileError(teaching);
             }
             const Return = function.return_type orelse @compileError(teaching);
             const return_info = @typeInfo(Return);
-            if (return_info != .pointer or return_info.pointer.size != .slice or !return_info.pointer.is_const) @compileError(teaching);
+            if (return_info != .pointer or return_info.pointer.size != .slice or !return_info.pointer.attrs.@"const") @compileError(teaching);
             const Window = statusItemRecordType(return_info.pointer.child, teaching);
             const info = @typeInfo(Window).@"struct";
-            if (info.fields.len != 19 or !@hasField(Window, "label") or !@hasField(Window, "canvasLabel") or
+            if (reflection.fieldsOf(info).len != 19 or !@hasField(Window, "label") or !@hasField(Window, "canvasLabel") or
                 !@hasField(Window, "title") or !@hasField(Window, "width") or !@hasField(Window, "height") or
                 !@hasField(Window, "x") or !@hasField(Window, "y") or !@hasField(Window, "resizable") or
                 !@hasField(Window, "restorePolicy") or
@@ -1138,31 +1139,31 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             if (segmented_info != .optional or metric_info != .optional or chart_info != .optional) @compileError(teaching);
 
             const Segmented = statusItemRecordType(segmented_info.optional.child, teaching);
-            const segmented_fields = @typeInfo(Segmented).@"struct".fields;
+            const segmented_fields = reflection.fieldsOf(@typeInfo(Segmented).@"struct");
             if (segmented_fields.len != 1 or !@hasField(Segmented, "options")) @compileError(teaching);
             const options_info = @typeInfo(@FieldType(Segmented, "options"));
-            if (options_info != .pointer or options_info.pointer.size != .slice or !options_info.pointer.is_const) @compileError(teaching);
+            if (options_info != .pointer or options_info.pointer.size != .slice or !options_info.pointer.attrs.@"const") @compileError(teaching);
             const Option = statusItemRecordType(options_info.pointer.child, teaching);
             const option_info = @typeInfo(Option).@"struct";
-            if (option_info.fields.len != 5 or !@hasField(Option, "id") or !@hasField(Option, "label") or
+            if (option_info.field_names.len != 5 or !@hasField(Option, "id") or !@hasField(Option, "label") or
                 !@hasField(Option, "command") or !@hasField(Option, "selected") or !@hasField(Option, "enabled") or
                 !statusItemNumericType(@FieldType(Option, "id")) or @FieldType(Option, "label") != []const u8 or
                 @FieldType(Option, "command") != []const u8 or @FieldType(Option, "selected") != bool or
                 @FieldType(Option, "enabled") != bool) @compileError(teaching);
 
             const Metric = statusItemRecordType(metric_info.optional.child, teaching);
-            const metric_fields = @typeInfo(Metric).@"struct".fields;
+            const metric_fields = reflection.fieldsOf(@typeInfo(Metric).@"struct");
             if (metric_fields.len != 3 or !@hasField(Metric, "primaryText") or !@hasField(Metric, "secondaryText") or
                 !@hasField(Metric, "accessibilityLabel") or @FieldType(Metric, "primaryText") != []const u8 or
                 @FieldType(Metric, "secondaryText") != []const u8 or @FieldType(Metric, "accessibilityLabel") != []const u8) @compileError(teaching);
 
             const Chart = statusItemRecordType(chart_info.optional.child, teaching);
-            const chart_fields = @typeInfo(Chart).@"struct".fields;
+            const chart_fields = reflection.fieldsOf(@typeInfo(Chart).@"struct");
             if (chart_fields.len != 6 or !@hasField(Chart, "values") or !@hasField(Chart, "minValue") or
                 !@hasField(Chart, "maxValue") or !@hasField(Chart, "leadingCaption") or
                 !@hasField(Chart, "trailingSummary") or !@hasField(Chart, "accessibilityLabel")) @compileError(teaching);
             const values_info = @typeInfo(@FieldType(Chart, "values"));
-            if (values_info != .pointer or values_info.pointer.size != .slice or !values_info.pointer.is_const or
+            if (values_info != .pointer or values_info.pointer.size != .slice or !values_info.pointer.attrs.@"const" or
                 !statusItemNumericType(values_info.pointer.child) or !statusItemNumericType(@FieldType(Chart, "minValue")) or
                 !statusItemNumericType(@FieldType(Chart, "maxValue")) or @FieldType(Chart, "leadingCaption") != []const u8 or
                 @FieldType(Chart, "trailingSummary") != []const u8 or @FieldType(Chart, "accessibilityLabel") != []const u8) @compileError(teaching);
@@ -1174,10 +1175,10 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn statusItemEnumType(comptime T: type, comptime expected: []const []const u8) bool {
             const info = @typeInfo(T);
-            if (info != .@"enum" or info.@"enum".fields.len != expected.len) return false;
+            if (info != .@"enum" or reflection.fieldsOf(info.@"enum").len != expected.len) return false;
             inline for (expected) |name| {
                 var found = false;
-                inline for (info.@"enum".fields) |field| {
+                inline for (reflection.fieldsOf(info.@"enum")) |field| {
                     if (std.mem.eql(u8, name, field.name)) found = true;
                 }
                 if (!found) return false;
@@ -1187,7 +1188,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn statusItemRecordType(comptime Raw: type, comptime teaching: []const u8) type {
             const Record = switch (@typeInfo(Raw)) {
-                .pointer => |pointer| if (pointer.size == .one and pointer.is_const) pointer.child else @compileError(teaching),
+                .pointer => |pointer| if (pointer.size == .one and pointer.attrs.@"const") pointer.child else @compileError(teaching),
                 else => Raw,
             };
             if (@typeInfo(Record) != .@"struct") @compileError(teaching);
@@ -1274,7 +1275,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 .closed => "io_failed",
             };
             const route = persist_options_store.?.routes.err;
-            inline for (@typeInfo(Msg).@"union".fields) |arm| {
+            inline for (reflection.fieldsOf(@typeInfo(Msg).@"union")) |arm| {
                 if (comptime arm.type == []const u8) {
                     if (std.mem.eql(u8, arm.name, route)) return @unionInit(Msg, arm.name, reason);
                 }
@@ -1284,7 +1285,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn dispatchPersistVoid(fx: *Effects, route: []const u8) void {
             @setEvalBranchQuota(msg_scan_quota);
-            inline for (@typeInfo(Msg).@"union".fields) |arm| {
+            inline for (reflection.fieldsOf(@typeInfo(Msg).@"union")) |arm| {
                 if (comptime arm.type == void) {
                     if (std.mem.eql(u8, arm.name, route)) {
                         Host.dispatch(fx, @unionInit(Msg, arm.name, {}));
@@ -1297,7 +1298,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
 
         fn dispatchPersistError(fx: *Effects, route: []const u8, reason: []const u8) void {
             @setEvalBranchQuota(msg_scan_quota);
-            inline for (@typeInfo(Msg).@"union".fields) |arm| {
+            inline for (reflection.fieldsOf(@typeInfo(Msg).@"union")) |arm| {
                 if (comptime arm.type == []const u8) {
                     if (std.mem.eql(u8, arm.name, route)) {
                         const copy = core.rt.frameAlloc(u8, reason.len);
@@ -1340,7 +1341,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// value through a full core cycle.
         fn dispatchOneEnvValue(fx: *Effects, msg: []const u8, value: []const u8) void {
             @setEvalBranchQuota(msg_scan_quota);
-            inline for (@typeInfo(Msg).@"union".fields) |arm| {
+            inline for (reflection.fieldsOf(@typeInfo(Msg).@"union")) |arm| {
                 if (comptime arm.type == []const u8) {
                     if (std.mem.eql(u8, arm.name, msg)) {
                         // The value copies into the core's frame arena
@@ -1362,7 +1363,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             @setEvalBranchQuota(scaledTypeScanQuota(Msg, core.envMsgs.len));
             for (core.envMsgs) |entry| {
                 var found = false;
-                for (@typeInfo(Msg).@"union".fields) |arm| {
+                for (reflection.fieldsOf(@typeInfo(Msg).@"union")) |arm| {
                     if (std.mem.eql(u8, arm.name, entry.msg)) {
                         if (arm.type != []const u8) {
                             @compileError("TsUiApp: envMsgs entry '" ++ entry.env ++ "' targets Msg arm '" ++ entry.msg ++ "', whose payload is not one Uint8Array field");
@@ -1392,14 +1393,14 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// exactly like a Zig `on_frame` (null while idle keeps the idle
         /// law: no Msg, no rebuild, the frame channel starves on its own).
         fn frameMsgAdapter(model: *const Model, frame: platform.GpuFrame) ?Msg {
-            const params = @typeInfo(@TypeOf(core.frameMsg)).@"fn".params;
-            if (comptime (params.len != 2 or params[0].type != *const Model)) {
+            const params = @typeInfo(@TypeOf(core.frameMsg)).@"fn".param_types;
+            if (comptime (params.len != 2 or params[0] != *const Model)) {
                 @compileError("TsUiApp: frameMsg must take (model: Model, frame: FrameEvent) - regenerate the core");
             }
-            const FrameArg = params[1].type.?;
+            const FrameArg = params[1].?;
             comptime validateChannelRecord(FrameArg, &.{ "width", "height", "timestampMs", "intervalMs" }, "frameMsg's FrameEvent", &.{});
             var arg: FrameArg = undefined;
-            inline for (@typeInfo(FrameArg).@"struct".fields) |field| {
+            inline for (reflection.fieldsOf(@typeInfo(FrameArg).@"struct")) |field| {
                 const value: f64 = if (comptime std.mem.eql(u8, field.name, "width"))
                     frame.size.width
                 else if (comptime std.mem.eql(u8, field.name, "height"))
@@ -1420,13 +1421,13 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// The UiApp precedence rule applies before this fires: focused
         /// widgets consume their own keys, editable text keeps typing.
         fn keyMsgAdapter(keyboard: canvas.WidgetKeyboardEvent) ?Msg {
-            const params = @typeInfo(@TypeOf(core.keyMsg)).@"fn".params;
+            const params = @typeInfo(@TypeOf(core.keyMsg)).@"fn".param_types;
             if (comptime params.len != 1) {
                 @compileError("TsUiApp: keyMsg must take one KeyEvent parameter - regenerate the core");
             }
-            const KeyArg = params[0].type.?;
+            const KeyArg = params[0].?;
             comptime {
-                const fields = @typeInfo(KeyArg).@"struct".fields;
+                const fields = reflection.fieldsOf(@typeInfo(KeyArg).@"struct");
                 if (fields.len != 5 or !@hasField(KeyArg, "key") or !@hasField(KeyArg, "shift") or
                     !@hasField(KeyArg, "control") or !@hasField(KeyArg, "alt") or !@hasField(KeyArg, "super"))
                 {
@@ -1459,13 +1460,13 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// in view-local canvas points. The core's return gates the channel
         /// exactly like a Zig `on_pinch` (null drops the event).
         fn pinchMsgAdapter(pinch: platform.PinchEvent) ?Msg {
-            const params = @typeInfo(@TypeOf(core.pinchMsg)).@"fn".params;
+            const params = @typeInfo(@TypeOf(core.pinchMsg)).@"fn".param_types;
             if (comptime params.len != 1) {
                 @compileError("TsUiApp: pinchMsg must take one PinchEvent parameter - regenerate the core");
             }
-            const PinchArg = params[0].type.?;
+            const PinchArg = params[0].?;
             comptime {
-                const fields = @typeInfo(PinchArg).@"struct".fields;
+                const fields = reflection.fieldsOf(@typeInfo(PinchArg).@"struct");
                 if (fields.len != 6 or !@hasField(PinchArg, "windowId") or !@hasField(PinchArg, "label") or
                     !@hasField(PinchArg, "phase") or !@hasField(PinchArg, "scale") or
                     !@hasField(PinchArg, "x") or !@hasField(PinchArg, "y"))
@@ -1474,7 +1475,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 }
                 const Phase = @FieldType(PinchArg, "phase");
                 const phase_info = @typeInfo(Phase);
-                if (phase_info != .@"enum" or phase_info.@"enum".fields.len != 3 or
+                if (phase_info != .@"enum" or reflection.fieldsOf(phase_info.@"enum").len != 3 or
                     !@hasField(Phase, "begin") or !@hasField(Phase, "change") or !@hasField(Phase, "end"))
                 {
                     @compileError("TsUiApp: pinchMsg's PinchEvent.phase must be the named \"begin\" | \"change\" | \"end\" alias");
@@ -1504,11 +1505,11 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// one is committed through the ordinary core dispatch immediately
         /// after this mapper returns.
         fn dropMsgAdapter(drop: platform.FileDropEvent) ?Msg {
-            const params = @typeInfo(@TypeOf(core.dropMsg)).@"fn".params;
+            const params = @typeInfo(@TypeOf(core.dropMsg)).@"fn".param_types;
             if (comptime params.len != 1) {
                 @compileError("TsUiApp: dropMsg must take one FileDropEvent parameter - regenerate the core");
             }
-            const DropArg = params[0].type.?;
+            const DropArg = params[0].?;
             comptime validateDropEvent(DropArg);
             const PointArg = @typeInfo(@FieldType(DropArg, "point")).optional.child;
             var arg: DropArg = undefined;
@@ -1532,7 +1533,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// MODEL owns appearance state).
         fn appearanceMsgAdapter(appearance: platform.Appearance) ?Msg {
             const arm_index = comptime channelArmIndex(core.appearanceMsg, "appearanceMsg");
-            const arm = @typeInfo(Msg).@"union".fields[arm_index];
+            const arm = reflection.fieldsOf(@typeInfo(Msg).@"union")[arm_index];
             comptime validateAppearanceArm(arm.type);
             var payload: arm.type = undefined;
             payload.reduceMotion = appearance.reduce_motion;
@@ -1551,7 +1552,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// build and again whenever it changes.
         fn chromeMsgAdapter(chrome: platform.WindowChrome) ?Msg {
             const arm_index = comptime channelArmIndex(core.chromeMsg, "chromeMsg");
-            const arm = @typeInfo(Msg).@"union".fields[arm_index];
+            const arm = reflection.fieldsOf(@typeInfo(Msg).@"union")[arm_index];
             comptime validateChromeArm(arm.type);
             var payload: arm.type = undefined;
             const Insets = @FieldType(arm.type, "insets");
@@ -1577,7 +1578,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// cores.
         fn channelArmIndex(comptime tag: []const u8, comptime channel: []const u8) usize {
             @setEvalBranchQuota(msg_scan_quota);
-            for (@typeInfo(Msg).@"union".fields, 0..) |arm, index| {
+            for (reflection.fieldsOf(@typeInfo(Msg).@"union"), 0..) |arm, index| {
                 if (std.mem.eql(u8, arm.name, tag)) return index;
             }
             @compileError("TsUiApp: " ++ channel ++ " names '" ++ tag ++ "', which is not an arm of Msg");
@@ -1589,7 +1590,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         /// non-negative from the host — take any numeric class.
         fn validateChannelRecord(comptime T: type, comptime names: []const []const u8, comptime what: []const u8, comptime signed_names: []const []const u8) void {
             const info = @typeInfo(T);
-            if (info != .@"struct" or info.@"struct".fields.len != names.len) {
+            if (info != .@"struct" or reflection.fieldsOf(info.@"struct").len != names.len) {
                 @compileError("TsUiApp: " ++ what ++ " record has the wrong field set");
             }
             for (names) |name| {
@@ -1597,7 +1598,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                     @compileError("TsUiApp: " ++ what ++ " record is missing field '" ++ name ++ "'");
                 }
             }
-            for (info.@"struct".fields) |field| {
+            for (reflection.fieldsOf(info.@"struct")) |field| {
                 if (field.type == u64) {
                     for (signed_names) |signed| {
                         if (std.mem.eql(u8, field.name, signed)) {
@@ -1614,7 +1615,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         fn validateDropEvent(comptime T: type) void {
             const teaching = "TsUiApp: dropMsg's FileDropEvent must be exactly { windowId: number; viewLabel: string; point: { x: number; y: number } | null; paths: readonly Uint8Array[] }";
             const info = @typeInfo(T);
-            if (info != .@"struct" or info.@"struct".fields.len != 4) @compileError(teaching);
+            if (info != .@"struct" or reflection.fieldsOf(info.@"struct").len != 4) @compileError(teaching);
             if (!@hasField(T, "windowId") or !@hasField(T, "viewLabel") or !@hasField(T, "point") or !@hasField(T, "paths")) @compileError(teaching);
             validateChannelRecord(struct { windowId: @FieldType(T, "windowId") }, &.{"windowId"}, "dropMsg's FileDropEvent", &.{});
             if (@FieldType(T, "viewLabel") != []const u8) @compileError(teaching);
@@ -1628,17 +1629,17 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             const paths = @typeInfo(@FieldType(T, "paths"));
             if (paths != .pointer or paths.pointer.size != .slice) @compileError(teaching);
             const path = @typeInfo(paths.pointer.child);
-            if (path != .pointer or path.pointer.size != .slice or path.pointer.child != u8 or !path.pointer.is_const) @compileError(teaching);
+            if (path != .pointer or path.pointer.size != .slice or path.pointer.child != u8 or !path.pointer.attrs.@"const") @compileError(teaching);
         }
 
         fn validateAppearanceArm(comptime T: type) void {
             const teaching = "TsUiApp: appearanceMsg's arm must carry exactly { colorScheme: a named light/dark alias; reduceMotion: boolean; highContrast: boolean }";
             const info = @typeInfo(T);
-            if (info != .@"struct" or info.@"struct".fields.len != 3) @compileError(teaching);
+            if (info != .@"struct" or reflection.fieldsOf(info.@"struct").len != 3) @compileError(teaching);
             if (!@hasField(T, "colorScheme") or !@hasField(T, "reduceMotion") or !@hasField(T, "highContrast")) @compileError(teaching);
             const Scheme = @FieldType(T, "colorScheme");
             const scheme_info = @typeInfo(Scheme);
-            if (scheme_info != .@"enum" or scheme_info.@"enum".fields.len != 2 or
+            if (scheme_info != .@"enum" or reflection.fieldsOf(scheme_info.@"enum").len != 2 or
                 !@hasField(Scheme, "light") or !@hasField(Scheme, "dark")) @compileError(teaching);
             if (@FieldType(T, "reduceMotion") != bool or @FieldType(T, "highContrast") != bool) @compileError(teaching);
         }
@@ -1646,7 +1647,7 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
         fn validateChromeArm(comptime T: type) void {
             const teaching = "TsUiApp: chromeMsg's arm must carry exactly { insets: top/right/bottom/left numbers; buttons: x/y/width/height numbers; tabsProjected: boolean }";
             const info = @typeInfo(T);
-            if (info != .@"struct" or info.@"struct".fields.len != 3) @compileError(teaching);
+            if (info != .@"struct" or reflection.fieldsOf(info.@"struct").len != 3) @compileError(teaching);
             if (!@hasField(T, "insets") or !@hasField(T, "buttons") or !@hasField(T, "tabsProjected")) @compileError(teaching);
             if (@FieldType(T, "tabsProjected") != bool) @compileError(teaching);
             validateChannelRecord(@FieldType(T, "insets"), &.{ "top", "right", "bottom", "left" }, "chromeMsg's insets", &.{});

@@ -523,7 +523,7 @@ test "null platform records configured shortcuts" {
     try std.testing.expect(null_platform.configuredShortcuts()[0].modifiers.primary);
     try std.testing.expect(null_platform.configuredShortcuts()[0].modifiers.shift);
 
-    const long_key = [_]u8{'x'} ** (max_shortcut_key_bytes + 1);
+    const long_key = @as([max_shortcut_key_bytes + 1]u8, @splat('x'));
     const invalid = [_]Shortcut{.{ .id = "invalid", .key = long_key[0..] }};
     try std.testing.expectError(error.InvalidShortcut, null_platform.platform().services.configureShortcuts(&invalid));
 

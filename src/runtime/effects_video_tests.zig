@@ -1987,7 +1987,7 @@ fn patchFirstVideoWidth(bytes: []u8, kind: effects_mod.EffectVideoEventKind, wid
         const len = std.mem.readInt(u32, bytes[pos + 1 ..][0..4], .little);
         const payload = bytes[pos + 5 .. pos + 5 + len];
         pos += 5 + len;
-        if (record_kind != @intFromEnum(journal.RecordKind.effect)) continue;
+        if (record_kind != @backingInt(journal.RecordKind.effect)) continue;
         const record = journal.decodeEffect(payload) catch continue;
         if (record.kind != .video or record.video_kind != kind) continue;
         std.mem.writeInt(u64, payload[payload.len - 59 ..][0..8], width, .little);
@@ -2079,10 +2079,10 @@ fn patchFirstVideoKind(bytes: []u8, kind: effects_mod.EffectVideoEventKind) bool
         const len = std.mem.readInt(u32, bytes[pos + 1 ..][0..4], .little);
         const payload = bytes[pos + 5 .. pos + 5 + len];
         pos += 5 + len;
-        if (record_kind != @intFromEnum(journal.RecordKind.effect)) continue;
+        if (record_kind != @backingInt(journal.RecordKind.effect)) continue;
         const record = journal.decodeEffect(payload) catch continue;
         if (record.kind != .video) continue;
-        payload[payload.len - 78] = @intFromEnum(kind);
+        payload[payload.len - 78] = @backingInt(kind);
         return true;
     }
     return false;
@@ -2101,10 +2101,10 @@ fn patchFirstVideoLoadKind(bytes: []u8, kind: effects_mod.EffectVideoEventKind) 
         const len = std.mem.readInt(u32, bytes[pos + 1 ..][0..4], .little);
         const payload = bytes[pos + 5 .. pos + 5 + len];
         pos += 5 + len;
-        if (record_kind != @intFromEnum(journal.RecordKind.effect)) continue;
+        if (record_kind != @backingInt(journal.RecordKind.effect)) continue;
         const record = journal.decodeEffect(payload) catch continue;
         if (record.kind != .video_load) continue;
-        payload[payload.len - 78] = @intFromEnum(kind);
+        payload[payload.len - 78] = @backingInt(kind);
         return true;
     }
     return false;
@@ -2363,7 +2363,7 @@ fn patchFirstVideoPosition(bytes: []u8, position: u64) bool {
         const len = std.mem.readInt(u32, bytes[pos + 1 ..][0..4], .little);
         const payload = bytes[pos + 5 .. pos + 5 + len];
         pos += 5 + len;
-        if (kind != @intFromEnum(journal.RecordKind.effect)) continue;
+        if (kind != @backingInt(journal.RecordKind.effect)) continue;
         const record = journal.decodeEffect(payload) catch continue;
         if (record.kind != .video) continue;
         std.mem.writeInt(u64, payload[payload.len - 77 ..][0..8], position, .little);

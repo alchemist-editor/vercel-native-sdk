@@ -63,7 +63,7 @@ fn buildHostile(source: []const u8) !BuildResult {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     var ui = Ui.init(arena_state.allocator());
-    const expanded = [_]bool{true} ** markdown.max_markdown_details_per_document;
+    const expanded = @as([markdown.max_markdown_details_per_document]bool, @splat(true));
     const node = Md.view(&ui, source, .{
         .on_link = Ui.linkMsg(.open_url),
         .on_details = Md.detailsMsg(.toggle_details),

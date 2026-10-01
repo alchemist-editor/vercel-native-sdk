@@ -143,7 +143,7 @@ fn appDbPath(allocator: std.mem.Allocator, io: std.Io, env: *std.process.Environ
 fn readUserVersion(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !u32 {
     var file = try std.Io.Dir.cwd().openFile(io, path, .{});
     file.close(io);
-    const path_z = try allocator.dupeZ(u8, path);
+    const path_z = try allocator.dupeSentinel(u8, path, 0);
     defer allocator.free(path_z);
     var connection = try sqlite.Connection.open(path_z);
     defer connection.close();

@@ -123,7 +123,7 @@ pub const Msg = union(enum) {
     chrome_changed: native_sdk.WindowChrome,
 };
 
-const WorkbenchApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = builtin.mode == .Debug });
+const WorkbenchApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = builtin.mode == .debug });
 pub const Effects = WorkbenchApp.Effects;
 
 /// TEA init: seed the history with the home page and spawn the shell —
@@ -272,7 +272,7 @@ pub fn appOptions(io: std.Io) WorkbenchApp.Options {
         .update_fx = update,
         .init_fx = boot,
         .view = CompiledWorkbenchView.build,
-        .markup = if (builtin.mode == .Debug)
+        .markup = if (builtin.mode == .debug)
             .{ .source = workbench_markup, .watch_path = "src/workbench.native", .io = io }
         else
             null,

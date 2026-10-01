@@ -600,7 +600,7 @@ test "runtime validates webview bridge commands" {
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "WebView was not found") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"invalid_request\"") != null);
 
-    var long_label = [_]u8{'a'} ** (platform.max_webview_label_bytes + 1);
+    var long_label = @as([platform.max_webview_label_bytes + 1]u8, @splat('a'));
     var long_label_request_buffer: [512]u8 = undefined;
     const long_label_request = try std.fmt.bufPrint(&long_label_request_buffer, "{{\"id\":\"long-label\",\"command\":\"native-sdk.webview.create\",\"payload\":{{\"label\":\"{s}\",\"url\":\"https://example.com\",\"frame\":{{\"width\":300,\"height\":200}}}}}}", .{&long_label});
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
@@ -611,7 +611,7 @@ test "runtime validates webview bridge commands" {
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "WebView label is too large") != null);
     try std.testing.expect(std.mem.indexOf(u8, harness.null_platform.lastBridgeResponse(), "\"invalid_request\"") != null);
 
-    var long_url = [_]u8{'a'} ** (platform.max_webview_url_bytes + 1);
+    var long_url = @as([platform.max_webview_url_bytes + 1]u8, @splat('a'));
     var long_url_request_buffer: [platform.max_webview_url_bytes + 256]u8 = undefined;
     const long_url_request = try std.fmt.bufPrint(&long_url_request_buffer, "{{\"id\":\"long-url\",\"command\":\"native-sdk.webview.create\",\"payload\":{{\"label\":\"too-long-url\",\"url\":\"{s}\",\"frame\":{{\"width\":300,\"height\":200}}}}}}", .{&long_url});
     try harness.runtime.dispatchPlatformEvent(app_state.app(), .{ .bridge_message = .{
