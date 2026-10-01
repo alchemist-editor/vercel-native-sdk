@@ -767,7 +767,8 @@ fn emitWidgetLayoutChildren(
                     layoutButtonGroupSegment(layout, index, child_index)
                 else
                     widget_model.WidgetGroupSegment.none;
-                try emitWidgetLayoutNode(builder, layout, child_index, tokens, state, segment);
+                const segment_vertical = if (group_index) |index| layout.nodes[index].widget.layout.vertical else false;
+                try emitWidgetLayoutNode(builder, layout, child_index, tokens, state, segment, segment_vertical);
             }
         }
         return;
