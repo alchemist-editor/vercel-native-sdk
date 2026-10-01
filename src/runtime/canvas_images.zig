@@ -46,11 +46,7 @@ pub const CanvasImageEntry = struct {
     width: usize = 0,
     height: usize = 0,
     byte_len: usize = 0,
-    /// Computed once by `canvasImageFingerprint` at registration and
-    /// forwarded to `ReferenceImage.content_fingerprint`, keeping the
-    /// draw-time and plan-time hot paths from walking all pixel bytes
-    /// for every draw/frame.
-    fingerprint: u64 = 0,
+    content_fingerprint: u64 = 0,
 };
 
 /// Dimensions of a successfully registered image (the decode-and-register
@@ -77,20 +73,6 @@ fn imageDecodeScratch(required: usize) error{OutOfMemory}![]u8 {
             try std.heap.page_allocator.realloc(scratch.bytes, required);
     }
     return scratch.bytes[0..required];
-}
-
-/// Content fingerprint for registered canvas images, computed once when
-/// bytes enter the registry rather than once per planned draw/frame.
-/// The canvas-specific "canvas" seed keeps this resource domain distinct
-/// from media-surface frames; zero is remapped because it is the sentinel
-/// for byte-walking fallback in `ReferenceImage.content_fingerprint`.
-fn canvasImageFingerprint(width: usize, height: usize, rgba8: []const u8) u64 {
-    var hasher = std.hash.Wyhash.init(0x63616e766173); // "canvas"
-    hasher.update(std.mem.asBytes(&width));
-    hasher.update(std.mem.asBytes(&height));
-    hasher.update(rgba8);
-    const value = hasher.final();
-    return if (value == 0) 1 else value;
 }
 
 pub fn RuntimeCanvasImages(comptime Runtime: type) type {
@@ -149,12 +131,16 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
                 self.canvas_image_pixels[index] = try self.owned_allocator.alloc(u8, self.max_image_pixel_bytes);
             }
             @memcpy(self.canvas_image_pixels[index][0..byte_len], rgba8);
+            // The owned pixels stay immutable until re-registration.
+            // Hash once here so frame planning never re-hashes them;
+            // zero is reserved for resources that still need byte hashing.
+            const fingerprint = std.hash.Wyhash.hash(0, self.canvas_image_pixels[index][0..byte_len]);
             self.canvas_image_entries[index] = .{
                 .id = id,
                 .width = width,
                 .height = height,
                 .byte_len = byte_len,
-                .fingerprint = canvasImageFingerprint(width, height, rgba8),
+                .content_fingerprint = if (fingerprint == 0) 1 else fingerprint,
             };
             if (index == self.canvas_image_count) self.canvas_image_count += 1;
             // No pixel push here: GPU packet hosts receive the bytes
@@ -259,7 +245,7 @@ pub fn RuntimeCanvasImages(comptime Runtime: type) type {
                     .width = entry.width,
                     .height = entry.height,
                     .pixels = self.canvas_image_pixels[index][0..entry.byte_len],
-                    .content_fingerprint = entry.fingerprint,
+                    .content_fingerprint = entry.content_fingerprint,
                 };
             }
             const media = runtime_media_surface.RuntimeMediaSurfaces(Runtime).adoptedMediaSurfaceTextures(
