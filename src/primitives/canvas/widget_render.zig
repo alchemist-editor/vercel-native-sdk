@@ -464,7 +464,7 @@ fn emitWidgetDepthContent(builder: *Builder, widget: Widget, tokens: DesignToken
         if (paint_widget.kind == .button_group)
             try emitButtonGroupWidget(builder, paint_widget, tokens, depth)
         else
-        try emitWidgetClippedChildren(builder, paint_widget, tokens, depth);
+            try emitWidgetClippedChildren(builder, paint_widget, tokens, depth);
         return;
     }
     try emitWidgetBackdropBlur(builder, paint_widget, tokens);
@@ -1193,8 +1193,8 @@ fn widgetContentClip(widget: Widget, tokens: DesignTokens) Clip {
 
 fn widgetContentClipRadius(widget: Widget, tokens: DesignTokens) Radius {
     if (!widget.layout.clip_content) return .{};
-        // The bubble clips at its own capsule arc so wide content (an
-        // image child, a full-bleed row) shears along the chrome's
+    // The bubble clips at its own capsule arc so wide content (an
+    // image child, a full-bleed row) shears along the chrome's
     // corners instead of the generic surface radius. Its four corners
     // differ, so no single authored scalar can stand in for them.
     if (widget.kind == .bubble) return widget_render_surfaces.bubbleWidgetRadius(widget, tokens);
@@ -2798,6 +2798,7 @@ fn emitImageWidget(builder: *Builder, widget: Widget) Error!void {
         // mode. Nearest sampling keeps an atlas crop from filtering
         // across its source boundary; whole-image draws stay linear.
         .sampling = if (widget.image_src != null) .nearest else widget.image_sampling,
+        .radius = Radius.all(widget.style.radius orelse 0),
     });
     if (clips_image) try builder.popClip();
 }
