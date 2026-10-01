@@ -1369,7 +1369,11 @@ pub fn build(b: *std.Build) void {
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "_metalLayer.contentsGravity = kCAGravityTopLeft" },
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "if (changed) {" },
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "[self requestRetainedCanvasFrame];" },
-        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "canvasTextureMatchesDrawable" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "if (self.hasCanvasTexture && self.canvasTexture && self.canvasRenderPipeline && self.canvasSampler)" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "self.liveResizeActive = YES;" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "self.liveResizeActive = NO;" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "self.metalLayer.presentsWithTransaction = YES;" },
+        .{ .path = "src/platform/macos/appkit_host.m", .pattern = "[commandBuffer waitUntilScheduled];" },
     });
     addFileContainsCheckStep(b, file_contains_checker, test_step, "test-appkit-gpu-packet-transforms", "Verify AppKit GPU packet presenter applies command transforms", &.{
         .{ .path = "src/platform/macos/appkit_host.m", .pattern = "NativeSdkPacketApplyTransform(command[@\"transform\"])" },

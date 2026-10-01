@@ -3395,7 +3395,7 @@ test "mac transparent gpu surfaces clear missing canvas content to transparent" 
     try std.testing.expect(std.mem.indexOf(
         u8,
         render_source,
-        "if (self.hasCanvasTexture && canvasTextureMatchesDrawable",
+        "if (self.hasCanvasTexture && self.canvasTexture && self.canvasRenderPipeline && self.canvasSampler)",
     ) != null);
 }
 
