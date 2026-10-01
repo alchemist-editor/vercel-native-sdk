@@ -14,9 +14,11 @@ static NSUInteger failures;
 @interface ScrollTestHost : NativeSdkAppKitHost
 @property NSUInteger offsets;
 @property double offsetY;
+@property NSUInteger focusActions;
 @end
 @implementation ScrollTestHost
 - (void)emitEvent:(native_sdk_appkit_event_t)event {
+    if (event.kind == NATIVE_SDK_APPKIT_EVENT_WIDGET_ACCESSIBILITY_ACTION && event.widget_action == NATIVE_SDK_APPKIT_WIDGET_ACCESSIBILITY_ACTION_FOCUS) self.focusActions++;
     if (event.kind == NATIVE_SDK_APPKIT_EVENT_GPU_SURFACE_SCROLL_DRIVER) { self.offsets++; self.offsetY = event.scroll_driver_offset_y; }
 }
 @end
@@ -30,6 +32,30 @@ static NSUInteger failures;
 - (BOOL)isAvailable { return YES; }
 - (void)emitFrameEventWithFrameIndex:(NSUInteger)index sampleColor:(uint32_t)color nonblank:(BOOL)nonblank occluded:(BOOL)occluded { self.frames++; }
 @end
+
+static void testAccessibilityFocusPublication(void) {
+    ScrollTestHost *host = [ScrollTestHost new];
+    ScrollTestSurface *surface = [[ScrollTestSurface alloc] initWithFrame:NSMakeRect(0, 0, 300, 300)];
+    [surface stopDisplayTimer];
+    surface.host = host;
+    surface.surfaceLabel = @"menu";
+    native_sdk_appkit_widget_accessibility_node_t node = {0};
+    node.id = 7;
+    node.role = NATIVE_SDK_APPKIT_WIDGET_ROLE_BUTTON;
+    node.state_flags = NATIVE_SDK_APPKIT_WIDGET_STATE_ENABLED | NATIVE_SDK_APPKIT_WIDGET_STATE_FOCUSED;
+    node.action_flags = NATIVE_SDK_APPKIT_WIDGET_ACTION_FOCUS;
+    node.width = 100;
+    node.height = 24;
+    for (NSUInteger i = 0; i < 20; i++) [surface updateWidgetAccessibilityWithNodes:&node count:1];
+    CHECK(host.focusActions == 0, "publishing focused semantics must never dispatch focus back into the runtime");
+    NativeSdkWidgetAccessibilityElement *element = (NativeSdkWidgetAccessibilityElement *)surface.widgetAccessibilityElements.firstObject;
+    CHECK(element.accessibilityFocused, "published focus must remain visible to assistive clients");
+    const NSUInteger before = host.focusActions;
+    [element setAccessibilityFocused:YES];
+    CHECK(host.focusActions == before + 1, "an assistive client's focus write must still dispatch exactly once");
+    [element setAccessibilityFocused:NO];
+    CHECK(host.focusActions == before + 1, "clearing the snapshot focus must not request focus");
+}
 
 static void testTrackingDelivery(void) {
     ScrollTestHost *host = [ScrollTestHost new];
@@ -99,6 +125,7 @@ static void testTranslatedRoundedClip(void) {
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        testAccessibilityFocusPublication();
         testTrackingDelivery();
         testTranslatedRoundedClip();
         testTranslatedRasterPixels();
