@@ -55,7 +55,7 @@ pub const max_shell_chrome_label_bytes: usize = max_command_title_bytes;
 /// `app:`-namespaced), never paths.
 pub const max_shell_chrome_icon_bytes: usize = 64;
 pub const max_menus: usize = 16;
-pub const max_menu_items: usize = 128;
+pub const max_menu_items: usize = 192;
 pub const max_menu_title_bytes: usize = 64;
 pub const max_menu_item_label_bytes: usize = 128;
 pub const max_menu_key_bytes: usize = 32;

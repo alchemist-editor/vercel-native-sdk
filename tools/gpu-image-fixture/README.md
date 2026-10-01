@@ -1,34 +1,16 @@
 # gpu-image-fixture
 
-A measurement fixture, not a showcase app. It exists to price one thing the
-showcase apps cannot: **what a resize step costs when a Windows canvas
-surface's texture cache is full.**
+A fixed **16-image / 16 MiB** resize workload. It preserves the original
+upstream registry-ceiling benchmark so timings remain comparable after the
+fork raises its registry to 129 images. It does not saturate the fork's new
+registry capacity.
 
-## Why it exists
-
-`src/platform/windows/gpu_surface_renderer.cpp` recreates its backing render
-target whenever the surface's pixel size, logical size, or scale changes, and
-Direct2D bitmaps belong to the target that created them. So `ensureTargets`
-calls `releaseImageBitmaps()` — the whole per-surface `image_bitmaps_` map —
-and the next display-list walk re-uploads every texture it draws.
-
-Every showcase app that runs on Windows draws **zero** bitmaps, so that flush
-is free everywhere it can currently be observed. This app draws the most the
-runtime will hold:
-
-| bound | value | source |
-|---|---|---|
-| registry slots | 16 | `canvas_limits.max_registered_canvas_images` |
-| bytes per slot | 1 MiB = 512×512 RGBA8 | `max_registered_canvas_image_pixel_bytes` |
-
-16 MiB of texture, all of it on screen, all of it flushed and re-uploaded on
-any resize step. That is the **worst case reachable through the
-registered-image path** — a registration above either bound fails loudly with
-`error.ImageTooLarge` / `error.ImageRegistryFull`, so no app can exceed it.
-(Media-surface textures are a separate, larger id space; see the note below.)
-
-Two tests pin the fixture to those limits, so if either constant moves the
-suite says so instead of the fixture quietly measuring less than it claims.
+The original Direct2D renderer discarded textures on resize. The fork's
+D3D11 flip-model renderer keeps them across resize; this workload measures the
+same visible images on either implementation. Four columns of fixed-size
+cells keep all sixteen textures visible in the harness's smallest window.
+The tests verify that this workload fits the registry and each texture fits
+the per-image pixel budget.
 
 ## Running it
 

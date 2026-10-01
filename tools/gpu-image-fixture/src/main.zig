@@ -1,27 +1,13 @@
-//! gpu-image-fixture: the registered-image ceiling on a hardware canvas.
+//! gpu-image-fixture: a fixed 16-image resize measurement workload.
 //!
-//! This is a MEASUREMENT fixture, not a showcase app. It exists to answer one
-//! question the showcase apps cannot: what does a resize step cost when the
-//! host's per-surface texture cache is full?
+//! The original upstream registry ceiling was 16 images of 512x512 RGBA8.
+//! Keep that 16 MiB workload and four-column geometry stable across SDK
+//! upgrades so recorded resize timings remain comparable. The Alchemist
+//! fork supports 129 registered images; this fixture does not claim to
+//! saturate that larger registry. The flip-model renderer retains textures
+//! across resize; this workload measures that path against the old baseline.
 //!
-//! On Windows the Direct2D renderer flushes its whole `image_bitmaps_` map
-//! whenever the surface's pixel size changes, because D2D bitmaps belong to
-//! the render target that created them and `ensureTargets` recreates that
-//! target. Every showcase app that runs on Windows draws zero bitmaps, so the
-//! flush is free there and the cost is invisible. This app draws the maximum
-//! the runtime will hold:
-//!
-//!   - `canvas_limits.max_registered_canvas_images` = 16 slots, and
-//!   - `max_registered_canvas_image_pixel_bytes` = 1 MiB = 512x512 RGBA8,
-//!
-//! so 16 MiB of texture, all of it on screen, all of it re-uploaded on any
-//! resize step that changes the backing size. That is the worst case an app
-//! can reach through the registered-image path — a real app cannot exceed it
-//! without the media-surface channels, which are a separate id space.
-//!
-//! Pair it with `NATIVE_SDK_GPU_PROFILE` (see gpu_surface_renderer.cpp) and
-//! `tools/windows-truth/gpu-resize-profile.ps1`, which drives a synthetic
-//! resize drag and reduces the log.
+//! Pair with NATIVE_SDK_GPU_PROFILE and gpu-resize-profile.ps1.
 
 const std = @import("std");
 const runner = @import("runner");
@@ -36,7 +22,7 @@ const canvas_label = "fixture-canvas";
 const window_width: f32 = 1024;
 const window_height: f32 = 768;
 
-/// The runtime registry's slot ceiling (`canvas_limits.max_registered_canvas_images`).
+/// Fixed baseline workload, bounded by the runtime registry.
 pub const image_count: u32 = 16;
 /// The per-slot pixel ceiling: `max_registered_canvas_image_pixel_bytes` is
 /// 1 MiB, which is exactly 512x512 RGBA8. Registering anything larger fails
@@ -275,9 +261,8 @@ pub fn main(init: std.process.Init) !void {
     }, init);
 }
 
-test "the fixture claims the runtime's whole registered-image ceiling" {
-    // If either limit moves, this fixture stops measuring the worst case.
-    try std.testing.expectEqual(native_sdk.max_registered_canvas_images, @as(usize, image_count));
+test "the fixed image workload fits the runtime registry and pixel budget" {
+    try std.testing.expect(@as(usize, image_count) <= native_sdk.max_registered_canvas_images);
     try std.testing.expectEqual(
         @as(usize, image_extent) * @as(usize, image_extent) * 4,
         native_sdk.max_registered_canvas_image_pixel_bytes,

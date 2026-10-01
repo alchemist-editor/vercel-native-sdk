@@ -235,7 +235,7 @@ pub fn viewInfoFromWebView(webview: anytype) platform.ViewInfo {
         .parent = webview.parent,
         .frame = webview.frame,
         .layer = webview.layer,
-        .visible = webview.open,
+        .visible = webview.open and webview.visible,
         .enabled = true,
         .role = "webview",
         .accessibility_label = "WebView",
