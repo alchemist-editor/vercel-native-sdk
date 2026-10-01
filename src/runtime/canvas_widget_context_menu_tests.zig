@@ -1141,3 +1141,25 @@ test "context-menu declarations sum across widgets to the budget and overflow lo
     nodes[1].widget.context_menu = &pair;
     try std.testing.expectError(error.WidgetContextMenuLimitReached, harness.runtime.setCanvasWidgetLayout(1, "canvas", .{ .nodes = &nodes }));
 }
+
+test "app canvas menu preference bypasses an available native presenter" {
+    var app_state: MenuTestApp = .{};
+    var app = app_state.app();
+    app.prefer_canvas_context_menus = true;
+    const harness = try createMenuHarness(app);
+    defer harness.destroy(std.testing.allocator);
+    const items = [_]canvas.WidgetContextMenuItem{.{ .label = "Complete" }};
+    const row = canvas.Widget{
+        .id = 2,
+        .kind = .list_item,
+        .frame = geometry.RectF.init(10, 10, 200, 40),
+        .context_menu = &items,
+    };
+    var nodes: [2]canvas.WidgetLayoutNode = undefined;
+    const layout = try canvas.layoutWidgetTree(.{ .kind = .stack, .children = &.{row} }, geometry.RectF.init(0, 0, 320, 200), &nodes);
+    _ = try harness.runtime.setCanvasWidgetLayout(1, "canvas", layout);
+    try harness.runtime.dispatchPlatformEvent(app, rightClick(50, 20));
+    try std.testing.expectEqual(@as(usize, 0), harness.null_platform.context_menu_request_count);
+    try std.testing.expectEqual(@as(u32, 1), app_state.request_count);
+    try std.testing.expectEqual(@as(canvas.ObjectId, 2), app_state.last_request_target);
+}
