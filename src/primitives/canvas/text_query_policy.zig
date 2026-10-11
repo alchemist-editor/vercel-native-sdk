@@ -85,16 +85,24 @@ pub fn resultValid(request: []const u8, result: []const u8) bool {
     };
 }
 pub fn execute(policy: run.Policy, text: types.DrawText, options: types.TextLayoutOptions, query: Query) Result {
-    const allocator = std.heap.page_allocator;
     const glyph_bytes = std.math.mul(usize, text.glyphs.len, 32) catch @panic("text query glyph capacity");
     const text_bytes = std.math.mul(usize, text.text.len, 5) catch @panic("text query byte capacity");
     const source_len = std.math.add(usize, std.math.add(usize, 1024, glyph_bytes) catch @panic("text query source capacity"), text_bytes) catch @panic("text query source capacity");
     const prepared_count = if (query.mode == 1) 64 else query.prepared.len;
     const total = std.math.add(usize, source_len, std.math.mul(usize, prepared_count, 64) catch @panic("text query line capacity")) catch @panic("text query packet capacity");
     if (total > std.math.maxInt(u32)) @panic("text query packet range");
-    var small: [8192]u8 = undefined;
-    const packet = if (total <= small.len) small[0..total] else allocator.alloc(u8, total) catch @panic("text query allocation");
-    defer if (total > small.len) allocator.free(packet);
+    if (total <= 8192) {
+        var small: [8192]u8 = undefined;
+        return executeInStorage(policy, text, options, query, source_len, prepared_count, small[0..total]);
+    }
+    const allocator = std.heap.page_allocator;
+    const packet = allocator.alloc(u8, total) catch @panic("text query allocation");
+    defer allocator.free(packet);
+    return executeInStorage(policy, text, options, query, source_len, prepared_count, packet);
+}
+
+fn executeInStorage(policy: run.Policy, text: types.DrawText, options: types.TextLayoutOptions, query: Query, source_len: usize, prepared_count: usize, packet: []u8) Result {
+    const total = packet.len;
     @memset(packet, 0);
     run.initialize(packet[512..source_len], 512, 0, text, options, 0, 0, false, .{}, 0, 0);
     put(packet, 520, source_len - text.text.len);

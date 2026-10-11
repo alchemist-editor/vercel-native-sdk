@@ -144,19 +144,26 @@ pub fn execute(
     offset: usize,
     x: f32,
 ) Result {
-    const allocator = std.heap.page_allocator;
     const glyph_bytes = std.math.mul(usize, text.glyphs.len, 32) catch @panic("text run glyph capacity");
     const advance_at = std.math.add(usize, 512, glyph_bytes) catch @panic("text run packet capacity");
     const advance_bytes = std.math.mul(usize, text.text.len, 4) catch @panic("text run advance capacity");
     const text_at = std.math.add(usize, advance_at, advance_bytes) catch @panic("text run packet capacity");
     const total = std.math.add(usize, text_at, text.text.len) catch @panic("text run text capacity");
     if (total > std.math.maxInt(u32)) @panic("text run packet range");
-    var small_request: [4096]u8 = undefined;
-    const request = if (total <= small_request.len) small_request[0..total] else allocator.alloc(u8, total) catch @panic("text run request allocation");
-    defer if (total > small_request.len) allocator.free(request);
+    if (total <= 4096) {
+        var small_request: [4096]u8 = undefined;
+        return executeInStorage(policy, mode, text, options, cursor, index, finished, line, offset, x, small_request[0..total]);
+    }
+    const allocator = std.heap.page_allocator;
+    const request = allocator.alloc(u8, total) catch @panic("text run request allocation");
+    defer allocator.free(request);
+    return executeInStorage(policy, mode, text, options, cursor, index, finished, line, offset, x, request);
+}
+
+fn executeInStorage(policy: Policy, mode: u8, text: types.DrawText, options: types.TextLayoutOptions, cursor: usize, index: usize, finished: bool, line: types.TextLine, offset: usize, x: f32, request: []u8) Result {
     var result: [512]u8 = undefined;
     initialize(request, 512, mode, text, options, cursor, index, finished, line, offset, x);
-    const quota = std.math.mul(usize, total, 8) catch @panic("text run continuation range");
+    const quota = std.math.mul(usize, request.len, 8) catch @panic("text run continuation range");
     var calls: usize = 0;
     while (true) {
         calls += 1;

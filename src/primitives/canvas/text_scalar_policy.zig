@@ -60,10 +60,24 @@ fn run(policy: Policy, request: []const u8, result: []u8) void {
 pub fn estimate(policy: Policy, font: u64, text: []const u8, size: f32, cluster: bool) f32 {
     const total = std.math.add(usize, 64, std.math.mul(usize, text.len, 9) catch @panic("scalar text capacity")) catch @panic("scalar text capacity");
     if (total > std.math.maxInt(u32)) @panic("scalar text packet range");
-    var small: [8192]u8 = undefined;
+    // Glyph and cluster probes should not initialize a whole run's scratch
+    // buffer in Debug. Every path retains the same complete wire packet.
+    var small: [256]u8 = undefined;
+    if (total <= small.len / 2) return estimateInStorage(policy, font, text, size, cluster, small[0 .. total * 2]);
+    return estimateLarge(policy, font, text, size, cluster, total);
+}
+fn estimateLarge(policy: Policy, font: u64, text: []const u8, size: f32, cluster: bool, total: usize) f32 {
+    if (total <= 4096) {
+        var small: [8192]u8 = undefined;
+        return estimateInStorage(policy, font, text, size, cluster, small[0 .. total * 2]);
+    }
     const allocator = std.heap.page_allocator;
-    const storage = if (total <= small.len / 2) small[0 .. total * 2] else allocator.alloc(u8, std.math.mul(usize, total, 2) catch @panic("scalar text capacity")) catch @panic("scalar text allocation");
-    defer if (total > small.len / 2) allocator.free(storage);
+    const storage = allocator.alloc(u8, std.math.mul(usize, total, 2) catch @panic("scalar text capacity")) catch @panic("scalar text allocation");
+    defer allocator.free(storage);
+    return estimateInStorage(policy, font, text, size, cluster, storage);
+}
+fn estimateInStorage(policy: Policy, font: u64, text: []const u8, size: f32, cluster: bool, storage: []u8) f32 {
+    const total = storage.len / 2;
     const packet = storage[0..total];
     const result = storage[total..];
     initialize(packet, if (cluster) 2 else 1, false, font, size, text.len);

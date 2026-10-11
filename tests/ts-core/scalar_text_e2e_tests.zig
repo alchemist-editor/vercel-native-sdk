@@ -33,6 +33,11 @@ test "compiled scalar text preserves malformed UTF8 font identities and every f3
             try corpus(bytes[0..n]);
         }
     }
+    // Exact accumulation and malformed-byte behavior must survive every
+    // transition between scalar, whole-run and heap scratch storage.
+    var boundary_bytes: [449]u8 = undefined;
+    for (&boundary_bytes, 0..) |*byte, i| byte.* = @truncate(i);
+    for ([_]usize{ 7, 8, 447, 448, 449 }) |len| try corpus(boundary_bytes[0..len]);
     const long = try std.testing.allocator.alloc(u8, 65537);
     defer std.testing.allocator.free(long);
     @memset(long, 'i');
