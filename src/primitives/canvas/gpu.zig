@@ -240,6 +240,8 @@ pub const CanvasGpuCommand = struct {
 };
 
 pub const CanvasGpuPacket = struct {
+    /// Process-local portable packet preparation; never serialized or hashed.
+    preparation_policy: ?@import("gpu_packet_preparation_policy.zig").Policy = null,
     frame_index: u64 = 0,
     timestamp_ns: u64 = 0,
     /// Retained-command-state generation stamped into the binary wire

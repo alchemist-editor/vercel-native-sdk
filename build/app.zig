@@ -1261,6 +1261,7 @@ fn tsCoreStage(
     stage_run.addFileInput(dep.path("packages/core/src/vector_effects.ts"));
     stage_run.addFileInput(dep.path("packages/core/src/render_resources.ts"));
     stage_run.addFileInput(dep.path("packages/core/src/gpu_planning.ts"));
+    stage_run.addFileInput(dep.path("packages/core/src/gpu_packet_preparation.ts"));
     stage_run.addFileInput(dep.path("packages/core/src/vector_raster.ts"));
     stage_run.addFileInput(dep.path("packages/core/src/control_appearance.ts"));
     stage_run.addFileInput(dep.path("packages/core/src/component_construction.ts"));

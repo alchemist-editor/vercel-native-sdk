@@ -227,6 +227,7 @@ pub fn packet(planner: anytype, pass: anytype, policy: Policy) canvas.Error!gpu.
     planner.unsupported_count = word(result, 16);
     if (word(result, 8) != 0) return error.CanvasGpuCommandListFull;
     var output: gpu.CanvasGpuPacket = .{ .frame_index = pass.frame_index, .timestamp_ns = pass.timestamp_ns, .surface_size = pass.surface_size, .scale = pass.scale, .load_action = @enumFromInt(word(result, 12)) };
+    output.preparation_policy = policy;
     if (output.load_action == .skip) return output;
     output.scissor = pass.dirty_bounds;
     output.images = pass.images;

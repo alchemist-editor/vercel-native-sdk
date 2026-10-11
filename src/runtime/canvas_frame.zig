@@ -610,7 +610,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                     if (view.canvas_packet_baseline_pixels) break :stats null;
                     if (!sizesEqual(view.canvas_packet_baseline_surface_size, packet.surface_size) or
                         view.canvas_packet_baseline_scale != packet.scale) break :stats null;
-                    break :stats computeCanvasPacketPatchStats(view, current_commands);
+                    break :stats computeCanvasPacketPatchStats(view, current_commands, canvas_frame.gpu_plan_policy);
                 };
                 self.frame_profile.end(.patch, patch_begin);
 
@@ -1107,7 +1107,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                     sizesEqual(self.views[index].canvas_packet_baseline_surface_size, frame_options.surface_size) and
                     self.views[index].canvas_packet_baseline_scale == frame_options.scale)
                 {
-                    if (gatherCanvasPacketCurrentCommandsFromPlan(render_plan.commands, frame_options.surface_size, render_plan.bounds)) |current| {
+                    if (gatherCanvasPacketCurrentCommandsFromPlan(render_plan.commands, frame_options.surface_size, render_plan.bounds, frame_options.render_cache_policy)) |current| {
                         const view = &self.views[index];
                         const baseline_count = view.canvas_packet_baseline_count;
                         const scratch = canvas_frame_scratch.get();
@@ -1178,7 +1178,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                     sizesEqual(self.views[index].canvas_packet_baseline_surface_size, frame_options.surface_size) and
                     self.views[index].canvas_packet_baseline_scale == frame_options.scale)
                 {
-                    if (gatherCanvasPacketCurrentCommandsFromPlan(render_plan.commands, frame_options.surface_size, render_plan.bounds)) |current| {
+                    if (gatherCanvasPacketCurrentCommandsFromPlan(render_plan.commands, frame_options.surface_size, render_plan.bounds, frame_options.render_cache_policy)) |current| {
                         if (canvasPacketPatchDirtyBounds(&self.views[index], current)) |patch_dirty| {
                             var refined = patch_dirty;
                             if (overrides_dirty) |overrides_rect| refined.add(overrides_rect);
@@ -1478,16 +1478,20 @@ fn recordCanvasPresentInputLatency(view: anytype) void {
 /// duplicate retain keys (which would corrupt a keyed dictionary) — those
 /// frames present through the non-retained encoding instead.
 fn gatherCanvasPacketCurrentCommands(canvas_frame: canvas.CanvasFrame) ?[]const CanvasPacketCurrentCommand {
-    return gatherCanvasPacketCurrentCommandsFromPlan(canvas_frame.render_plan.commands, canvas_frame.surface_size, canvas_frame.render_plan.bounds);
+    return gatherCanvasPacketCurrentCommandsFromPlan(canvas_frame.render_plan.commands, canvas_frame.surface_size, canvas_frame.render_plan.bounds, canvas_frame.gpu_plan_policy);
 }
 
 /// Plan-time twin of `gatherCanvasPacketCurrentCommands`: the frame
 /// planner derives Msg-rebuild dirty bounds from the same keyed list
 /// before the `CanvasFrame` value exists. Same inputs, same scratch,
 /// byte-identical output.
-fn gatherCanvasPacketCurrentCommandsFromPlan(render_commands: []const canvas.RenderCommand, surface_size: geometry.SizeF, render_bounds: ?geometry.RectF) ?[]const CanvasPacketCurrentCommand {
+fn gatherCanvasPacketCurrentCommandsFromPlan(render_commands: []const canvas.RenderCommand, surface_size: geometry.SizeF, render_bounds: ?geometry.RectF, policy: ?canvas.GpuPacketPreparationPolicy.Policy) ?[]const CanvasPacketCurrentCommand {
     const full_bounds = canvasFullRepaintBounds(surface_size, render_bounds) orelse return null;
     const scratch = canvas_frame_scratch.get();
+    if (policy) |owner| {
+        const count = canvas.GpuPacketPreparationPolicy.gather(render_commands, full_bounds, &scratch.packet_current, owner) orelse return null;
+        return scratch.packet_current[0..count];
+    }
     var count: usize = 0;
     for (render_commands, 0..) |command, index| {
         if (!canvas.renderCommandIntersectsDirtyBounds(command, full_bounds)) continue;
@@ -1539,12 +1543,16 @@ fn findCanvasPacketBaselineIndex(keys: []const u64, sorted: []const u32, key: u6
 /// baseline: fills the matched/upsert scratch flags (which the patch
 /// encoder reads) and returns the edit counts, so callers can decide
 /// patch-vs-full BEFORE paying for the encode.
-fn computeCanvasPacketPatchStats(view: anytype, current: []const CanvasPacketCurrentCommand) CanvasPacketPatchStats {
+fn computeCanvasPacketPatchStats(view: anytype, current: []const CanvasPacketCurrentCommand, policy: ?canvas.GpuPacketPreparationPolicy.Policy) CanvasPacketPatchStats {
     const baseline_count = view.canvas_packet_baseline_count;
     const baseline_keys = view.canvas_packet_baseline_keys[0..baseline_count];
     const baseline_fingerprints = view.canvas_packet_baseline_fingerprints[0..baseline_count];
 
     const scratch = canvas_frame_scratch.get();
+    if (policy) |owner| {
+        const edits = canvas.GpuPacketPreparationPolicy.edits(current, baseline_keys, baseline_fingerprints, scratch.packet_baseline_matched[0..baseline_count], scratch.packet_upsert[0..current.len], owner);
+        return .{ .upsert_count = edits.upsert_count, .evict_count = edits.evict_count };
+    }
     const baseline_sorted = scratch.packet_baseline_sort[0..baseline_count];
     for (baseline_sorted, 0..) |*slot, index| slot.* = @intCast(index);
     std.sort.pdq(u32, baseline_sorted, @as([]const u64, baseline_keys), canvasPacketBaselineKeyLessThan);

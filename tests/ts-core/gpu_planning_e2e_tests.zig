@@ -25,7 +25,9 @@ fn comparePackets(pass: c.CanvasRenderPass, capacity: usize, encode: bool) !void
     const compiled = candidate.buildCompiled(pass, observed);
     if (native) |value| {
         const result = try compiled;
-        try exact(value, result);
+        var expected = value;
+        expected.preparation_policy = observed;
+        try exact(expected, result);
         if (encode) {
             var left: std.Io.Writer.Allocating = .init(std.testing.allocator);
             defer left.deinit();
@@ -174,7 +176,9 @@ fn framePlanning(expected: c.CanvasFrame, actual: c.CanvasFrame) !void {
     calls = @splat(0);
     var a: [64]c.CanvasGpuCommand = undefined;
     var b: [64]c.CanvasGpuCommand = undefined;
-    try exact(try expected.gpuPacket(&a), try actual.gpuPacket(&b));
+    var expected_packet = try expected.gpuPacket(&a);
+    expected_packet.preparation_policy = observed;
+    try exact(expected_packet, try actual.gpuPacket(&b));
     var aa: [128]c.RenderEncoderCommand = undefined;
     var bb: [128]c.RenderEncoderCommand = undefined;
     try exact(try expected.renderPass().encoderPlan(&aa), try actual.renderPass().encoderPlan(&bb));
