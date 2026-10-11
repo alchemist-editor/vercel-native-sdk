@@ -521,6 +521,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
         }
 
         pub fn commandSourceForNativeView(self: *const Runtime, window_id: platform.WindowId, label: []const u8) CommandSource {
+            if (self.command_policy) |policy| return if (@import("command_policy.zig").nativeViewSource(policy, self.views[0..self.view_count], window_id, label)) .toolbar else .native_view;
             const index = Self.findViewIndex(self, window_id, label) orelse return .native_view;
             // Walk by POINTER: a View embeds its widget storage, so a
             // by-value copy here is megabytes of stack — more than a

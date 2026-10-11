@@ -1283,6 +1283,8 @@ pub fn build(b: *std.Build) void {
         native_api_tests.addFileArg(b.path("packages/core/test/native_testing.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/control_appearance.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/component_construction.test.ts"));
+        native_api_tests.addFileArg(b.path("packages/core/test/command_coordination.test.ts"));
+        native_api_tests.addFileArg(b.path("packages/core/test/status_validation.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/widget_motion.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/widget_audits.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/widget_routing.test.ts"));
@@ -1513,6 +1515,7 @@ pub fn build(b: *std.Build) void {
         const surface_layout_run = b.addRunArtifact(ts_core_artifacts.surface_layout);
         b.step("test-ts-surface-layout-e2e", "Compare compiled floating-surface placement with native layout and ABI ownership").dependOn(&surface_layout_run.step);
         b.step("test-ts-accessibility-publication", "Compare complete compiled accessibility projection and runtime publication").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-accessibility-publication-tests", &.{"compiled accessibility"})).step);
+        b.step("test-ts-command-coordination", "Compare complete compiled command routing and native registry ownership").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-command-coordination-tests", &.{"compiled command"})).step);
         b.step("test-ts-vector-derivation", "Compare compiled vector and effect derivation without runtime frame setup").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-vector-derivation-tests", &.{ "compiled vector resources preserve", "vector resource copied transport" })).step);
         b.step("test-ts-render-resources", "Compare complete compiled image layer and resource derivation").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-render-resource-tests", &.{ "compiled render resources", "render resource copied transport" })).step);
         b.step("test-ts-gpu-planning", "Compare complete compiled GPU packet and encoder planning").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-gpu-planning-tests", &.{ "compiled GPU planning", "GPU planning copied transport", "both runtime damage consumers preserve", "both Runtime consumers preserve full override frames" })).step);
@@ -5675,6 +5678,8 @@ fn externalCoreFixtureModule(
     stage_run.addFileInput(b.path("packages/core/src/view_frontend.ts"));
     stage_run.addFileInput(b.path("packages/core/src/view_components.ts"));
     stage_run.addFileInput(b.path("packages/core/src/runtime_policy.ts"));
+    stage_run.addFileInput(b.path("packages/core/src/command_coordination.ts"));
+    stage_run.addFileInput(b.path("packages/core/src/status_validation.ts"));
     stage_run.addFileInput(b.path("packages/core/src/paragraph_layout.ts"));
     stage_run.addFileInput(b.path("packages/core/src/text_run_layout.ts"));
     stage_run.addFileInput(b.path("packages/core/src/text_query_layout.ts"));

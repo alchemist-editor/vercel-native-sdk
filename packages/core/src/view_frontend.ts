@@ -980,6 +980,8 @@ function compileViewFunction(source: string, contract: ViewContract, options: Vi
 const viewPrelude = "\n// Portable Native components compiled beside the committed model.\n" +
   readFileSync(new URL("./view_components.ts", import.meta.url), "utf8") +
   readFileSync(new URL("./runtime_policy.ts", import.meta.url), "utf8") +
+  readFileSync(new URL("./command_coordination.ts", import.meta.url), "utf8") +
+  readFileSync(new URL("./status_validation.ts", import.meta.url), "utf8") +
   readFileSync(new URL("./paragraph_layout.ts", import.meta.url), "utf8") +
   readFileSync(new URL("./text_run_layout.ts", import.meta.url), "utf8") +
   readFileSync(new URL("./text_query_layout.ts", import.meta.url), "utf8") +

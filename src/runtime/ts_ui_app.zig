@@ -520,6 +520,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             if (comptime @hasDecl(core, "nativeWindowPolicy")) {
                 if (options.shell_layout_policy != null) @panic("TsUiApp owns shell_layout_policy - remove custom shell layout wiring");
                 stamped.shell_layout_policy = core.nativeWindowPolicy;
+                if (options.command_policy != null) @panic("TsUiApp owns command_policy - remove custom command wiring");
+                stamped.command_policy = core.nativeWindowPolicy;
                 if (options.text_cache_policy != null) @panic("TsUiApp owns text_cache_policy - remove custom text cache wiring");
                 stamped.text_cache_policy = core.nativeWindowPolicy;
                 if (options.render_cache_policy != null) @panic("TsUiApp owns render_cache_policy - remove custom render cache wiring");

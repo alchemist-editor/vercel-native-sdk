@@ -102,7 +102,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [max_command_id_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const name = jsonStringField(payload, "name", &storage) orelse jsonStringField(payload, "id", &storage) orelse return error.InvalidCommand;
-            const view_label = if (std.mem.eql(u8, source_view_label, "main")) "" else source_view_label;
+            const view_label = if (self.command_policy) |policy| @import("command_policy.zig").bridgeLabel(policy, source_view_label) else if (std.mem.eql(u8, source_view_label, "main")) "" else source_view_label;
             const event: CommandEvent = .{
                 .name = name,
                 .source = .bridge,

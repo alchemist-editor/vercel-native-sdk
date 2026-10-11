@@ -3,6 +3,7 @@ const geometry = @import("geometry");
 const trace = @import("trace");
 const json = @import("json");
 const validation = @import("validation.zig");
+const command_policy = @import("command_policy.zig");
 const runtime_api = @import("api.zig");
 const runtime_async_bridge = @import("async_bridge.zig");
 const runtime_automation_snapshot = @import("automation_snapshot.zig");
@@ -101,7 +102,9 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                 init_field_count += 1;
             }
             log(self, "runtime.init", "runtime initialized", init_fields[0..init_field_count]);
-            try app_manifest.validateCommands(self.options.commands);
+            // Startup declaration admission runs before OS configuration and
+            // app_start installs the retained runtime policy callbacks.
+            if (app.command_policy) |policy| try command_policy.catalog(policy, self.options.commands) else try app_manifest.validateCommands(self.options.commands);
             try self.options.platform.services.configureSecurityPolicy(self.options.security);
             try self.options.platform.services.configureMenus(self.options.menus);
             try self.options.platform.services.configureShortcuts(self.options.shortcuts);
@@ -231,6 +234,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
             switch (event_value) {
                 .app_start => {
                     self.shell_layout_policy = app.shell_layout_policy;
+                    self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
                     self.render_plan_policy = app.render_plan_policy;
@@ -585,8 +589,12 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
         }
 
         pub fn dispatchCommand(self: *Runtime, app: App, command: CommandEvent) anyerror!void {
-            try validateCommandName(command.name);
-            if (std.mem.eql(u8, command.name, platform.update_check_command)) {
+            const plan: command_policy.Dispatch = if (self.command_policy) |policy| command_policy.dispatch(policy, command.name) else native: {
+                try validateCommandName(command.name);
+                break :native if (std.mem.eql(u8, command.name, platform.update_check_command)) .updater else .app;
+            };
+            if (plan == .invalid) return error.InvalidCommand;
+            if (plan == .updater) {
                 self.options.platform.services.checkForUpdates(true) catch |err| switch (err) {
                     error.UnsupportedService => return dispatchEvent(self, app, .{ .command = command }),
                     else => return err,

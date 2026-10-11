@@ -2,6 +2,8 @@ const std = @import("std");
 const credentials_store = @import("credentials_store.zig");
 const json = @import("json");
 const validation = @import("validation.zig");
+const command_policy = @import("command_policy.zig");
+const status_validation = @import("status_validation.zig");
 const bridge_payload = @import("bridge_payload.zig");
 const bridge_responses = @import("bridge_responses.zig");
 const bridge = @import("../bridge/root.zig");
@@ -143,8 +145,8 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         }
 
         pub fn createStatusItem(self: *Runtime, status_item_id: platform.StatusItemId, options: platform.TrayOptions) anyerror!void {
-            try validation.validateStatusItemId(status_item_id);
-            try validateTrayOptions(options);
+            if (self.command_policy) |policy| try status_validation.identity(policy, status_item_id) else try validation.validateStatusItemId(status_item_id);
+            if (self.command_policy) |policy| try status_validation.options(policy, options) else try validateTrayOptions(options);
             const status_item = try statusItemSlot(self, status_item_id);
             const was_active = status_item.active;
             try self.options.platform.services.createStatusItem(status_item_id, options);
@@ -162,16 +164,16 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         }
 
         pub fn updateStatusItemShell(self: *Runtime, status_item_id: platform.StatusItemId, shell: platform.TrayShell) anyerror!void {
-            try validation.validateStatusItemId(status_item_id);
-            try validateTrayShell(shell);
+            if (self.command_policy) |policy| try status_validation.identity(policy, status_item_id) else try validation.validateStatusItemId(status_item_id);
+            if (self.command_policy) |policy| try status_validation.shell(policy, shell) else try validateTrayShell(shell);
             const status_item = findStatusItem(self, status_item_id) orelse return error.InvalidTrayOptions;
             try self.options.platform.services.updateStatusItemShell(status_item_id, shell);
             status_item.visible = shell.visible;
         }
 
         pub fn updateStatusItemMenu(self: *Runtime, status_item_id: platform.StatusItemId, items: []const platform.TrayMenuItem) anyerror!void {
-            try validation.validateStatusItemId(status_item_id);
-            try validateTrayMenuItems(items);
+            if (self.command_policy) |policy| try status_validation.identity(policy, status_item_id) else try validation.validateStatusItemId(status_item_id);
+            if (self.command_policy) |policy| try status_validation.menu(policy, items) else try validateTrayMenuItems(items);
             const status_item = findStatusItem(self, status_item_id) orelse return error.InvalidTrayOptions;
             try self.options.platform.services.updateStatusItemMenu(status_item_id, items);
             try storeTrayItems(status_item, items);
@@ -186,8 +188,8 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         /// bar rides this seam). Platforms without the
         /// title seam report `UnsupportedService`; the menu keeps working.
         pub fn updateStatusItemTitle(self: *Runtime, status_item_id: platform.StatusItemId, title: []const u8) anyerror!void {
-            try validation.validateStatusItemId(status_item_id);
-            try validateTrayTitle(title);
+            if (self.command_policy) |policy| try status_validation.identity(policy, status_item_id) else try validation.validateStatusItemId(status_item_id);
+            if (self.command_policy) |policy| try status_validation.title(policy, title) else try validateTrayTitle(title);
             const status_item = findStatusItem(self, status_item_id) orelse return error.InvalidTrayOptions;
             try self.options.platform.services.updateStatusItemTitle(status_item_id, title);
             status_item.title = try copyInto(&status_item.title_storage, title);
@@ -198,8 +200,8 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         }
 
         pub fn updateStatusItemPresentation(self: *Runtime, status_item_id: platform.StatusItemId, presentation: platform.TrayPresentation) anyerror!void {
-            try validation.validateStatusItemId(status_item_id);
-            try validation.validateTrayPresentation(presentation);
+            if (self.command_policy) |policy| try status_validation.identity(policy, status_item_id) else try validation.validateStatusItemId(status_item_id);
+            if (self.command_policy) |policy| try status_validation.presentation(policy, presentation) else try validation.validateTrayPresentation(presentation);
             const status_item = findStatusItem(self, status_item_id) orelse return error.InvalidTrayOptions;
             try self.options.platform.services.updateStatusItemPresentation(status_item_id, presentation);
             status_item.title = try copyInto(&status_item.title_storage, presentation.title);
@@ -210,7 +212,7 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         }
 
         pub fn removeStatusItem(self: *Runtime, status_item_id: platform.StatusItemId) anyerror!void {
-            try validation.validateStatusItemId(status_item_id);
+            if (self.command_policy) |policy| try status_validation.identity(policy, status_item_id) else try validation.validateStatusItemId(status_item_id);
             const status_item = findStatusItem(self, status_item_id) orelse return;
             try self.options.platform.services.removeStatusItem(status_item_id);
             status_item.* = .{};
@@ -227,6 +229,7 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
 
         pub fn statusItemMenuItemExists(self: *const Runtime, status_item_id: platform.StatusItemId, item_id: platform.TrayItemId) bool {
             const status_item = findStatusItemConst(self, status_item_id) orelse return false;
+            if (self.command_policy) |policy| return command_policy.menu(policy, status_item.items[0..status_item.item_count], item_id).exists;
             for (status_item.items[0..status_item.item_count]) |item| {
                 if (item.id == item_id) return true;
                 if (item.segmented) |segmented| {
@@ -241,6 +244,7 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         /// platform action, so the automation seam must reject them too.
         pub fn statusItemMenuItemActionable(self: *const Runtime, status_item_id: platform.StatusItemId, item_id: platform.TrayItemId) bool {
             const status_item = findStatusItemConst(self, status_item_id) orelse return false;
+            if (self.command_policy) |policy| return command_policy.menu(policy, status_item.items[0..status_item.item_count], item_id).actionable;
             for (status_item.items[0..status_item.item_count]) |item| {
                 if (item.id == item_id) return !item.separator and item.enabled and (item.role == .command or item.role == .agent);
                 if (item.segmented) |segmented| {
@@ -258,6 +262,11 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
 
         pub fn statusItemCommandNameForItem(self: *const Runtime, status_item_id: platform.StatusItemId, item_id: platform.TrayItemId) []const u8 {
             const status_item = findStatusItemConst(self, status_item_id) orelse return "tray.action";
+            if (self.command_policy) |policy| {
+                const selection = command_policy.menu(policy, status_item.items[0..status_item.item_count], item_id);
+                const row = selection.row orelse return "tray.action";
+                return if (selection.option) |option| status_item.items[row].segmented.?.options[option].command else status_item.items[row].command;
+            }
             for (status_item.items[0..status_item.item_count]) |item| {
                 if (item.id == item_id and item.command.len > 0) return item.command;
                 if (item.segmented) |segmented| {
@@ -547,6 +556,10 @@ fn storeTrayItems(status_item: anytype, items: []const platform.TrayMenuItem) !v
 }
 
 fn findStatusItem(self: anytype, status_item_id: platform.StatusItemId) ?@TypeOf(&self.status_items[0]) {
+    if (self.command_policy) |policy| {
+        const selection = command_policy.slot(policy, &self.status_items, status_item_id, false, self.status_item_count);
+        return if (selection.index) |index| &self.status_items[index] else null;
+    }
     for (&self.status_items) |*status_item| {
         if (status_item.active and status_item.id == status_item_id) return status_item;
     }
@@ -554,6 +567,10 @@ fn findStatusItem(self: anytype, status_item_id: platform.StatusItemId) ?@TypeOf
 }
 
 fn findStatusItemConst(self: anytype, status_item_id: platform.StatusItemId) ?@TypeOf(&self.status_items[0]) {
+    if (self.command_policy) |policy| {
+        const selection = command_policy.slot(policy, &self.status_items, status_item_id, false, self.status_item_count);
+        return if (selection.index) |index| &self.status_items[index] else null;
+    }
     for (&self.status_items) |*status_item| {
         if (status_item.active and status_item.id == status_item_id) return status_item;
     }
@@ -561,6 +578,10 @@ fn findStatusItemConst(self: anytype, status_item_id: platform.StatusItemId) ?@T
 }
 
 fn statusItemSlot(self: anytype, status_item_id: platform.StatusItemId) !@TypeOf(&self.status_items[0]) {
+    if (self.command_policy) |policy| {
+        const selection = command_policy.slot(policy, &self.status_items, status_item_id, true, self.status_item_count);
+        return if (selection.index) |index| &self.status_items[index] else error.InvalidTrayOptions;
+    }
     if (findStatusItem(self, status_item_id)) |status_item| return status_item;
     if (self.status_item_count >= self.status_items.len) return error.InvalidTrayOptions;
     for (&self.status_items) |*status_item| {

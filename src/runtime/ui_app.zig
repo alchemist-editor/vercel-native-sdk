@@ -514,6 +514,8 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             markdown_content_policy: ?canvas.MarkdownContentPolicy.Policy = null,
             construction_policy: ?canvas.ComponentConstructionPolicy.Policy = null,
             shell_layout_policy: ?*const fn ([]const u8, []u8) usize = null,
+            /// Installed by TsUiApp for compiled command and status policy.
+            command_policy: ?*const fn ([]const u8, []u8) usize = null,
             text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
             render_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
             render_plan_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -1561,6 +1563,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .name = self.options.name,
                 .scene_fn = sceneFn,
                 .shell_layout_policy = self.options.shell_layout_policy,
+                .command_policy = self.options.command_policy,
                 .text_cache_policy = self.options.text_cache_policy,
                 .render_cache_policy = self.options.render_cache_policy,
                 .render_plan_policy = self.options.render_plan_policy,

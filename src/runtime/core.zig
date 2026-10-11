@@ -268,6 +268,7 @@ pub const Runtime = struct {
     shell_layouts: [platform.max_windows]RuntimeShellLayout = undefined,
     shell_layout_count: usize = 0,
     shell_layout_policy: ?*const fn ([]const u8, []u8) usize = null,
+    command_policy: ?*const fn ([]const u8, []u8) usize = null,
     text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
     render_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
     render_plan_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -538,6 +539,15 @@ pub const Runtime = struct {
         // The profile rings exceed the small-default copy bound above;
         // assign explicitly so the disabled state is never undefined.
         self.frame_profile = .{};
+        // Status rows exceed the small-default copy bound. Initialize their
+        // ownership metadata without touching unused menu payload buffers.
+        for (&self.status_items) |*item| {
+            item.id = 0;
+            item.active = false;
+            item.visible = true;
+            item.title = "";
+            item.item_count = 0;
+        }
         self.started_timestamp_ns = timestampToU64(nowNanoseconds());
         self.text_measure_provider = if (options.platform.services.measure_text_fn) |measure_fn|
             .{
@@ -1302,6 +1312,10 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const command_policy = @import("command_policy.zig");
+    pub const status_validation = @import("status_validation.zig");
+    pub const native_validation = @import("validation.zig");
+    pub const command_services = runtime_system_services.RuntimeSystemServices(Runtime);
     pub const accessibility_policy = @import("accessibility_policy.zig");
     pub const accessibility_publication = runtime_canvas_widget_display.RuntimeCanvasWidgetDisplay(Runtime);
     pub const DamageCurrentCommand = @import("canvas_frame.zig").DamageCurrentCommand;
