@@ -1539,6 +1539,7 @@ pub fn build(b: *std.Build) void {
         const services_pool_e2e_run: ?*std.Build.Step.Run = if (ts_core_artifacts.services_pool) |pool_tests| pool: {
             const run = b.addRunArtifact(pool_tests);
             ts_services_e2e_step.dependOn(&run.step);
+            b.step("test-ts-services-pool", "Run the complete in-process service pool suite (FIFO, deadlines, trap isolation, streaming and replay)").dependOn(&run.step);
             break :pool run;
         } else null;
         // Service carrier benchmark: cold start, warm round-trip latency
