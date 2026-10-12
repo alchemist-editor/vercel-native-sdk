@@ -37,6 +37,10 @@ export function nativeManifestName(host) {
   return host.startsWith("win32-") ? "scriptc.exe.json" : "scriptc.json";
 }
 
+export function toolchainPackageDirectory(modules, key, asset) {
+  return path.join(modules, ...(asset.name.startsWith("@scriptc/") ? asset.name.split("/") : [key]));
+}
+
 export function coreManifestPath(origin) {
   let directory = path.dirname(origin instanceof URL || origin.startsWith("file:") ? fileURLToPath(origin) : origin);
   for (;;) {
@@ -78,8 +82,18 @@ export function installedRelease(origin, options = {}) {
   if (receipt.runtimeAbi !== config.release.runtimeAbi || !Array.isArray(receipt.runtimePacks) || JSON.stringify([...receipt.runtimePacks].sort()) !== JSON.stringify(packs)) {
     throw new Error("scriptc installation has an incomplete runtime pack inventory");
   }
-  for (const name of [`release/bin/${nativeManifestName(config.host)}`, `release/bin/scriptc${config.host.startsWith("win32-") ? ".exe" : ""}`, "api/node_modules/@scriptc/compiler/dist/index.js", "api/node_modules/@scriptc/compiler/surface-manifest.json", "api/node_modules/typescript/package.json", "api/node_modules/typescript5/package.json", ...packs.map(name => `api/node_modules/@scriptc/${name}/runtime-pack.json`)]) {
+  const modules = path.join(config.root, "api", "node_modules");
+  for (const [key, asset] of Object.entries(config.release.packages)) {
+    const directory = toolchainPackageDirectory(modules, key, asset);
+    const pkg = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
+    if (pkg.name !== asset.name || pkg.version !== asset.version) throw new Error(`scriptc installation has an incorrect package identity: ${key}`);
+  }
+  for (const name of [`release/bin/${nativeManifestName(config.host)}`, `release/bin/scriptc${config.host.startsWith("win32-") ? ".exe" : ""}`, "api/node_modules/@scriptc/compiler/dist/index.js", "api/node_modules/@scriptc/compiler/surface-manifest.json", "api/node_modules/typescript/package.json", "api/node_modules/typescript5/package.json", ...(config.release.packages.types ? ["api/node_modules/@scriptc/types/index.d.ts"] : []), ...(config.release.packages.threads ? ["api/node_modules/@scriptc/threads/index.d.ts", "api/node_modules/@scriptc/threads/index.js"] : []), ...packs.map(name => `api/node_modules/@scriptc/${name}/runtime-pack.json`)]) {
     if (!fs.statSync(path.join(config.root, name)).isFile()) throw new Error(`scriptc installation is missing ${name}`);
+  }
+  for (const name of packs) {
+    const pack = JSON.parse(fs.readFileSync(path.join(modules, "@scriptc", name, "runtime-pack.json"), "utf8"));
+    if (pack.version !== config.release.version || pack.runtime_abi?.version !== config.release.runtimeAbi) throw new Error(`scriptc installation has an incompatible runtime pack: ${name}`);
   }
   return config;
 }

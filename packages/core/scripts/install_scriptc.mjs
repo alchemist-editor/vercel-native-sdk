@@ -10,7 +10,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { installedRelease, nativeManifestName, nativeTargetName, releaseConfiguration } from "./scriptc_toolchain.mjs";
+import { installedRelease, nativeManifestName, nativeTargetName, releaseConfiguration, toolchainPackageDirectory } from "./scriptc_toolchain.mjs";
 
 function transientDownloadError(error) {
   for (let cause = error, depth = 0; cause && depth < 8; cause = cause.cause, depth++) {
@@ -135,7 +135,7 @@ export async function installScriptc(origin = new URL("../package.json", import.
     const nativeManifest = readJson(nativeManifestPath);
     if (nativeManifest.compiler_version !== config.release.version || nativeManifest.target !== nativeTargetName(config.host)) throw new Error("native compiler release identity mismatch");
     for (const [key, asset] of Object.entries(config.release.packages)) {
-      const directory = path.join(modules, ...(key === "compiler" ? ["@scriptc", "compiler"] : key.startsWith("runtime-") ? ["@scriptc", key] : [key]));
+      const directory = toolchainPackageDirectory(modules, key, asset);
       await acquire(asset, directory, { strip: 1 });
       requireVersion(directory, asset.version, asset.name);
     }
