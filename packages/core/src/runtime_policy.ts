@@ -198,6 +198,7 @@ export function native_window_policy(request: Uint8Array): Uint8Array {
   if (request[0] === 83) return nscvFontRegistry(request);
   if (request[0] === 84) return nscvShellCoordination(request);
   if (request[0] === 85) return nscvShellAdmission(request);
+  if (request[0] === 86) return nscvSystemAdmission(request);
   if (request[0] === 81) return nscvWindowLifecycle(request);
   if (request[0] === 80) return nscvViewCoordination(request);
   if (request[0] === 2) return nscvShellLayout(request);

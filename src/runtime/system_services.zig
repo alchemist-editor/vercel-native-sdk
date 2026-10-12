@@ -2,6 +2,7 @@ const std = @import("std");
 const credentials_store = @import("credentials_store.zig");
 const json = @import("json");
 const validation = @import("validation.zig");
+const admission = @import("system_admission_policy.zig");
 const command_policy = @import("command_policy.zig");
 const status_validation = @import("status_validation.zig");
 const bridge_payload = @import("bridge_payload.zig");
@@ -16,16 +17,8 @@ const platformFeatureFromString = bridge_payload.platformFeatureFromString;
 const writeBoolJson = bridge_responses.writeBoolJson;
 const writeTrueJson = bridge_responses.writeTrueJson;
 
-const validateClipboardData = validation.validateClipboardData;
-const validateClipboardMimeType = validation.validateClipboardMimeType;
 const validateCredential = validation.validateCredential;
 const validateCredentialKey = validation.validateCredentialKey;
-const validateMessageDialogOptions = validation.validateMessageDialogOptions;
-const validateNotificationOptions = validation.validateNotificationOptions;
-const validateOpenDialogOptions = validation.validateOpenDialogOptions;
-const validateRecentDocumentPath = validation.validateRecentDocumentPath;
-const validateRevealPath = validation.validateRevealPath;
-const validateSaveDialogOptions = validation.validateSaveDialogOptions;
 const validateTrayMenuItems = validation.validateTrayMenuItems;
 const validateTrayOptions = validation.validateTrayOptions;
 const validateTrayShell = validation.validateTrayShell;
@@ -47,12 +40,12 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         }
 
         pub fn readClipboardData(self: *Runtime, mime_type: []const u8, buffer: []u8) anyerror![]const u8 {
-            try validateClipboardMimeType(mime_type);
+            try admission.mime(self.system_admission_policy, mime_type);
             return self.options.platform.services.readClipboardData(mime_type, buffer);
         }
 
         pub fn writeClipboardData(self: *Runtime, data: platform.ClipboardData) anyerror!void {
-            try validateClipboardData(data);
+            try admission.clipboard(self.system_admission_policy, data);
             try self.options.platform.services.writeClipboardData(data);
         }
 
@@ -62,12 +55,12 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         }
 
         pub fn revealPath(self: *Runtime, path: []const u8) anyerror!void {
-            try validateRevealPath(path);
+            try admission.reveal(self.system_admission_policy, path);
             try self.options.platform.services.revealPath(path);
         }
 
         pub fn addRecentDocument(self: *Runtime, path: []const u8) anyerror!void {
-            try validateRecentDocumentPath(path);
+            try admission.recent(self.system_admission_policy, path);
             try self.options.platform.services.addRecentDocument(path);
         }
 
@@ -76,22 +69,22 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
         }
 
         pub fn showOpenDialog(self: *Runtime, options: platform.OpenDialogOptions, buffer: []u8) anyerror!platform.OpenDialogResult {
-            try validateOpenDialogOptions(options, buffer);
+            try admission.open(self.system_admission_policy, options, buffer);
             return self.options.platform.services.showOpenDialog(options, buffer);
         }
 
         pub fn showSaveDialog(self: *Runtime, options: platform.SaveDialogOptions, buffer: []u8) anyerror!?[]const u8 {
-            try validateSaveDialogOptions(options, buffer);
+            try admission.save(self.system_admission_policy, options, buffer);
             return self.options.platform.services.showSaveDialog(options, buffer);
         }
 
         pub fn showMessageDialog(self: *Runtime, options: platform.MessageDialogOptions) anyerror!platform.MessageDialogResult {
-            try validateMessageDialogOptions(options);
+            try admission.message(self.system_admission_policy, options);
             return self.options.platform.services.showMessageDialog(options);
         }
 
         pub fn showNotification(self: *Runtime, options: platform.NotificationOptions) anyerror!void {
-            try validateNotificationOptions(options);
+            try admission.notification(self.system_admission_policy, options);
             try self.options.platform.services.showNotification(options);
         }
 

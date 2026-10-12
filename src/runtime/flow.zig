@@ -240,6 +240,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.font_registry_policy = app.font_registry_policy;
                     self.shell_coordination_policy = app.shell_coordination_policy;
                     self.shell_admission_policy = app.shell_admission_policy;
+                    self.system_admission_policy = app.system_admission_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;

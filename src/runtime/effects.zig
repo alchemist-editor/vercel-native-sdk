@@ -72,7 +72,6 @@ const builtin = @import("builtin");
 const canvas = @import("canvas");
 const canvas_limits = @import("canvas_limits.zig");
 const platform = @import("../platform/root.zig");
-const validation = @import("validation.zig");
 const runtime_clock = @import("clock.zig");
 const persist_store = @import("persist_store.zig");
 const record_store = @import("record_store.zig");
@@ -5028,6 +5027,7 @@ pub fn Effects(comptime Msg: type) type {
         next_credentials_sequence: u64 = 1,
         defer_desktop_capabilities: bool = false,
         flushing_desktop_capabilities: bool = false,
+        system_admission_policy: ?*const fn ([]const u8, []u8) usize = null,
         /// The channel family's OWN generation counter — u64 and
         /// monotonic for the process's lifetime, never the shared u32
         /// `next_generation` above: channel handles live on app-owned
@@ -8729,7 +8729,7 @@ pub fn Effects(comptime Msg: type) type {
         /// user-visible side effect.
         pub fn showNotification(self: *Self, options: platform.NotificationOptions) void {
             if (self.executor == .fake or self.replay) return;
-            validation.validateNotificationOptions(options) catch return;
+            @import("system_admission_policy.zig").notification(self.system_admission_policy, options) catch return;
             const services = self.services orelse return;
             services.showNotification(options) catch {};
         }
