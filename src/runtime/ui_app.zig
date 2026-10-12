@@ -4874,7 +4874,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             // results with the frame tick so this frame presents them.
             self.canvas_window_id = frame_event.window_id;
             self.frame_timestamp_ns = frame_event.timestamp_ns;
-            const scale = normalizedSurfaceScale(frame_event.scale_factor);
+            const scale = self.normalizedSurfaceScale(frame_event.scale_factor);
             var installing = false;
             if (!self.installed) {
                 installing = true;
@@ -5006,7 +5006,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         fn handleWindowSlotFrame(self: *Self, runtime: *Runtime, frame_event: platform.GpuSurfaceFrameEvent) anyerror!void {
             const slot = self.windowSlotByCanvasLabel(frame_event.label) orelse return;
             slot.window_id = frame_event.window_id;
-            const scale = normalizedSurfaceScale(frame_event.scale_factor);
+            const scale = self.normalizedSurfaceScale(frame_event.scale_factor);
             var installing = false;
             if (!slot.installed) {
                 installing = true;
@@ -5147,7 +5147,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         /// Grow the heap pixel buffers to hold the surface at the given
         /// scale. No-op when they are already large enough.
         fn ensurePixelBuffers(self: *Self, surface_size: geometry.SizeF, scale_factor: f32) anyerror!void {
-            const pixel_size = try canvas_frame.canvasSurfacePixelSize(surface_size, scale_factor);
+            const pixel_size = try canvas_frame.canvasSurfacePixelSizeWithPolicy(surface_size, scale_factor, self.options.render_cache_policy);
             if (self.pixel_buffer.len < pixel_size.byte_len) {
                 self.pixel_buffer_window_id = null;
                 if (self.pixel_buffer.len > 0) self.backing.free(self.pixel_buffer);
@@ -5161,9 +5161,8 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             }
         }
 
-        fn normalizedSurfaceScale(scale_factor: f32) f32 {
-            if (!std.math.isFinite(scale_factor) or scale_factor <= 0) return 1;
-            return scale_factor;
+        fn normalizedSurfaceScale(self: *Self, scale_factor: f32) f32 {
+            return canvas_frame.normalizedCanvasPresentationScaleWithPolicy(scale_factor, 1, self.options.render_cache_policy);
         }
 
         /// Change-detection hashes for the model-derived tray state:
@@ -5261,12 +5260,12 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             if (!std.mem.eql(u8, resize_event.label, self.options.canvas_label)) {
                 const slot = self.windowSlotByCanvasLabel(resize_event.label) orelse return;
                 slot.canvas_size = .{ .width = resize_event.frame.width, .height = resize_event.frame.height };
-                slot.pixel_snap_scale = normalizedSurfaceScale(resize_event.scale_factor);
+                slot.pixel_snap_scale = self.normalizedSurfaceScale(resize_event.scale_factor);
                 if (slot.installed) try self.rebuildWindowSlot(runtime, slot);
                 return;
             }
             self.canvas_size = .{ .width = resize_event.frame.width, .height = resize_event.frame.height };
-            self.pixel_snap_scale = normalizedSurfaceScale(resize_event.scale_factor);
+            self.pixel_snap_scale = self.normalizedSurfaceScale(resize_event.scale_factor);
             if (!self.installed) return;
             // Fullscreen transitions resize the canvas AND flip the
             // chrome overlay insets (macOS hides the titlebar band and

@@ -35,6 +35,26 @@ pub const canvasRenderAnimationActive = canvas_frame_helpers.canvasRenderAnimati
 pub const platformCanvasFrameProfileRisk = canvas_frame_helpers.platformCanvasFrameProfileRisk;
 pub const gpuSurfaceFrameEventFromGpuFrame = canvas_frame_helpers.gpuSurfaceFrameEventFromGpuFrame;
 
+pub fn canvasSurfacePixelSizeWithPolicy(surface: geometry.SizeF, scale: f32, owner: ?canvas.GpuPlanningPolicy.Policy) !CanvasPixelSize {
+    if (owner) |policy| {
+        const program = canvas.CanvasFrameCoordinationPolicy.plan(.{ .surface = surface, .scale = scale }, .pixels, policy);
+        if (program.invalid_pixels) return error.InvalidGpuSurfacePixels;
+        return .{ .width = program.pixel_width, .height = program.pixel_height, .byte_len = program.pixel_bytes };
+    }
+    return canvasSurfacePixelSize(surface, scale);
+}
+pub fn normalizedCanvasPresentationScaleWithPolicy(scale: ?f32, fallback: f32, owner: ?canvas.GpuPlanningPolicy.Policy) f32 {
+    if (owner) |policy| return canvas.CanvasFrameCoordinationPolicy.plan(.{ .requested_scale = scale, .fallback_scale = fallback }, .scale, policy).scale;
+    return normalizedCanvasPresentationScale(scale, fallback);
+}
+fn canvasFullRepaintBoundsWithPolicy(surface: geometry.SizeF, bounds: ?geometry.RectF, owner: ?canvas.GpuPlanningPolicy.Policy) ?geometry.RectF {
+    if (owner) |policy| return canvas.CanvasFrameCoordinationPolicy.plan(.{ .surface = surface, .render_bounds = bounds }, .bounds, policy).bounds;
+    return canvasFullRepaintBounds(surface, bounds);
+}
+fn canvasFramePixelSizeWithPolicy(frame: canvas.CanvasFrame) !CanvasPixelSize {
+    return canvasSurfacePixelSizeWithPolicy(frame.surface_size, frame.scale, frame.gpu_plan_policy);
+}
+
 /// Whether presentation for this view should use the GPU packet path. A
 /// missing view stays eligible so the presentation entry point can report
 /// its normal validation error instead of masking it as a backend choice.
@@ -293,7 +313,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             if (self.views[view_index].gpu_requested_backend == .software) return error.UnsupportedService;
             var canvas_frame = try planCanvasFrameForView(self, view_index, options, storage, true);
             recordCanvasClearColor(self, window_id, label, clear_color);
-            const presentation_scale = normalizedCanvasPresentationScale(packet_scale, canvas_frame.scale);
+            const presentation_scale = normalizedCanvasPresentationScaleWithPolicy(packet_scale, canvas_frame.scale, canvas_frame.gpu_plan_policy);
             // Widen BEFORE the packet build so the scissor-culled
             // command subset rides the widened scissor.
             if (options.render_damage_policy orelse self.render_damage_policy) |owner|
@@ -351,7 +371,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             if (!canvas_frame.requiresRender()) {
                 return .{ .frame = canvas_frame, .mode = .skipped };
             }
-            const presentation_scale = normalizedCanvasPresentationScale(pixel_scale, canvas_frame.scale);
+            const presentation_scale = normalizedCanvasPresentationScaleWithPolicy(pixel_scale, canvas_frame.scale, canvas_frame.gpu_plan_policy);
             // Widen BEFORE the packet build (and the pixel fallback below)
             // so the scissor-culled command subset rides the widened
             // scissor.
@@ -446,7 +466,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
         ) anyerror!void {
             recordCanvasClearColor(self, window_id, label, clear_color);
             if (!canvas_frame.requiresRender()) return;
-            const pixel_size = try canvasFramePixelSize(canvas_frame);
+            const pixel_size = try canvasFramePixelSizeWithPolicy(canvas_frame);
             var surface = if (scratch.len >= pixel_size.byte_len)
                 try canvas.ReferenceRenderSurface.initWithScratch(pixel_size.width, pixel_size.height, pixels, scratch)
             else
@@ -993,14 +1013,15 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
 
+            const screenshot = canvasScreenshotOptions(&self.views[index], scale, self.render_cache_policy);
             const canvas_frame = try planCanvasFrameForView(self, index, .{
                 .frame_index = self.views[index].gpu_frame_index,
                 .timestamp_ns = self.views[index].gpu_timestamp_ns,
-                .surface_size = canvasScreenshotSurfaceSize(&self.views[index]),
-                .scale = normalizedCanvasPresentationScale(scale, 1),
+                .surface_size = screenshot.surface,
+                .scale = screenshot.scale,
                 .full_repaint = true,
             }, canvasFrameScratchStorage(self), false);
-            const pixel_size = try canvasFramePixelSize(canvas_frame);
+            const pixel_size = try canvasFramePixelSizeWithPolicy(canvas_frame);
             var surface = if (scratch.len >= pixel_size.byte_len)
                 try canvas.ReferenceRenderSurface.initWithScratch(pixel_size.width, pixel_size.height, pixels, scratch)
             else
@@ -1026,11 +1047,16 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             try validateViewLabel(label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
-            return canvasSurfacePixelSize(canvasScreenshotSurfaceSize(&self.views[index]), normalizedCanvasPresentationScale(scale, 1));
+            const screenshot = canvasScreenshotOptions(&self.views[index], scale, self.render_cache_policy);
+            return canvasSurfacePixelSizeWithPolicy(screenshot.surface, screenshot.scale, self.render_cache_policy);
         }
 
-        fn canvasScreenshotSurfaceSize(view: anytype) geometry.SizeF {
-            return if (view.gpu_size.isEmpty()) view.frame.size() else view.gpu_size;
+        fn canvasScreenshotOptions(view: anytype, scale: ?f32, owner: ?canvas.GpuPlanningPolicy.Policy) struct { surface: geometry.SizeF, scale: f32 } {
+            if (owner) |policy| {
+                const program = canvas.CanvasFrameCoordinationPolicy.plan(.{ .gpu_size = view.gpu_size, .frame_size = view.frame.size(), .requested_scale = scale }, .screenshot, policy);
+                return .{ .surface = program.surface, .scale = program.scale };
+            }
+            return .{ .surface = if (view.gpu_size.isEmpty()) view.frame.size() else view.gpu_size, .scale = normalizedCanvasPresentationScale(scale, 1) };
         }
 
         pub fn planCanvasFrameForView(self: *Runtime, index: usize, options: canvas.CanvasFrameOptions, storage: canvas.CanvasFrameStorage, record: bool) anyerror!canvas.CanvasFrame {
@@ -1055,24 +1081,32 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             if (frame_options.render_override_policy == null) frame_options.render_override_policy = self.render_override_policy;
             if (frame_options.render_damage_policy == null) frame_options.render_damage_policy = self.render_damage_policy;
             frame_options.backdrop_blur_sample_extent_multiplier = backdropBlurSampleExtentMultiplier(self.options.platform.name);
-            if (frame_options.surface_size.isEmpty()) {
-                frame_options.surface_size = if (self.views[index].gpu_size.isEmpty()) self.views[index].frame.size() else self.views[index].gpu_size;
-            }
-            // Runtime-registered images feed every view unless the caller
-            // supplied its own resource set: the CPU pixel paths
-            // (presentation, screenshots) and the GPU packet plan both
-            // read `image_resources` from the planned frame.
-            if (frame_options.image_resources.len == 0) {
-                frame_options.image_resources = self.registeredCanvasImages();
-            }
-            // Runtime-registered fonts feed every view the same way: the
-            // CPU pixel paths resolve registered font ids from the
-            // planned frame's `font_resources`.
-            if (frame_options.font_resources.len == 0) {
-                frame_options.font_resources = self.registeredCanvasFonts();
-            }
-            if (canvasFrameBudgetIsUnset(frame_options.budget)) {
-                frame_options.budget = self.views[index].canvas_frame_budget;
+            if (frame_options.render_cache_policy) |owner| {
+                const defaults = canvas.CanvasFrameCoordinationPolicy.plan(.{ .surface = frame_options.surface_size, .gpu_size = self.views[index].gpu_size, .frame_size = self.views[index].frame.size(), .images = frame_options.image_resources.len, .fonts = frame_options.font_resources.len, .budget = frame_options.budget }, .defaults, owner);
+                frame_options.surface_size = defaults.surface;
+                if (defaults.inherit_images) frame_options.image_resources = self.registeredCanvasImages();
+                if (defaults.inherit_fonts) frame_options.font_resources = self.registeredCanvasFonts();
+                if (defaults.inherit_budget) frame_options.budget = self.views[index].canvas_frame_budget;
+            } else {
+                if (frame_options.surface_size.isEmpty()) {
+                    frame_options.surface_size = if (self.views[index].gpu_size.isEmpty()) self.views[index].frame.size() else self.views[index].gpu_size;
+                }
+                // Runtime-registered images feed every view unless the caller
+                // supplied its own resource set: the CPU pixel paths
+                // (presentation, screenshots) and the GPU packet plan both
+                // read `image_resources` from the planned frame.
+                if (frame_options.image_resources.len == 0) {
+                    frame_options.image_resources = self.registeredCanvasImages();
+                }
+                // Runtime-registered fonts feed every view the same way: the
+                // CPU pixel paths resolve registered font ids from the
+                // planned frame's `font_resources`.
+                if (frame_options.font_resources.len == 0) {
+                    frame_options.font_resources = self.registeredCanvasFonts();
+                }
+                if (canvasFrameBudgetIsUnset(frame_options.budget)) {
+                    frame_options.budget = self.views[index].canvas_frame_budget;
+                }
             }
             frame_options.previous_resource_cache = self.views[index].canvasFrameResourceCache();
             frame_options.previous_pipeline_cache = self.views[index].canvasFramePipelineCache();
@@ -1100,16 +1134,14 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             } else try mergeCanvasRenderOverrides(scheduled_render_overrides, frame_options.render_overrides, &self.canvas_frame_render_override_combined);
             frame_options.render_overrides = render_overrides;
 
-            const canvas_changed = self.views[index].canvas_revision != self.views[index].presented_canvas_revision;
-            const canvas_surface_changed = !sizesEqual(self.views[index].presented_canvas_surface_size, frame_options.surface_size) or
-                self.views[index].presented_canvas_scale != frame_options.scale;
-            if (!frame_options.full_repaint and
-                self.views[index].presented_canvas_valid and
-                !canvas_changed and
-                !canvas_surface_changed and
-                frame_options.previous_render_overrides.len == 0 and
-                frame_options.render_overrides.len == 0)
-            {
+            const coordination = canvas.CanvasFrameCoordinationPolicy;
+            const coordination_view = &self.views[index];
+            const frame_facts = coordination.Facts{ .surface = frame_options.surface_size, .scale = frame_options.scale, .previous_surface = coordination_view.presented_canvas_surface_size, .previous_scale = coordination_view.presented_canvas_scale, .baseline_surface = coordination_view.canvas_packet_baseline_surface_size, .baseline_scale = coordination_view.canvas_packet_baseline_scale, .revision = coordination_view.canvas_revision, .presented_revision = coordination_view.presented_canvas_revision, .previous_overrides = frame_options.previous_render_overrides.len, .current_overrides = frame_options.render_overrides.len, .full_repaint = frame_options.full_repaint, .presented_valid = coordination_view.presented_canvas_valid, .presented_unkeyed = coordination_view.presented_canvas_has_unkeyed, .baseline_valid = coordination_view.canvas_packet_baseline_valid };
+            const admission = if (frame_options.render_cache_policy) |owner| coordination.plan(frame_facts, .admission, owner) else null;
+            const canvas_changed = if (admission) |program| program.canvas_changed else self.views[index].canvas_revision != self.views[index].presented_canvas_revision;
+            const canvas_surface_changed = if (admission) |program| program.surface_changed else !sizesEqual(self.views[index].presented_canvas_surface_size, frame_options.surface_size) or self.views[index].presented_canvas_scale != frame_options.scale;
+            const no_op = if (admission) |program| program.no_op else !frame_options.full_repaint and self.views[index].presented_canvas_valid and !canvas_changed and !canvas_surface_changed and frame_options.previous_render_overrides.len == 0 and frame_options.render_overrides.len == 0;
+            if (no_op) {
                 const canvas_frame = canvas.CanvasFrame{
                     .gpu_plan_policy = frame_options.render_cache_policy,
                     .frame_index = frame_options.frame_index,
@@ -1254,10 +1286,16 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                     storage.text_layout_cache_actions,
                 );
 
-            var full_repaint = frame_options.full_repaint or
+            const repaint = if (frame_options.render_cache_policy) |owner| blk: {
+                var facts = frame_facts;
+                if (admission.?.observe_unkeyed) facts.current_unkeyed = self.views[index].currentCanvasHasUnkeyed();
+                break :blk coordination.plan(facts, .repaint, owner);
+            } else null;
+            var full_repaint = if (repaint) |program| program.full_repaint else frame_options.full_repaint or
                 !self.views[index].presented_canvas_valid or
                 canvas_surface_changed or
                 (canvas_changed and (self.views[index].presented_canvas_has_unkeyed or self.views[index].currentCanvasHasUnkeyed()));
+            const refinement_eligible = if (repaint) |program| program.refine_damage else !full_repaint and canvas_changed and self.views[index].canvas_packet_baseline_valid and sizesEqual(self.views[index].canvas_packet_baseline_surface_size, frame_options.surface_size) and self.views[index].canvas_packet_baseline_scale == frame_options.scale;
             var changes: []const canvas.DiffChange = if (full_repaint)
                 storage.changes[0..0]
             else
@@ -1266,11 +1304,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             var dirty_rect_count: usize = 0;
             var dirty_bounds: ?geometry.RectF = if (frame_options.render_damage_policy) |owner| compiled: {
                 var refinement: ?canvas.RenderDamagePolicy.Patch = null;
-                if (!full_repaint and canvas_changed and
-                    self.views[index].canvas_packet_baseline_valid and
-                    sizesEqual(self.views[index].canvas_packet_baseline_surface_size, frame_options.surface_size) and
-                    self.views[index].canvas_packet_baseline_scale == frame_options.scale)
-                {
+                if (refinement_eligible) {
                     if (gatherCanvasPacketCurrentCommandsFromPlan(render_plan.commands, frame_options.surface_size, render_plan.bounds, frame_options.render_cache_policy)) |current| {
                         const view = &self.views[index];
                         const baseline_count = view.canvas_packet_baseline_count;
@@ -1294,7 +1328,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 if (full_repaint) changes = storage.changes[0..0];
                 break :compiled result.bounds;
             } else if (full_repaint)
-                canvasFullRepaintBounds(frame_options.surface_size, render_plan.bounds)
+                canvasFullRepaintBoundsWithPolicy(frame_options.surface_size, render_plan.bounds, frame_options.render_cache_policy)
             else dirty: {
                 // Every incremental dirty rect leaves here through
                 // `bleedAlignedCanvasDirtyBounds`: one whole device
@@ -1337,11 +1371,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 // stakes further: a full-window repaint there means a
                 // full-surface CPU raster AND a full-surface upload, so
                 // refinement must run at any command count.
-                if (canvas_changed and
-                    self.views[index].canvas_packet_baseline_valid and
-                    sizesEqual(self.views[index].canvas_packet_baseline_surface_size, frame_options.surface_size) and
-                    self.views[index].canvas_packet_baseline_scale == frame_options.scale)
-                {
+                if (refinement_eligible) {
                     if (gatherCanvasPacketCurrentCommandsFromPlan(render_plan.commands, frame_options.surface_size, render_plan.bounds, frame_options.render_cache_policy)) |current| {
                         if (canvasPacketPatchDirtyBounds(&self.views[index], current)) |patch_dirty| {
                             var refined = patch_dirty;
@@ -1378,7 +1408,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 // footprint; damage elsewhere remains incremental.
                 full_repaint = true;
                 changes = storage.changes[0..0];
-                dirty_bounds = canvasFullRepaintBounds(frame_options.surface_size, render_plan.bounds);
+                dirty_bounds = canvasFullRepaintBoundsWithPolicy(frame_options.surface_size, render_plan.bounds, frame_options.render_cache_policy);
                 dirty_rect_count = 0;
             }
 
@@ -1654,7 +1684,7 @@ fn gatherCanvasPacketCurrentCommands(canvas_frame: canvas.CanvasFrame) ?[]const 
 /// before the `CanvasFrame` value exists. Same inputs, same scratch,
 /// byte-identical output.
 fn gatherCanvasPacketCurrentCommandsFromPlan(render_commands: []const canvas.RenderCommand, surface_size: geometry.SizeF, render_bounds: ?geometry.RectF, policy: ?canvas.GpuPacketPreparationPolicy.Policy) ?[]const CanvasPacketCurrentCommand {
-    const full_bounds = canvasFullRepaintBounds(surface_size, render_bounds) orelse return null;
+    const full_bounds = canvasFullRepaintBoundsWithPolicy(surface_size, render_bounds, policy) orelse return null;
     const scratch = canvas_frame_scratch.get();
     if (policy) |owner| {
         const count = canvas.GpuPacketPreparationPolicy.gatherMaterialized(render_commands, full_bounds, &scratch.packet_current, &scratch.packet_commands, owner) orelse return null;
@@ -1898,7 +1928,7 @@ fn writeCanvasPacketFullBinary(
     generation: u64,
     writer: *std.Io.Writer,
 ) !void {
-    const scissor = canvasFullRepaintBounds(canvas_frame.surface_size, canvas_frame.render_plan.bounds);
+    const scissor = canvasFullRepaintBoundsWithPolicy(canvas_frame.surface_size, canvas_frame.render_plan.bounds, canvas_frame.gpu_plan_policy);
     // Load-action wire code 2 = clear (see serialization.zig's layout).
     try canvas.writeCanvasGpuPacketBinaryHeader(2, generation, scissor, &.{}, packet.images, packet.image_actions, writer);
     try writer.writeInt(u32, @intCast(current.len), .little);

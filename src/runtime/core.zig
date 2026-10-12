@@ -1312,6 +1312,9 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const referenceFrameBounds = canvas_frame_helpers.canvasFullRepaintBounds;
+    pub const referenceFrameScale = canvas_frame_helpers.normalizedCanvasPresentationScale;
+    pub const referenceFrameBudgetUnset = canvas_frame_helpers.canvasFrameBudgetIsUnset;
     pub const render_animation_policy = @import("render_animation_policy.zig");
     pub const motion_sampling_policy = @import("motion_sampling_policy.zig");
     pub const referenceAnimationScheduleDirtyBounds = @import("canvas_frame.zig").referenceAnimationScheduleDirtyBounds;

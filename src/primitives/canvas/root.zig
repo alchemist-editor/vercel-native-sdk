@@ -948,6 +948,7 @@ pub const writeCanvasGpuPacketBinaryHeader = serialization.writeCanvasGpuPacketB
 pub const writeCanvasGpuCommandBinaryKeyed = serialization.writeCanvasGpuCommandBinaryKeyed;
 pub const GpuPacketPreparationPolicy = @import("gpu_packet_preparation_policy.zig");
 pub const GpuPresentationPolicy = @import("gpu_presentation_policy.zig");
+pub const CanvasFrameCoordinationPolicy = @import("canvas_frame_coordination_policy.zig");
 pub const canvasGpuCommandFingerprint = serialization.canvasGpuCommandFingerprint;
 pub const canvasGpuPacketCommandKey = serialization.canvasGpuPacketCommandKey;
 pub const binary_packet_magic = serialization.binary_packet_magic;

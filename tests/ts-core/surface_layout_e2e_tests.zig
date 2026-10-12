@@ -936,6 +936,7 @@ test {
 test {
     _ = @import("gpu_planning_e2e_tests.zig");
     _ = @import("gpu_presentation_e2e_tests.zig");
+    _ = @import("canvas_frame_coordination_e2e_tests.zig");
     _ = @import("gpu_packet_preparation_e2e_tests.zig");
     _ = @import("vector_raster_e2e_tests.zig");
 }
