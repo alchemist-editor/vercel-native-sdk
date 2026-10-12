@@ -1,3 +1,4 @@
+const scene_policy = @import("canvas_scene_observation_policy.zig");
 const sampling_policy = @import("motion_sampling_policy.zig");
 const geometry = @import("geometry");
 const canvas = @import("canvas");
@@ -620,6 +621,10 @@ pub fn RuntimeViewCanvasFrame(comptime RuntimeView: type) type {
         }
 
         pub fn copyPresentedCanvasSummary(self: *RuntimeView, display_list: canvas.DisplayList, surface_size: geometry.SizeF, scale: f32) anyerror!void {
+            return self.copyPresentedCanvasSummaryWithPolicy(display_list, surface_size, scale, null);
+        }
+
+        pub fn copyPresentedCanvasSummaryWithPolicy(self: *RuntimeView, display_list: canvas.DisplayList, surface_size: geometry.SizeF, scale: f32, owner: ?scene_policy.Policy) anyerror!void {
             _ = try CanvasResourceCounts.fromDisplayList(display_list);
 
             self.presented_canvas_valid = true;
@@ -639,9 +644,10 @@ pub fn RuntimeViewCanvasFrame(comptime RuntimeView: type) type {
                     .id = id,
                     .bounds = command_bounds,
                 };
-                if (id == null and command_bounds != null) self.presented_canvas_has_unkeyed = true;
+                if (owner == null and id == null and command_bounds != null) self.presented_canvas_has_unkeyed = true;
                 self.presented_canvas_command_count += 1;
             }
+            if (owner) |policy| self.presented_canvas_has_unkeyed = scene_policy.summaryHasUnkeyed(self.presented_canvas_commands[0..self.presented_canvas_command_count], policy);
             self.presented_canvas_revision = self.canvas_revision;
         }
 
@@ -656,6 +662,11 @@ pub fn RuntimeViewCanvasFrame(comptime RuntimeView: type) type {
         }
 
         pub fn currentCanvasHasUnkeyed(self: *const RuntimeView) bool {
+            return self.currentCanvasHasUnkeyedWithPolicy(null);
+        }
+
+        pub fn currentCanvasHasUnkeyedWithPolicy(self: *const RuntimeView, owner: ?scene_policy.Policy) bool {
+            if (owner) |policy| return scene_policy.currentHasUnkeyed(self.canvasDisplayList().commands, policy);
             for (self.canvasDisplayList().commands) |command| {
                 if (command.objectId() == null and command.bounds() != null) return true;
             }
@@ -663,6 +674,11 @@ pub fn RuntimeViewCanvasFrame(comptime RuntimeView: type) type {
         }
 
         pub fn diffPresentedCanvasSummary(self: *const RuntimeView, output: []canvas.DiffChange) anyerror![]const canvas.DiffChange {
+            return self.diffPresentedCanvasSummaryWithPolicy(output, null);
+        }
+
+        pub fn diffPresentedCanvasSummaryWithPolicy(self: *const RuntimeView, output: []canvas.DiffChange, owner: ?scene_policy.Policy) anyerror![]const canvas.DiffChange {
+            if (owner) |policy| return scene_policy.diff(self, output, policy);
             if (self.canvas_revision == self.presented_canvas_revision) return output[0..0];
 
             // Id lookups ride the probe-table index whenever the lists

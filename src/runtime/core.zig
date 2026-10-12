@@ -1312,6 +1312,10 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const scene_observation_policy = @import("canvas_scene_observation_policy.zig");
+    pub const referenceSceneDirtyProjection = @import("canvas_frame.zig").canvasDirtyRegionForView;
+    pub const referenceSceneBlurExtent = @import("canvas_frame.zig").backdropBlurSampleExtentMultiplier;
+    pub const referenceSceneColor = canvas_frame_helpers.canvasColorToRgba8;
     pub const referenceFrameBounds = canvas_frame_helpers.canvasFullRepaintBounds;
     pub const referenceFrameScale = canvas_frame_helpers.normalizedCanvasPresentationScale;
     pub const referenceFrameBudgetUnset = canvas_frame_helpers.canvasFrameBudgetIsUnset;

@@ -1,3 +1,4 @@
+const scene_policy = @import("canvas_scene_observation_policy.zig");
 const std = @import("std");
 const geometry = @import("geometry");
 const canvas = @import("canvas");
@@ -194,7 +195,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 canvasRenderAnimationScheduleDirtyBounds(&self.views[index], animations);
             try self.views[index].copyCanvasRenderAnimations(animations);
             if (dirty) |local_dirty| {
-                if (canvasDirtyRegionForView(self.views[index].frame, local_dirty)) |region| {
+                if (canvasDirtyRegionForViewWithPolicy(self.views[index].frame, local_dirty, self.render_cache_policy)) |region| {
                     self.invalidateFor(.state, region);
                 } else {
                     self.invalidateFor(.state, self.views[index].frame);
@@ -257,7 +258,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             if (frame_options.render_override_policy == null) frame_options.render_override_policy = self.render_override_policy;
             if (frame_options.render_damage_policy == null) frame_options.render_damage_policy = self.render_damage_policy;
             if (frame_options.surface_size.isEmpty()) frame_options.surface_size = self.views[index].frame.size();
-            frame_options.backdrop_blur_sample_extent_multiplier = backdropBlurSampleExtentMultiplier(self.options.platform.name);
+            frame_options.backdrop_blur_sample_extent_multiplier = backdropBlurSampleExtentMultiplierWithPolicy(self.options.platform.name, frame_options.render_cache_policy);
             return self.views[index].canvasDisplayList().framePlan(previous, frame_options, storage);
         }
 
@@ -623,7 +624,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 .timestamp_ns = packet.timestamp_ns,
                 .surface_size = packet.surface_size,
                 .scale_factor = packet.scale,
-                .clear_color_rgba8 = canvasColorToRgba8(clear_color),
+                .clear_color_rgba8 = canvasColorToRgba8WithPolicy(clear_color, canvas_frame.gpu_plan_policy),
                 .requires_render = packet.requiresRender(),
                 .command_count = packet.commandCount(),
                 .cache_action_count = packet.cacheActionCount(),
@@ -1080,7 +1081,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             if (frame_options.render_plan_policy == null) frame_options.render_plan_policy = self.render_plan_policy;
             if (frame_options.render_override_policy == null) frame_options.render_override_policy = self.render_override_policy;
             if (frame_options.render_damage_policy == null) frame_options.render_damage_policy = self.render_damage_policy;
-            frame_options.backdrop_blur_sample_extent_multiplier = backdropBlurSampleExtentMultiplier(self.options.platform.name);
+            frame_options.backdrop_blur_sample_extent_multiplier = backdropBlurSampleExtentMultiplierWithPolicy(self.options.platform.name, frame_options.render_cache_policy);
             if (frame_options.render_cache_policy) |owner| {
                 const defaults = canvas.CanvasFrameCoordinationPolicy.plan(.{ .surface = frame_options.surface_size, .gpu_size = self.views[index].gpu_size, .frame_size = self.views[index].frame.size(), .images = frame_options.image_resources.len, .fonts = frame_options.font_resources.len, .budget = frame_options.budget }, .defaults, owner);
                 frame_options.surface_size = defaults.surface;
@@ -1288,7 +1289,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
             const repaint = if (frame_options.render_cache_policy) |owner| blk: {
                 var facts = frame_facts;
-                if (admission.?.observe_unkeyed) facts.current_unkeyed = self.views[index].currentCanvasHasUnkeyed();
+                if (admission.?.observe_unkeyed) facts.current_unkeyed = self.views[index].currentCanvasHasUnkeyedWithPolicy(frame_options.render_cache_policy);
                 break :blk coordination.plan(facts, .repaint, owner);
             } else null;
             var full_repaint = if (repaint) |program| program.full_repaint else frame_options.full_repaint or
@@ -1299,7 +1300,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             var changes: []const canvas.DiffChange = if (full_repaint)
                 storage.changes[0..0]
             else
-                try self.views[index].diffPresentedCanvasSummary(storage.changes);
+                try self.views[index].diffPresentedCanvasSummaryWithPolicy(storage.changes, frame_options.render_cache_policy);
             var dirty_rects: [canvas.max_canvas_frame_dirty_rects]geometry.RectF = undefined;
             var dirty_rect_count: usize = 0;
             var dirty_bounds: ?geometry.RectF = if (frame_options.render_damage_policy) |owner| compiled: {
@@ -1454,7 +1455,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 try self.views[index].copyCanvasFrameVisualEffectCache(canvas_frame.visual_effect_cache_plan.entries);
                 try self.views[index].copyCanvasFrameGlyphAtlasCache(canvas_frame.glyph_atlas_cache_plan.entries);
                 try self.views[index].copyCanvasFrameTextLayoutCache(canvas_frame.text_layout_cache_plan.entries);
-                try self.views[index].copyPresentedCanvasSummary(display_list, canvas_frame.surface_size, canvas_frame.scale);
+                try self.views[index].copyPresentedCanvasSummaryWithPolicy(display_list, canvas_frame.surface_size, canvas_frame.scale, frame_options.render_cache_policy);
                 self.views[index].recordCanvasFrame(canvas_frame);
                 try self.views[index].copyCanvasFrameRenderOverrides(frame_options.render_overrides);
                 const render_animation_active = if (frame_options.render_override_policy) |owner|
@@ -1575,7 +1576,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             var emitted_dirty_region = false;
             for (changes) |change| {
                 const local_dirty = change.dirty_bounds orelse continue;
-                if (canvasDirtyRegionForView(view_frame, local_dirty)) |dirty_region| {
+                if (canvasDirtyRegionForViewWithPolicy(view_frame, local_dirty, self.render_cache_policy)) |dirty_region| {
                     self.invalidateFor(.state, dirty_region);
                     emitted_dirty_region = true;
                 }
@@ -1604,7 +1605,7 @@ fn incrementalCanvasDamageIntersectsBackdropBlur(
 /// AppKit approximates its Gaussian with three consecutive box filters, so
 /// one output pixel can depend on the sum of three box radii. Other renderers
 /// retain the shared one-radius footprint.
-fn backdropBlurSampleExtentMultiplier(platform_name: []const u8) f32 {
+pub fn backdropBlurSampleExtentMultiplier(platform_name: []const u8) f32 {
     return if (std.mem.eql(u8, platform_name, "macos")) 3 else 1;
 }
 
@@ -2102,7 +2103,7 @@ fn runtimeFindViewIndex(self: anytype, window_id: platform.WindowId, label: []co
     return null;
 }
 
-fn canvasDirtyRegionForView(view_frame: geometry.RectF, local_dirty: geometry.RectF) ?geometry.RectF {
+pub fn canvasDirtyRegionForView(view_frame: geometry.RectF, local_dirty: geometry.RectF) ?geometry.RectF {
     const normalized_view = view_frame.normalized();
     const surface_bounds = geometry.RectF.init(0, 0, normalized_view.width, normalized_view.height);
     const clipped = geometry.RectF.intersection(surface_bounds, local_dirty.normalized());
@@ -2184,4 +2185,17 @@ pub fn referenceDamagePatch(view: anytype, current: []const DamageCurrentCommand
         return result;
     }
     return null;
+}
+
+fn canvasDirtyRegionForViewWithPolicy(view_frame: geometry.RectF, dirty: geometry.RectF, owner: ?scene_policy.Policy) ?geometry.RectF {
+    if (owner) |policy| return scene_policy.projectDirty(view_frame, dirty, policy);
+    return canvasDirtyRegionForView(view_frame, dirty);
+}
+fn backdropBlurSampleExtentMultiplierWithPolicy(platform_name: []const u8, owner: ?scene_policy.Policy) f32 {
+    if (owner) |policy| return scene_policy.blurExtent(std.mem.eql(u8, platform_name, "macos"), policy);
+    return backdropBlurSampleExtentMultiplier(platform_name);
+}
+pub fn canvasColorToRgba8WithPolicy(color: canvas.Color, owner: ?scene_policy.Policy) [4]u8 {
+    if (owner) |policy| return scene_policy.colorRgba8(color, policy);
+    return canvasColorToRgba8(color);
 }
