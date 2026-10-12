@@ -1,4 +1,5 @@
 const std = @import("std");
+const coordination = @import("shell_coordination_policy.zig");
 const lifecycle = @import("window_lifecycle_policy.zig");
 const geometry = @import("geometry");
 const validation = @import("validation.zig");
@@ -314,9 +315,9 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
                 .resizable = shell_window.resizable,
                 .restore_state = shell_window.restore_state,
                 .restore_policy = shellRestorePolicy(shell_window.restore_policy),
-                .initial_placement = if (shell_window.x != null or shell_window.y != null) .explicit else .default,
+                .initial_placement = if (self.shell_coordination_policy) |policy| coordination.presentation(policy, shell_window).placement else if (shell_window.x != null or shell_window.y != null) .explicit else .default,
                 .titlebar = shell_layout.shellTitlebarStyle(shell_window.titlebar),
-                .show = shell_layout.shellWindowShowMode(shell_window),
+                .show = if (self.shell_coordination_policy) |policy| coordination.presentation(policy, shell_window).show else shell_layout.shellWindowShowMode(shell_window),
                 .transparent = shell_window.transparent,
                 .always_on_top = shell_window.always_on_top,
                 .click_through = shell_window.click_through,
@@ -334,7 +335,11 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
         }
 
         pub fn createShellViews(self: *Runtime, window_id: platform.WindowId, views: []const app_manifest.ShellView, bounds: geometry.RectF) anyerror!void {
-            if (views.len > app_manifest.max_shell_views_per_window) return error.ViewLimitReached;
+            if (self.shell_coordination_policy) |policy| {
+                var request = coordination.request(.admission, 0, 0, 2);
+                std.mem.writeInt(u64, request[16..24], views.len, .little);
+                try coordination.plan(policy, &request).admit();
+            } else if (views.len > app_manifest.max_shell_views_per_window) return error.ViewLimitReached;
             try Self.validateShellViewCreatePlan(self, window_id, views);
 
             var main_state: RuntimeMainWebViewState = undefined;
@@ -360,6 +365,27 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
             var native_view_count: usize = 0;
             var child_webview_count: usize = 0;
             for (views, 0..) |view, index| {
+                if (self.shell_coordination_policy) |policy| {
+                    var duplicate = false;
+                    for (views[0..index]) |previous| {
+                        if (coordination.equal(policy, previous.label, view.label)) duplicate = true;
+                    }
+                    const main_label = coordination.equal(policy, view.label, "main");
+                    var exists = main_label;
+                    for (self.views[0..self.view_count]) |stored| {
+                        if (stored.open and stored.window_id == window_id and coordination.equal(policy, stored.label, view.label)) exists = true;
+                    }
+                    for (self.webviews[0..self.webview_count]) |stored| {
+                        if (stored.open and stored.window_id == window_id and coordination.equal(policy, stored.label, view.label)) exists = true;
+                    }
+                    var request = coordination.request(.admission, @as(u32, @intFromBool(duplicate)) | (@as(u32, @intFromBool(exists)) << 1) | (@as(u32, @intFromBool(main_label)) << 2), 0, 0);
+                    coordination.put(&request, 16, @intFromEnum(view.kind));
+                    const program = coordination.plan(policy, &request);
+                    try program.admit();
+                    if (program.decisions == 1) child_webview_count += 1;
+                    if (program.decisions == 2) native_view_count += 1;
+                    continue;
+                }
                 for (views[0..index]) |previous| {
                     if (std.mem.eql(u8, previous.label, view.label)) return error.DuplicateViewLabel;
                 }
@@ -374,6 +400,14 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
                 }
             }
 
+            if (self.shell_coordination_policy) |policy| {
+                var request = coordination.request(.admission, 0, 0, 1);
+                coordination.put(&request, 20, @intCast(native_view_count));
+                coordination.put(&request, 24, @intCast(child_webview_count));
+                coordination.put(&request, 28, @intCast(self.view_count));
+                coordination.put(&request, 32, @intCast(self.webview_count));
+                return coordination.plan(policy, &request).admit();
+            }
             if (native_view_count > platform.max_views - self.view_count) return error.ViewLimitReached;
             if (child_webview_count > platform.max_webviews - self.webview_count) return error.WebViewLimitReached;
         }
@@ -422,6 +456,25 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
         }
 
         pub fn applyShellView(self: *Runtime, options: platform.ViewOptions, mode: ShellApplyMode) anyerror!bool {
+            if (self.shell_coordination_policy) |policy| {
+                const main_label = coordination.equal(policy, options.label, "main");
+                const facts = @as(u32, @intFromBool(mode == .update)) | (@as(u32, @intFromBool(main_label)) << 1);
+                var request = coordination.request(.apply, facts, 0, 0);
+                coordination.put(&request, 16, @intFromEnum(options.kind));
+                const program = coordination.plan(policy, &request);
+                if (program.decisions & 1 != 0) try Self.setMainWebViewParent(self, options.window_id, options.parent);
+                if (program.decisions & 2 != 0) {
+                    _ = try Self.createView(self, options);
+                    return true;
+                }
+                _ = Self.updateView(self, options.window_id, options.label, .{ .frame = options.frame, .layer = options.layer }) catch |err| {
+                    var finish = request;
+                    coordination.put(&finish, 4, facts | (@as(u32, @intFromBool(err == error.ViewNotFound or err == error.WebViewNotFound)) << 2));
+                    if (coordination.plan(policy, &finish).decisions & 8 != 0) return false;
+                    return err;
+                };
+                return false;
+            }
             switch (mode) {
                 .create => {
                     if (options.kind == .webview and isMainWebViewLabel(options.label)) {
@@ -455,6 +508,15 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
 
         pub fn rollbackCreatedShellViews(self: *Runtime, window_id: platform.WindowId, labels: []const []const u8) void {
             var index = labels.len;
+            if (self.shell_coordination_policy) |policy| {
+                while (true) {
+                    const request = coordination.request(.rollback, 0, @intCast(labels.len), @intCast(index));
+                    const slot = coordination.plan(policy, &request).selected orelse break;
+                    Self.closeView(self, window_id, labels[slot]) catch {};
+                    index = slot;
+                }
+                return;
+            }
             while (index > 0) {
                 index -= 1;
                 Self.closeView(self, window_id, labels[index]) catch {};
@@ -477,13 +539,18 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
             const window = self.windows[index];
             var restore_error: ?anyerror = null;
 
-            if (window.source != null) {
-                if (window.main_frame_set != state.frame_set or !Self.rectsEqual(window.main_frame, state.frame)) {
+            const restore = if (self.shell_coordination_policy) |policy| compiled: {
+                var request = coordination.request(.restore, @as(u32, @intFromBool(window.source != null)) | (@as(u32, @intFromBool(window.main_frame_set != state.frame_set)) << 1), @bitCast(window.main_layer), @bitCast(state.layer));
+                for ([_]f32{ window.main_frame.x, window.main_frame.y, window.main_frame.width, window.main_frame.height, state.frame.x, state.frame.y, state.frame.width, state.frame.height }, 0..) |value, i| coordination.put(&request, 16 + i * 4, @bitCast(value));
+                break :compiled coordination.plan(policy, &request).decisions;
+            } else @as(u32, if (window.source != null and (window.main_frame_set != state.frame_set or !Self.rectsEqual(window.main_frame, state.frame))) 1 else 0) | @as(u32, if (window.source != null and window.main_layer != state.layer) 2 else 0);
+            {
+                if (restore & 1 != 0) {
                     self.options.platform.services.setWebViewFrame(window_id, "main", state.frame) catch |err| {
                         restore_error = err;
                     };
                 }
-                if (window.main_layer != state.layer) {
+                if (restore & 2 != 0) {
                     self.options.platform.services.setWebViewLayer(window_id, "main", state.layer) catch |err| {
                         if (restore_error == null) restore_error = err;
                     };

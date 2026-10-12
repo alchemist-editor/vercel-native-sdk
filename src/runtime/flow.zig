@@ -238,6 +238,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.window_lifecycle_policy = app.window_lifecycle_policy;
                     self.image_registry_policy = app.image_registry_policy;
                     self.font_registry_policy = app.font_registry_policy;
+                    self.shell_coordination_policy = app.shell_coordination_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
@@ -741,14 +742,20 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
             }
 
             const uses_default_empty_source = appUsesDefaultEmptyWebViewSource(App, app);
-            const source = if (sceneNeedsMainWebView(scene) or !uses_default_empty_source)
+            const source = if (if (self.shell_coordination_policy) |policy|
+                @import("shell_coordination_policy.zig").scene(policy, scene.windows, uses_default_empty_source).decisions != 0
+            else
+                sceneNeedsMainWebView(scene) or !uses_default_empty_source)
                 try WindowViewMethods().copyLoadedSource(self, try app.webViewSource())
             else
                 null;
             if (source != null and !self.options.web_layer) return error.WebViewLayerNotBuilt;
             self.loaded_source = source;
 
-            const startup_uses_source = sceneWindowUsesAppSource(scene.windows[0], uses_default_empty_source);
+            const startup_uses_source = if (self.shell_coordination_policy) |policy|
+                @import("shell_coordination_policy.zig").scene(policy, scene.windows[0..1], uses_default_empty_source).choices[0] & 4 != 0
+            else
+                sceneWindowUsesAppSource(scene.windows[0], uses_default_empty_source);
             try loadStartupSceneWindow(
                 self,
                 scene.windows[0],
@@ -756,7 +763,11 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                 if (startup_uses_source) .allow_source_less else .never_source,
             );
             for (scene.windows[1..]) |window| {
-                if (sceneWindowUsesAppSource(window, uses_default_empty_source)) {
+                if (if (self.shell_coordination_policy) |policy|
+                    @import("shell_coordination_policy.zig").scene(policy, &.{window}, uses_default_empty_source).choices[0] & 4 != 0
+                else
+                    sceneWindowUsesAppSource(window, uses_default_empty_source))
+                {
                     _ = try WindowViewMethods().createShellWindowWithSourceMode(self, window, source, source != null);
                 } else {
                     _ = try WindowViewMethods().createSourcelessShellWindow(self, window);

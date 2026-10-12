@@ -278,6 +278,20 @@ pub fn RuntimeWindowStorage(comptime Runtime: type) type {
         }
 
         pub fn bindShellViews(self: *Runtime, window_id: platform.WindowId, views: []const app_manifest.ShellView) !void {
+            if (self.shell_coordination_policy) |policy| {
+                const c = @import("shell_coordination_policy.zig");
+                var request: [64 + 16 * 8]u8 = @splat(0);
+                request[0..64].* = c.request(.bind, 0, @intCast(self.shell_layout_count), 0);
+                std.mem.writeInt(u64, request[16..24], window_id, .little);
+                for (self.shell_layouts[0..self.shell_layout_count], 0..) |layout, i| std.mem.writeInt(u64, request[64 + i * 8 ..][0..8], layout.window_id, .little);
+                const program = c.plan(policy, request[0 .. 64 + self.shell_layout_count * 8]);
+                try program.admit();
+                const slot = program.selected.?;
+                if (program.decisions != 0) self.shell_layouts[slot].window_id = window_id;
+                try self.shell_layouts[slot].copyViews(views);
+                if (program.decisions != 0) self.shell_layout_count += 1;
+                return;
+            }
             if (Self.findShellLayoutIndex(self, window_id)) |index| {
                 try self.shell_layouts[index].copyViews(views);
                 return;
