@@ -59,6 +59,6 @@
     "tar": "7.5.22"
   },
   "nativeToolchain": {
-    "scriptc": "0.2.8"
+    "scriptc": "0.2.9"
   }
 }

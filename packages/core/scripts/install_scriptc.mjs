@@ -9,7 +9,15 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { installedRelease, nativeManifestName, nativeTargetName, releaseConfiguration } from "./scriptc_toolchain.mjs";
+
+function transientDownloadError(error) {
+  for (let cause = error, depth = 0; cause && depth < 8; cause = cause.cause, depth++) {
+    if (["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE", "ENETUNREACH", "EHOSTUNREACH", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "ERR_STREAM_PREMATURE_CLOSE"].includes(cause.code) || cause.name === "TimeoutError") return true;
+  }
+  return error instanceof TypeError && error.message === "fetch failed" && !error.cause;
+}
 
 export async function downloadVerified(asset, output, options = {}) {
   const url = new URL(asset.url);
@@ -17,20 +25,37 @@ export async function downloadVerified(asset, output, options = {}) {
   const algorithm = asset.sha256 ? "sha256" : "sha512";
   const expected = asset.sha256 ?? asset.integrity?.replace(/^sha512-/, "");
   if (!expected || (!asset.sha256 && !asset.integrity.startsWith("sha512-"))) throw new Error("toolchain asset has no supported digest");
-  const hash = createHash(algorithm);
-  const response = await (options.fetch ?? fetch)(asset.url, { signal: AbortSignal.timeout(120_000) });
-  if (!response.ok || !response.body) throw new Error(`cannot download ${asset.url}: HTTP ${response.status}`);
-  const body = Readable.fromWeb(response.body);
-  let bytes = 0;
-  body.on("data", chunk => { bytes += chunk.length; hash.update(chunk); });
-  try {
-    await pipeline(body, fs.createWriteStream(output, { flags: "wx", mode: 0o600 }));
-    const digest = hash.digest(asset.sha256 ? "hex" : "base64");
-    if (digest !== expected || (asset.bytes !== undefined && bytes !== asset.bytes)) throw new Error(`toolchain checksum or size mismatch: ${asset.url}`);
-    return { bytes, digest };
-  } catch (error) {
-    await fsp.rm(output, { force: true });
-    throw error;
+  // Retry transport failures within the original two-minute asset budget.
+  // Each attempt owns a new stream and hash; corrupt bytes are never retried.
+  const deadline = Date.now() + 120_000;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let owned = false, retryable = false;
+    try {
+      const signal = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
+      const response = await (options.fetch ?? fetch)(asset.url, { signal });
+      if (!response.ok || !response.body) {
+        retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+        await response.body?.cancel().catch(() => {});
+        throw new Error(`cannot download ${asset.url}: HTTP ${response.status}`);
+      }
+      const handle = await fsp.open(output, "wx", 0o600);
+      owned = true;
+      const hash = createHash(algorithm);
+      let bytes = 0;
+      try {
+        const body = Readable.fromWeb(response.body);
+        body.on("data", chunk => { bytes += chunk.length; hash.update(chunk); });
+        await pipeline(body, handle.createWriteStream(), { signal });
+      } finally { await handle.close(); }
+      const digest = hash.digest(asset.sha256 ? "hex" : "base64");
+      if (digest !== expected || (asset.bytes !== undefined && bytes !== asset.bytes)) throw new Error(`toolchain checksum or size mismatch: ${asset.url}`);
+      return { bytes, digest };
+    } catch (error) {
+      if (owned) await fsp.rm(output, { force: true });
+      const backoff = 1000 * 2 ** attempt;
+      if (!(retryable || transientDownloadError(error)) || attempt === 3 || Date.now() + backoff >= deadline) throw error;
+      await (options.sleep ?? sleep)(backoff);
+    }
   }
 }
 

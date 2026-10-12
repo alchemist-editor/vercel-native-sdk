@@ -6,11 +6,11 @@
      Verify without writing:
        node packages/core/scripts/gen_service_surface.mjs --check -->
 
-# Service compile surface — scriptc 0.2.8
+# Service compile surface — scriptc 0.2.9
 
 What TypeScript under `src/services/` can use, as stated by the pinned
-compiler itself (surface manifest schema 1, 650 entries:
-521 static, 14 dynamic-only, 115 unsupported).
+compiler itself (surface manifest schema 1, 651 entries:
+522 static, 14 dynamic-only, 115 unsupported).
 
 How to read the tables:
 
@@ -296,6 +296,7 @@ manifest row in the Notes column:
 | `node-builtin.net.getDefaultAutoSelectFamilyAttemptTimeout` | net.getDefaultAutoSelectFamilyAttemptTimeout | static |  |  |
 | `node-builtin.net.setDefaultAutoSelectFamilyAttemptTimeout` | net.setDefaultAutoSelectFamilyAttemptTimeout | static |  |  |
 | `node-builtin.os.EOL` | os.EOL | static |  | constant value read |
+| `node-builtin.os.availableParallelism` | os.availableParallelism | static |  |  |
 | `node-builtin.os.homedir` | os.homedir | static |  |  |
 | `node-builtin.os.networkInterfaces` | os.networkInterfaces | static |  |  |
 | `node-builtin.os.platform` | os.platform | static |  |  |

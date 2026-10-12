@@ -45,6 +45,126 @@ test("partial downloads and integrity mismatches never leave an asset", async ()
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test("transient fetch and HTTP failures retry within a bounded verified download", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-scriptc-retry-"));
+  try {
+    const payload = Buffer.from("verified after transport recovery");
+    const sha256 = createHash("sha256").update(payload).digest("hex");
+    const asset = { url: "https://example.com/release.tar.gz", sha256, bytes: payload.length };
+    for (const status of [408, 429, 500, 502, 503, 504, null]) {
+      const file = path.join(root, "asset");
+      let attempts = 0, cancelled = 0;
+      const delays: number[] = [];
+      const result = await downloadVerified(asset, file, {
+        sleep: async (ms: number) => { delays.push(ms); },
+        fetch: async (_url: string, { signal }: { signal: AbortSignal }) => {
+          assert.ok(signal instanceof AbortSignal);
+          if (++attempts < 3) {
+            if (status === null) throw new TypeError("fetch failed", { cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }) });
+            return new Response(new ReadableStream({ cancel() { cancelled++; } }), { status });
+          }
+          return new Response(payload);
+        },
+      });
+      assert.deepEqual(result, { bytes: payload.length, digest: sha256 });
+      assert.equal(attempts, 3); assert.deepEqual(delays, [1000, 2000]);
+      assert.equal(cancelled, status === null ? 0 : 2);
+      assert.deepEqual(fs.readFileSync(file), payload); fs.unlinkSync(file);
+    }
+    let attempts = 0;
+    const delays: number[] = [];
+    await assert.rejects(downloadVerified(asset, path.join(root, "asset"), {
+      sleep: async (ms: number) => { delays.push(ms); },
+      fetch: async () => { attempts++; throw new TypeError("fetch failed"); },
+    }), /fetch failed/);
+    assert.equal(attempts, 4); assert.deepEqual(delays, [1000, 2000, 4000]);
+    assert.equal(fs.existsSync(path.join(root, "asset")), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("slow transfers retain the complete asset budget while retries share the remaining time", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-scriptc-budget-"));
+  const originalNow = Date.now, originalTimeout = AbortSignal.timeout;
+  try {
+    const payload = Buffer.from("verified slow transfer");
+    const asset = { url: "https://example.com/release.tar.gz", sha256: createHash("sha256").update(payload).digest("hex"), bytes: payload.length };
+    const file = path.join(root, "asset");
+    let now = 0, attempts = 0;
+    const timeouts: number[] = [];
+    Date.now = () => now;
+    AbortSignal.timeout = ms => { timeouts.push(ms); return originalTimeout(ms); };
+    await downloadVerified(asset, file, {
+      sleep: async (ms: number) => { now += ms; },
+      fetch: async () => {
+        now += 45_000;
+        if (++attempts === 1) throw Object.assign(new Error("temporary reset"), { code: "ECONNRESET" });
+        return new Response(payload);
+      },
+    });
+    assert.deepEqual(timeouts, [120_000, 74_000]);
+    assert.equal(attempts, 2); assert.equal(now, 91_000);
+    assert.deepEqual(fs.readFileSync(file), payload); fs.unlinkSync(file);
+    now = 0; attempts = 0; timeouts.length = 0;
+    await assert.rejects(downloadVerified(asset, file, {
+      sleep: async () => { assert.fail("exhausted budget must stop before backoff"); },
+      fetch: async () => { attempts++; now = 119_800; throw Object.assign(new Error("budget exhausted"), { code: "ECONNRESET" }); },
+    }), /budget exhausted/);
+    assert.equal(attempts, 1); assert.deepEqual(timeouts, [120_000]);
+    assert.equal(fs.existsSync(file), false);
+  } finally {
+    Date.now = originalNow; AbortSignal.timeout = originalTimeout;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed response body is discarded before a fresh stream and hash are admitted", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-scriptc-stream-retry-"));
+  try {
+    const payload = Buffer.from("fresh complete asset");
+    const integrity = "sha512-" + createHash("sha512").update(payload).digest("base64");
+    const asset = { url: "https://example.com/release.tar.gz", integrity, bytes: payload.length };
+    const file = path.join(root, "asset");
+    let attempts = 0, pulls = 0;
+    const result = await downloadVerified(asset, file, {
+      sleep: async () => { assert.equal(fs.existsSync(file), false); },
+      fetch: async () => {
+        if (++attempts === 2) return new Response(payload);
+        return new Response(new ReadableStream({ pull(controller) {
+          if (++pulls === 1) controller.enqueue(Buffer.from("superseded prefix"));
+          else controller.error(Object.assign(new Error("body interrupted"), { code: "ECONNRESET" }));
+        } }));
+      },
+    });
+    assert.equal(attempts, 2); assert.equal(result.digest, integrity.slice(7));
+    assert.equal(result.bytes, payload.length); assert.deepEqual(fs.readFileSync(file), payload);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("permanent errors and corrupt assets stop immediately and preserve unrelated output files", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-scriptc-no-retry-"));
+  try {
+    const payload = Buffer.from("expected asset");
+    const asset = { url: "https://example.com/release.tar.gz", sha256: createHash("sha256").update(payload).digest("hex"), bytes: payload.length };
+    const file = path.join(root, "asset");
+    for (const outcome of [400, 401, 403, 404, "certificate", "corrupt", "size", "exists"]) {
+      let attempts = 0;
+      if (outcome === "exists") fs.writeFileSync(file, "unrelated existing bytes");
+      await assert.rejects(downloadVerified(outcome === "size" ? { ...asset, bytes: payload.length + 1 } : asset, file, {
+        sleep: async () => { assert.fail("permanent failures must not retry"); },
+        fetch: async () => {
+          attempts++;
+          if (typeof outcome === "number") return new Response(null, { status: outcome });
+          if (outcome === "certificate") throw new TypeError("fetch failed", { cause: Object.assign(new Error("untrusted certificate"), { code: "CERT_HAS_EXPIRED" }) });
+          return new Response(outcome === "corrupt" ? "corrupt" : payload);
+        },
+      }));
+      assert.equal(attempts, 1);
+      if (outcome === "exists") { assert.equal(fs.readFileSync(file, "utf8"), "unrelated existing bytes"); fs.unlinkSync(file); }
+      else assert.equal(fs.existsSync(file), false);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 // Construct a real tar header so traversal and links reach the extractor,
 // rather than being sanitized away by an archive-writing library first.
 function tarMember(name: string, type = "0", payload = Buffer.from("contents")): Buffer {
