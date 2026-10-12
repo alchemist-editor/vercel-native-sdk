@@ -520,6 +520,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             if (comptime @hasDecl(core, "nativeWindowPolicy")) {
                 if (options.shell_layout_policy != null) @panic("TsUiApp owns shell_layout_policy - remove custom shell layout wiring");
                 stamped.shell_layout_policy = core.nativeWindowPolicy;
+                if (options.view_coordination_policy != null) @panic("TsUiApp owns view_coordination_policy - remove custom view coordination wiring");
+                stamped.view_coordination_policy = core.nativeWindowPolicy;
                 if (options.command_policy != null) @panic("TsUiApp owns command_policy - remove custom command wiring");
                 stamped.command_policy = core.nativeWindowPolicy;
                 if (options.text_cache_policy != null) @panic("TsUiApp owns text_cache_policy - remove custom text cache wiring");
@@ -2281,7 +2283,9 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
             }
             const arena = core.rt.frameAllocator();
             var count: usize = 0;
-            for (layout.nodes) |node| if (node.widget.kind == .slider) { count += 1; };
+            for (layout.nodes) |node| if (node.widget.kind == .slider) {
+                count += 1;
+            };
             const samples = arena.alloc(Sample, count) catch @panic("slider state allocation failed");
             count = 0;
             for (layout.nodes) |node| {

@@ -49,6 +49,7 @@ pub fn expectComplete(expected: anytype, actual: @TypeOf(expected)) anyerror!voi
 
 test {
     _ = @import("host_input_regions_e2e_tests.zig");
+    _ = @import("view_coordination_e2e_tests.zig");
     _ = @import("input_composition_e2e_tests.zig");
     _ = @import("semantic_tree_e2e_tests.zig");
     _ = @import("accessibility_publication_e2e_tests.zig");

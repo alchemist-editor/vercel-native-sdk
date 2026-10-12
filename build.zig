@@ -1323,6 +1323,7 @@ pub fn build(b: *std.Build) void {
         native_api_tests.addFileArg(b.path("packages/core/test/canvas_presentation_lifecycle.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/input_composition.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/host_input_regions.test.ts"));
+        native_api_tests.addFileArg(b.path("packages/core/test/view_coordination.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/vector_raster.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/text_span_queries.test.ts"));
         native_api_tests.addFileArg(b.path("packages/core/test/component_composition.test.ts"));
@@ -1531,6 +1532,7 @@ pub fn build(b: *std.Build) void {
         input_composition_step.dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-input-composition-tests", &.{ "compiled input composition", "input composition transport" })).step);
         input_composition_step.dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.feed_reader.root_module, "ts-input-selection-ownership-tests", &.{"compiled selection press decisions own"})).step);
         b.step("test-ts-host-input-regions", "Compare complete compiled host scroll and window-drag region ownership").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-host-input-regions-tests", &.{"compiled host input regions"})).step);
+        b.step("test-ts-view-coordination", "Compare complete compiled cross-view focus and ancestry coordination").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-view-coordination-tests", &.{"compiled view coordination"})).step);
         b.step("test-ts-canvas-presentation-lifecycle", "Compare complete compiled presentation lifecycle and native capability execution").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-canvas-presentation-lifecycle-tests", &.{ "compiled presentation lifecycle", "presentation lifecycle transport", "compiled GPU presentation runtime" })).step);
         b.step("test-ts-canvas-frame-coordination", "Compare compiled frame admission and complete surface preparation").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-canvas-frame-coordination-tests", &.{ "compiled frame coordination", "canvas frame coordination copied transport", "compiled GPU presentation runtime" })).step);
         b.step("test-ts-gpu-presentation", "Compare compiled retained presentation programs and runtime ownership").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-gpu-presentation-tests", &.{ "compiled GPU presentation", "GPU presentation copied transport", "compiled GPU packet preparation gathers" })).step);
