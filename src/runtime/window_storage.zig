@@ -8,7 +8,6 @@ const runtime_canvas_widget_events = @import("canvas_widget_events.zig");
 const app_manifest = @import("app_manifest");
 const platform = @import("../platform/root.zig");
 
-const validateWindowFrame = validation.validateWindowFrame;
 const WindowSourcePolicy = runtime_state.WindowSourcePolicy;
 const copySourceInto = runtime_state.copySourceInto;
 const RuntimeShellLayout = shell_layout.RuntimeShellLayout;
@@ -97,7 +96,7 @@ pub fn RuntimeWindowStorage(comptime Runtime: type) type {
                 }
             }
             const id = if (options.id != 0) options.id else Self.allocateWindowId(self);
-            try validateWindowFrame(options.default_frame);
+            try @import("shell_admission_policy.zig").frame(self.shell_admission_policy, 1, options.default_frame);
             // `.hide` needs a host that can keep a closed-by-the-user
             // window alive and re-show it; refusing here is the loud
             // teaching (GTK: no status item exists to bring the window

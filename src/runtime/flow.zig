@@ -239,6 +239,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.image_registry_policy = app.image_registry_policy;
                     self.font_registry_policy = app.font_registry_policy;
                     self.shell_coordination_policy = app.shell_coordination_policy;
+                    self.shell_admission_policy = app.shell_admission_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
@@ -735,7 +736,10 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
         }
 
         fn loadScene(self: *Runtime, app: App, scene: app_manifest.ShellConfig) anyerror!void {
-            try app_manifest.validateShell(scene, &.{});
+            if (self.shell_admission_policy) |policy|
+                try @import("shell_admission_policy.zig").scene(policy, scene, &.{})
+            else
+                try app_manifest.validateShell(scene, &.{});
             if (scene.windows.len == 0) {
                 log(self, "scene.load", "loaded empty app scene", &.{trace.string("app", app.name)});
                 return;

@@ -54,6 +54,7 @@ test {
     _ = @import("image_registry_e2e_tests.zig");
     _ = @import("font_registry_e2e_tests.zig");
     _ = @import("shell_coordination_e2e_tests.zig");
+    _ = @import("shell_admission_e2e_tests.zig");
     _ = @import("input_composition_e2e_tests.zig");
     _ = @import("semantic_tree_e2e_tests.zig");
     _ = @import("accessibility_publication_e2e_tests.zig");

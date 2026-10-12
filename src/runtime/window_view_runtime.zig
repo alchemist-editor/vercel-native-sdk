@@ -14,11 +14,7 @@ const platform = @import("../platform/root.zig");
 const security = @import("../security/root.zig");
 
 const isMainWebViewLabel = validation.isMainWebViewLabel;
-const validateChildWebViewLabel = validation.validateChildWebViewLabel;
-const validateViewOptions = validation.validateViewOptions;
-const validateViewLabel = validation.validateViewLabel;
-const validateViewFrame = validation.validateViewFrame;
-const isValidWebViewFrame = validation.isValidWebViewFrame;
+
 const validateCommandName = validation.validateCommandName;
 
 const webViewUrlOrigin = bridge_payload.webViewUrlOrigin;
@@ -49,7 +45,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
 
         pub fn createView(self: *Runtime, options: platform.ViewOptions) anyerror!platform.ViewInfo {
             try Self.validateViewParent(self, options.window_id);
-            try validateViewOptions(options);
+            try @import("shell_admission_policy.zig").runtimeView(self.shell_admission_policy, options);
             if (Self.viewLabelExists(self, options.window_id, options.label)) return error.DuplicateViewLabel;
             try Self.validateViewParentLink(self, options.window_id, options.label, options.parent);
             if (options.kind == .webview) return Self.createWebViewView(self, options);
@@ -71,19 +67,23 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
 
         pub fn updateView(self: *Runtime, window_id: platform.WindowId, label: []const u8, patch: platform.ViewPatch) anyerror!platform.ViewInfo {
             try Self.validateViewParent(self, window_id);
-            try validateViewLabel(label);
-            if (patch.frame) |view_frame| try validateViewFrame(view_frame);
-            if (patch.role) |role| {
-                if (role.len > platform.max_view_role_bytes) return error.ViewRoleTooLarge;
-            }
-            if (patch.accessibility_label) |accessibility_label| {
-                if (accessibility_label.len > platform.max_view_accessibility_label_bytes) return error.ViewAccessibilityLabelTooLarge;
-            }
-            if (patch.text) |text| {
-                if (text.len > platform.max_view_text_bytes) return error.ViewTextTooLarge;
-            }
-            if (patch.command) |command| {
-                if (command.len > 0) try validateCommandName(command);
+            if (self.shell_admission_policy) |policy| {
+                try @import("shell_admission_policy.zig").runtimePatch(policy, label, patch);
+            } else {
+                try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
+                if (patch.frame) |view_frame| try @import("shell_admission_policy.zig").frame(self.shell_admission_policy, 0, view_frame);
+                if (patch.role) |role| {
+                    if (role.len > platform.max_view_role_bytes) return error.ViewRoleTooLarge;
+                }
+                if (patch.accessibility_label) |accessibility_label| {
+                    if (accessibility_label.len > platform.max_view_accessibility_label_bytes) return error.ViewAccessibilityLabelTooLarge;
+                }
+                if (patch.text) |text| {
+                    if (text.len > platform.max_view_text_bytes) return error.ViewTextTooLarge;
+                }
+                if (patch.command) |command| {
+                    if (command.len > 0) try validateCommandName(command);
+                }
             }
             if (patch.url != null and !isMainWebViewLabel(label) and Self.findWebViewIndex(self, window_id, label) == null) return error.InvalidViewOptions;
 
@@ -111,7 +111,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
 
         pub fn closeView(self: *Runtime, window_id: platform.WindowId, label: []const u8) anyerror!void {
             try Self.validateViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             if (isMainWebViewLabel(label)) return error.InvalidViewOptions;
 
             if (Self.findWebViewIndex(self, window_id, label)) |webview_index| {
@@ -165,7 +165,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
 
         pub fn focusView(self: *Runtime, window_id: platform.WindowId, label: []const u8) anyerror!void {
             try Self.validateViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             if (!Self.viewLabelExists(self, window_id, label)) return error.ViewNotFound;
             try self.options.platform.services.focusView(window_id, label);
             try Self.setFocusedView(self, window_id, label);
@@ -182,7 +182,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
         /// (`supports(.view_surface_adoption)` is the honest pre-check).
         pub fn adoptViewSurface(self: *Runtime, window_id: platform.WindowId, label: []const u8, surface_handle: *anyopaque) anyerror!void {
             try Self.validateViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             if (isMainWebViewLabel(label) or Self.findWebViewIndex(self, window_id, label) != null) return error.InvalidViewOptions;
             if (Self.findViewIndex(self, window_id, label) == null) return error.ViewNotFound;
             try self.options.platform.services.adoptViewSurface(window_id, label, surface_handle);
@@ -193,7 +193,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
         /// platform view stays alive for the caller to reuse.
         pub fn releaseViewSurface(self: *Runtime, window_id: platform.WindowId, label: []const u8) anyerror!void {
             try Self.validateViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             if (Self.findViewIndex(self, window_id, label) == null) return error.ViewNotFound;
             try self.options.platform.services.releaseViewSurface(window_id, label);
             self.invalidateFor(.command, null);
@@ -328,9 +328,9 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
 
         pub fn createWebViewView(self: *Runtime, options: platform.ViewOptions) !platform.ViewInfo {
             if (!self.options.web_layer) return error.WebViewLayerNotBuilt;
-            try validateChildWebViewLabel(options.label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 2, options.label);
             try Self.validateWebViewUrl(self, options.url);
-            if (!isValidWebViewFrame(options.frame)) return error.InvalidWebViewOptions;
+            try @import("shell_admission_policy.zig").frame(self.shell_admission_policy, 2, options.frame);
             if (self.webview_count >= platform.max_webviews) return error.WebViewLimitReached;
             var platform_options = options;
             platform_options.frame = try Self.platformFrameForView(self, options.window_id, options.parent, options.frame);
@@ -359,7 +359,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
                 const window_index = WindowStorageMethods.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
                 if (patch.url != null) return error.InvalidViewOptions;
                 if (patch.frame) |view_frame| {
-                    if (!isValidWebViewFrame(view_frame)) return error.InvalidWebViewOptions;
+                    try @import("shell_admission_policy.zig").frame(self.shell_admission_policy, 2, view_frame);
                     if (self.windows[window_index].source != null) {
                         try self.options.platform.services.setWebViewFrame(window_id, label, view_frame);
                     }
@@ -379,7 +379,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
 
             const webview_index = Self.findWebViewIndex(self, window_id, label) orelse return error.WebViewNotFound;
             if (patch.frame) |view_frame| {
-                if (!isValidWebViewFrame(view_frame)) return error.InvalidWebViewOptions;
+                try @import("shell_admission_policy.zig").frame(self.shell_admission_policy, 2, view_frame);
                 const platform_frame = try Self.platformFrameForView(self, window_id, self.webviews[webview_index].parent, view_frame);
                 try self.options.platform.services.setWebViewFrame(window_id, label, platform_frame);
                 self.webviews[webview_index].local_frame = view_frame;

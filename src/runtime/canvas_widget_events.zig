@@ -22,7 +22,7 @@ const CanvasWidgetPointerEvent = runtime_api.CanvasWidgetPointerEvent;
 const CanvasWidgetKeyboardEvent = runtime_api.CanvasWidgetKeyboardEvent;
 const CanvasWidgetFileDropEvent = runtime_api.CanvasWidgetFileDropEvent;
 const CanvasWidgetDragEvent = runtime_api.CanvasWidgetDragEvent;
-const validateViewLabel = validation.validateViewLabel;
+
 const platformCursorFromCanvas = widget_bridge.platformCursorFromCanvas;
 const canvasWidgetPointerEventFromGpuInput = canvas_frame_helpers.canvasWidgetPointerEventFromGpuInput;
 const canvasWidgetKeyboardEventFromGpuInput = canvas_frame_helpers.canvasWidgetKeyboardEventFromGpuInput;
@@ -68,7 +68,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
         }
         pub fn routeCanvasWidgetPointerInput(self: *const Runtime, input_event: GpuSurfaceInputEvent, output: []canvas.WidgetEventRouteEntry) anyerror!?CanvasWidgetPointerEvent {
             try validateRuntimeViewParent(self, input_event.window_id);
-            try validateViewLabel(input_event.label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, input_event.label);
             var pointer = (if (normalizedInput(self, input_event)) |program| input_composition.pointerEvent(program, input_event) else canvasWidgetPointerEventFromGpuInput(input_event)) orelse return null;
             const index = runtimeFindViewIndex(self, input_event.window_id, input_event.label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
@@ -203,7 +203,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
 
         pub fn routeCanvasWidgetKeyboardInput(self: *const Runtime, input_event: GpuSurfaceInputEvent, output: []canvas.WidgetEventRouteEntry) anyerror!?CanvasWidgetKeyboardEvent {
             try validateRuntimeViewParent(self, input_event.window_id);
-            try validateViewLabel(input_event.label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, input_event.label);
             const index = runtimeFindViewIndex(self, input_event.window_id, input_event.label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             if (!self.views[index].focused) return null;
@@ -236,7 +236,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
 
         pub fn routeCanvasWidgetTextInput(self: *const Runtime, input_event: GpuSurfaceInputEvent, output: []canvas.WidgetEventRouteEntry) anyerror!?CanvasWidgetKeyboardEvent {
             try validateRuntimeViewParent(self, input_event.window_id);
-            try validateViewLabel(input_event.label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, input_event.label);
             const index = runtimeFindViewIndex(self, input_event.window_id, input_event.label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             if (!self.views[index].focused) return null;
@@ -291,7 +291,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
         pub fn routeCanvasWidgetFileDrop(self: *const Runtime, drop: platform.FileDropEvent, output: []canvas.WidgetEventRouteEntry) anyerror!?CanvasWidgetFileDropEvent {
             try validateRuntimeViewParent(self, drop.window_id);
             if (drop.view_label.len == 0 or drop.paths.len == 0) return null;
-            try validateViewLabel(drop.view_label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, drop.view_label);
             const point = drop.point orelse return null;
             const index = runtimeFindViewIndex(self, drop.window_id, drop.view_label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
@@ -313,7 +313,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
 
         pub fn routeCanvasWidgetDragInput(self: *Runtime, input_event: GpuSurfaceInputEvent, output: []canvas.WidgetEventRouteEntry) anyerror!?CanvasWidgetDragEvent {
             try validateRuntimeViewParent(self, input_event.window_id);
-            try validateViewLabel(input_event.label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, input_event.label);
             const index = runtimeFindViewIndex(self, input_event.window_id, input_event.label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             const previous_render_state = self.views[index].canvasWidgetRenderState();
@@ -481,7 +481,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
             if (drag_policy.decide(policy, .{ .stage = .escape, .phase = if (input_event.kind == .key_down) 0 else 4, .facts = @intFromBool(if (normalizedInput(self, input_event)) |program| program.has(2) else canvasWidgetEscapeKey(input_event.key)), .modifiers = drag_policy.modifiers(input_event.modifiers) }) == 0) return null;
 
             try validateRuntimeViewParent(self, input_event.window_id);
-            try validateViewLabel(input_event.label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, input_event.label);
             const index = runtimeFindViewIndex(self, input_event.window_id, input_event.label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             const source_id = self.views[index].canvas_widget_drag_source_id;

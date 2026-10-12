@@ -17,7 +17,6 @@ const runtime_automation_widget_dispatch = @import("automation_widget_dispatch.z
 const runtime_gpu_surface_events = @import("gpu_surface_events.zig");
 const widget_bridge = @import("widget_bridge.zig");
 
-const validateViewLabel = validation.validateViewLabel;
 const max_canvas_widget_nodes_per_view = canvas_limits.max_canvas_widget_nodes_per_view;
 const max_canvas_widget_semantics_per_view = canvas_limits.max_canvas_widget_semantics_per_view;
 const max_canvas_widget_text_bytes_per_view = canvas_limits.max_canvas_widget_text_bytes_per_view;
@@ -55,7 +54,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
     return struct {
         pub fn setCanvasWidgetLayout(self: *Runtime, window_id: platform.WindowId, label: []const u8, layout: canvas.WidgetLayoutTree) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             if (layout.nodes.len > max_canvas_widget_nodes_per_view) return error.WidgetNodeLimitReached;
@@ -255,7 +254,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
 
         pub fn canvasWidgetLayout(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror!canvas.WidgetLayoutTree {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             return self.views[index].widgetLayoutTree();
@@ -263,7 +262,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
 
         pub fn canvasWidgetSemantics(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror![]const canvas.WidgetSemanticsNode {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             return self.views[index].widgetSemantics();
@@ -277,7 +276,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
             action: runtime_api.CanvasWidgetAccessibilityAction,
         ) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             if (action.id == 0) return error.InvalidCommand;
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
@@ -372,7 +371,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
 
         pub fn stepCanvasWidgetKineticScroll(self: *Runtime, window_id: platform.WindowId, label: []const u8, dt_ms: f32) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
 
@@ -418,7 +417,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
         /// drag tracks the pointer and must re-wrap live.
         pub fn startCanvasWidgetLayoutTween(self: *Runtime, window_id: platform.WindowId, label: []const u8, tween: canvas.CanvasWidgetLayoutTween) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             try startCanvasWidgetLayoutTweenForView(self, index, tween, true);
@@ -1005,7 +1004,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
 
         pub fn setCanvasWidgetDesignTokens(self: *Runtime, window_id: platform.WindowId, label: []const u8, tokens: canvas.DesignTokens) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             if (std.meta.eql(self.views[index].widget_tokens, tokens)) return self.views[index].info();
@@ -1020,7 +1019,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
 
         pub fn canvasWidgetDesignTokens(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror!canvas.DesignTokens {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             return self.views[index].widget_tokens;
@@ -1028,7 +1027,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
 
         pub fn canvasWidgetTextGeometry(self: *const Runtime, window_id: platform.WindowId, label: []const u8, id: canvas.ObjectId) anyerror!canvas.WidgetTextGeometry {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             if (id == 0) return error.InvalidCommand;
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
@@ -1039,7 +1038,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
 
         pub fn editCanvasWidgetText(self: *Runtime, window_id: platform.WindowId, label: []const u8, id: canvas.ObjectId, edit: canvas.TextInputEvent) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             if (id == 0) return error.InvalidCommand;
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;

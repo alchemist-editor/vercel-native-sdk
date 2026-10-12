@@ -13,8 +13,7 @@ const security = @import("../security/root.zig");
 
 const max_command_id_bytes = validation.max_command_id_bytes;
 const isMainWebViewLabel = validation.isMainWebViewLabel;
-const validateWebViewLabel = validation.validateWebViewLabel;
-const validateChildWebViewLabel = validation.validateChildWebViewLabel;
+
 const jsonStringField = bridge_payload.jsonStringField;
 const jsonNumberField = bridge_payload.jsonNumberField;
 const jsonIntegerField = bridge_payload.jsonIntegerField;
@@ -411,7 +410,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             const transparent = jsonBoolField(payload, "transparent") orelse false;
             const bridge_enabled = jsonBoolField(payload, "bridge") orelse false;
             try WindowViewMethods.validateWebViewParent(self, window_id);
-            try validateChildWebViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 2, label);
             try WindowViewMethods.validateWebViewUrl(self, url);
             if (WindowViewMethods.findWebViewIndex(self, window_id, label) != null) return error.DuplicateWebViewLabel;
             if (WindowViewMethods.viewLabelExists(self, window_id, label)) return error.DuplicateViewLabel;
@@ -446,7 +445,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             const window_id = try webViewWindowIdFromJson(payload, source_window_id);
             const webview_frame = try webViewFrameFromJson(payload);
             try WindowViewMethods.validateWebViewParent(self, window_id);
-            try validateWebViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             if (isMainWebViewLabel(label)) {
                 const window_index = WindowViewMethods.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
                 try self.options.platform.services.setWebViewFrame(window_id, label, webview_frame);
@@ -470,7 +469,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             const url = jsonStringField(payload, "url", &storage) orelse return error.MissingWebViewUrl;
             const window_id = try webViewWindowIdFromJson(payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
-            try validateWebViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             try WindowViewMethods.validateWebViewUrl(self, url);
             if (isMainWebViewLabel(label)) return error.InvalidWebViewOptions;
             const webview_index = WindowViewMethods.findWebViewIndex(self, window_id, label) orelse return error.WebViewNotFound;
@@ -488,7 +487,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             if (zoom < 0.25 or zoom > 5.0) return error.InvalidWebViewOptions;
             const window_id = try webViewWindowIdFromJson(payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
-            try validateWebViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             if (isMainWebViewLabel(label)) {
                 const window_index = WindowViewMethods.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
                 try self.options.platform.services.setWebViewZoom(window_id, label, zoom);
@@ -507,7 +506,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             const label = jsonStringField(payload, "label", &storage) orelse "webview";
             const window_id = try webViewWindowIdFromJson(payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
-            try validateWebViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             const layer = try webViewLayerFromJson(payload);
             if (isMainWebViewLabel(label)) {
                 const window_index = WindowViewMethods.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
@@ -527,7 +526,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             const label = jsonStringField(payload, "label", &storage) orelse "webview";
             const window_id = try webViewWindowIdFromJson(payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
-            try validateWebViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             if (isMainWebViewLabel(label)) return error.InvalidWebViewOptions;
             const webview_index = WindowViewMethods.findWebViewIndex(self, window_id, label) orelse return error.WebViewNotFound;
             var closed_info = self.webviews[webview_index];

@@ -530,6 +530,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 stamped.font_registry_policy = core.nativeWindowPolicy;
                 if (options.shell_coordination_policy != null) @panic("TsUiApp owns shell_coordination_policy - remove custom shell coordination wiring");
                 stamped.shell_coordination_policy = core.nativeWindowPolicy;
+                if (options.shell_admission_policy != null) @panic("TsUiApp owns shell_admission_policy - remove custom shell admission wiring");
+                stamped.shell_admission_policy = core.nativeWindowPolicy;
                 if (options.command_policy != null) @panic("TsUiApp owns command_policy - remove custom command wiring");
                 stamped.command_policy = core.nativeWindowPolicy;
                 if (options.text_cache_policy != null) @panic("TsUiApp owns text_cache_policy - remove custom text cache wiring");

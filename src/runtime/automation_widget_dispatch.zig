@@ -23,7 +23,6 @@ const parseAutomationDropPaths = automation_commands.parseAutomationDropPaths;
 const automationInputTimestampNs = runtime_clock.automationInputTimestampNs;
 const canvasWidgetInteractionTargetExists = canvas_widget_runtime.canvasWidgetInteractionTargetExists;
 const canvasWidgetSelectableTargetExists = canvas_widget_runtime.canvasWidgetSelectableTargetExists;
-const validateViewLabel = validation.validateViewLabel;
 
 pub fn RuntimeAutomationWidgetDispatch(comptime Runtime: type) type {
     return struct {
@@ -218,7 +217,7 @@ pub fn RuntimeAutomationWidgetDispatch(comptime Runtime: type) type {
         }
 
         fn widgetContextMenuTargetViewIndex(self: *Runtime, item: platform.WidgetContextMenuActionEvent) anyerror!usize {
-            try validateViewLabel(item.label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, item.label);
             const window_index = runtimeFindWindowIndexById(self, item.window_id) orelse return error.WindowNotFound;
             if (!self.windows[window_index].info.open) return error.WindowNotFound;
             const view_index = find: {
@@ -858,7 +857,7 @@ pub fn RuntimeAutomationWidgetDispatch(comptime Runtime: type) type {
         /// per window, and for hand-rolled duplicates the first open
         /// match in window order wins, deterministically.
         pub fn automationGpuSurfaceViewIndexByLabel(self: *Runtime, view_label: []const u8) anyerror!usize {
-            try validateViewLabel(view_label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, view_label);
             for (self.views[0..self.view_count], 0..) |*view, index| {
                 if (!view.open or view.kind != .gpu_surface) continue;
                 if (!std.mem.eql(u8, view.label, view_label)) continue;

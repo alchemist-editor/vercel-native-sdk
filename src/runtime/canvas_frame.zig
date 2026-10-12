@@ -134,7 +134,6 @@ const CanvasPacketCurrentCommand = struct {
 // `computeCanvasPacketPatchStats` and `writeCanvasPacketPatchBinary` on
 // the same thread — the same contract the statics carried.
 
-const validateViewLabel = validation.validateViewLabel;
 const canvasRenderAnimationStartNsForView = runtime_view.canvasRenderAnimationStartNsForView;
 const canvas_frame_log = std.log.scoped(.zero_canvas_frame);
 
@@ -150,7 +149,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
     return struct {
         pub fn setCanvasDisplayList(self: *Runtime, window_id: platform.WindowId, label: []const u8, display_list: canvas.DisplayList) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             var canvas_changes: [max_canvas_diff_changes_per_view]canvas.DiffChange = undefined;
@@ -167,7 +166,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn canvasDisplayList(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror!canvas.DisplayList {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             return self.views[index].canvasDisplayList();
@@ -175,7 +174,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn setCanvasRenderAnimations(self: *Runtime, window_id: platform.WindowId, label: []const u8, animations: []const canvas.CanvasRenderAnimation) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             const inert = if (self.render_override_policy) |owner|
@@ -223,7 +222,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn clearCanvasRenderAnimations(self: *Runtime, window_id: platform.WindowId, label: []const u8) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             const inert = if (self.render_override_policy) |owner|
@@ -239,7 +238,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn canvasRenderAnimations(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror![]const canvas.CanvasRenderAnimation {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             return self.views[index].canvasRenderAnimations();
@@ -247,7 +246,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn canvasRenderAnimationStartNs(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror!u64 {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             return canvasRenderAnimationStartNsForView(&self.views[index]);
@@ -255,7 +254,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn canvasFramePlan(self: *const Runtime, window_id: platform.WindowId, label: []const u8, previous: ?canvas.DisplayList, options: canvas.CanvasFrameOptions, storage: canvas.CanvasFrameStorage) anyerror!canvas.CanvasFrame {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
 
@@ -272,7 +271,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn nextCanvasFrame(self: *Runtime, window_id: platform.WindowId, label: []const u8, options: canvas.CanvasFrameOptions, storage: canvas.CanvasFrameStorage) anyerror!canvas.CanvasFrame {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             return try planCanvasFrameForView(self, index, options, storage, true);
@@ -280,7 +279,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn nextCanvasGpuPacket(self: *Runtime, window_id: platform.WindowId, label: []const u8, options: canvas.CanvasFrameOptions, storage: canvas.CanvasFrameStorage, output: []canvas.CanvasGpuCommand) anyerror!canvas.CanvasGpuPacket {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             const canvas_frame = try planCanvasFrameForView(self, index, options, storage, true);
@@ -316,7 +315,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             // before uploading any packet image resources); callers that
             // offer a pixel fallback handle UnsupportedService as usual.
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const view_index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[view_index].kind != .gpu_surface) return error.InvalidViewOptions;
             if (!canvasGpuPacketRequestedWithPolicy(self, window_id, label, options.render_cache_policy orelse self.render_cache_policy)) return error.UnsupportedService;
@@ -1132,7 +1131,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             render_memo: ?*canvas.ReferenceRenderMemo,
         ) anyerror!CanvasScreenshot {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
 
@@ -1167,7 +1166,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             scale: ?f32,
         ) anyerror!CanvasPixelSize {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             const screenshot = canvasScreenshotOptions(&self.views[index], scale, self.render_cache_policy);
@@ -1653,14 +1652,14 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn gpuSurfaceFrame(self: *const Runtime, window_id: platform.WindowId, label: []const u8) anyerror!platform.GpuFrame {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             return self.views[index].info().gpuFrame() orelse error.InvalidViewOptions;
         }
 
         pub fn setCanvasFrameBudget(self: *Runtime, window_id: platform.WindowId, label: []const u8, budget: canvas.CanvasFrameBudget) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             self.views[index].canvas_frame_budget = budget;
@@ -1670,7 +1669,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
 
         pub fn setGpuSurfaceInputLatencyBudget(self: *Runtime, window_id: platform.WindowId, label: []const u8, budget_ns: u64) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             self.views[index].gpu_input_latency_budget_ns = budget_ns;

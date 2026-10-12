@@ -27,6 +27,7 @@
   "src/image_registry.ts",
   "src/font_registry.ts",
   "src/shell_coordination.ts",
+  "src/shell_admission.ts",
   "src/render_animation_lifecycle.ts",
   "src/motion_sampling.ts",
   "src/vector_raster.ts",

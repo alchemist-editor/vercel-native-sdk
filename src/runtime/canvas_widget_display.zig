@@ -19,7 +19,7 @@ const CanvasWidgetToggleAnimation = runtime_view.CanvasWidgetToggleAnimation;
 const CanvasDisplayListScratch = runtime_view.CanvasDisplayListScratch;
 const max_canvas_commands_per_view = canvas_limits.max_canvas_commands_per_view;
 const max_canvas_diff_changes_per_view = canvas_limits.max_canvas_diff_changes_per_view;
-const validateViewLabel = validation.validateViewLabel;
+
 const canvasRenderAnimationStartNsForView = runtime_view.canvasRenderAnimationStartNsForView;
 const canvasWidgetKineticScrollFrameMs = canvas_widget_runtime.canvasWidgetKineticScrollFrameMs;
 const canvasWidgetSemanticParentId = widget_bridge.canvasWidgetSemanticParentId;
@@ -40,7 +40,7 @@ pub fn RuntimeCanvasWidgetDisplay(comptime Runtime: type) type {
 
         pub fn emitCanvasWidgetDisplayListWithChrome(self: *Runtime, window_id: platform.WindowId, label: []const u8, tokens: canvas.DesignTokens, chrome: CanvasWidgetDisplayListChrome) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             if (!std.meta.eql(self.views[index].widget_tokens, tokens)) {
@@ -54,7 +54,7 @@ pub fn RuntimeCanvasWidgetDisplay(comptime Runtime: type) type {
 
         pub fn emitCanvasWidgetDisplayListWithStoredTokensAndChrome(self: *Runtime, window_id: platform.WindowId, label: []const u8, chrome: CanvasWidgetDisplayListChrome) anyerror!platform.ViewInfo {
             try validateRuntimeViewParent(self, window_id);
-            try validateViewLabel(label);
+            try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 0, label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
 
