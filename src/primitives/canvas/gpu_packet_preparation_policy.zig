@@ -297,6 +297,11 @@ pub fn edits(current: anytype, keys: []const u64, fingerprints: []const u64, mat
     return .{ .upsert_count = word(result, 12), .evict_count = word(result, 16) };
 }
 pub fn gather(commands: []const canvas.RenderCommand, bounds: @import("geometry").RectF, current: anytype, policy: Policy) ?usize {
+    return gatherMaterialized(commands, bounds, current, null, policy);
+}
+/// Preserve the complete compiled payloads through serialization. Their slices
+/// borrow the render plan; the caller owns the materialized command storage.
+pub fn gatherMaterialized(commands: []const canvas.RenderCommand, bounds: @import("geometry").RectF, current: anytype, materialized: ?[]gpu.CanvasGpuCommand, policy: Policy) ?usize {
     const capacity = @min(commands.len, current.len);
     const packets = allocator.alloc(gpu.CanvasGpuCommand, capacity) catch @panic("packet gather allocation failed");
     defer allocator.free(packets);
@@ -312,5 +317,9 @@ pub fn gather(commands: []const canvas.RenderCommand, bounds: @import("geometry"
         .render_index = @intCast(command.command_index),
         .bounds = command.bounds,
     };
+    if (materialized) |storage| {
+        if (storage.len < packet.commands.len) @panic("retained command storage mismatch");
+        @memcpy(storage[0..packet.commands.len], packet.commands);
+    }
     return packet.commands.len;
 }

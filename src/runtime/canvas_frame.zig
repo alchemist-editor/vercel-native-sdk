@@ -58,7 +58,7 @@ const max_canvas_text_layouts_per_view = canvas_limits.max_canvas_text_layouts_p
 const max_canvas_text_layout_lines_per_view = canvas_limits.max_canvas_text_layout_lines_per_view;
 const max_canvas_retained_packet_commands_per_view = canvas_limits.max_canvas_retained_packet_commands_per_view;
 // The frame planner's per-thread scratch behind one lazily
-// heap-allocated pointer (~1.8 MiB that would otherwise sit in the
+// heap-allocated pointer (the fixed arrays would otherwise sit in the
 // static TLS template every OS thread's loader clones): the text-layout
 // planning arrays plus the packet patch-derivation arrays declared with
 // their contract below. Init happens on a thread's first frame plan —
@@ -73,6 +73,7 @@ const CanvasFrameScratch = struct {
     text_layout_cache_entries: [max_canvas_text_layouts_per_view]canvas.TextLayoutCacheEntry,
     text_layout_cache_actions: [max_canvas_text_layouts_per_view * 2]canvas.TextLayoutCacheAction,
     packet_current: [max_canvas_retained_packet_commands_per_view]CanvasPacketCurrentCommand,
+    packet_commands: [max_canvas_retained_packet_commands_per_view]canvas.CanvasGpuCommand,
     packet_current_sort: [max_canvas_retained_packet_commands_per_view]u32,
     packet_baseline_sort: [max_canvas_retained_packet_commands_per_view]u32,
     packet_baseline_matched: [max_canvas_retained_packet_commands_per_view]bool,
@@ -569,7 +570,158 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
         /// path; `refusal` names the reason to record when a presenter
         /// exists but declines (the caller knows whether the packet was
         /// representable — this helper does not).
+        /// Execute a compiled presentation program. All capability outcomes are
+        /// returned to its owner before mutating the retained baseline.
         fn presentCanvasPacketEncoded(
+            self: *Runtime,
+            window_id: platform.WindowId,
+            label: []const u8,
+            canvas_frame: canvas.CanvasFrame,
+            packet: canvas.CanvasGpuPacket,
+            clear_color: canvas.Color,
+            packet_bytes_buffer: []u8,
+            refusal: CanvasPacketRefusal,
+        ) anyerror!bool {
+            const owner = canvas_frame.gpu_plan_policy orelse
+                return referencePresentCanvasPacketEncoded(self, window_id, label, canvas_frame, packet, clear_color, packet_bytes_buffer, refusal);
+            const policy = canvas.GpuPresentationPolicy;
+            const services = self.options.platform.services;
+            const view_index = runtimeFindViewIndex(self, window_id, label);
+            var facts = policy.Facts{ .binary = services.present_gpu_surface_packet_binary_fn != null, .json = services.present_gpu_surface_packet_fn != null, .surface = packet.surface_size, .scale = packet.scale };
+            if (view_index) |index| {
+                const view = &self.views[index];
+                facts.baseline_valid = view.canvas_packet_baseline_valid;
+                facts.baseline_pixels = view.canvas_packet_baseline_pixels;
+                facts.baseline_surface = view.canvas_packet_baseline_surface_size;
+                facts.baseline_scale = view.canvas_packet_baseline_scale;
+                facts.generation = view.canvas_packet_generation;
+            }
+            var base = platform.GpuSurfacePacket{
+                .window_id = window_id,
+                .label = label,
+                .frame_index = packet.frame_index,
+                .timestamp_ns = packet.timestamp_ns,
+                .surface_size = packet.surface_size,
+                .scale_factor = packet.scale,
+                .clear_color_rgba8 = canvasColorToRgba8(clear_color),
+                .requires_render = packet.requiresRender(),
+                .command_count = packet.commandCount(),
+                .cache_action_count = packet.cacheActionCount(),
+                .cached_resource_command_count = packet.cachedResourceCommandCount(),
+                .unsupported_command_count = packet.unsupported_command_count,
+                .representable = packet.fullyRepresentable(),
+            };
+            const binary_buffer = packet_bytes_buffer[0..@min(packet_bytes_buffer.len, platform.max_gpu_surface_packet_binary_bytes)];
+            const json_buffer = packet_bytes_buffer[0..@min(packet_bytes_buffer.len, platform.max_gpu_surface_packet_json_bytes)];
+            var current: ?[]const CanvasPacketCurrentCommand = null;
+            var stats: CanvasPacketPatchStats = .{};
+            var phase: policy.Phase = .start;
+            var outcome: policy.Outcome = .ok;
+            var patch_begin: @TypeOf(self.frame_profile.begin()) = undefined;
+            while (true) {
+                const program = policy.plan(facts, phase, outcome, owner);
+                if (phase == .gathered and program.instruction != .edits) self.frame_profile.end(.patch, patch_begin);
+                if (program.invalidate_baseline) if (view_index) |index| {
+                    self.views[index].canvas_packet_baseline_valid = false;
+                };
+                if (program.patch_refused) recordCanvasPacketFallback(self, window_id, label, .{ .reason = .patch_refused });
+                if (program.adopt_baseline) {
+                    const view = &self.views[view_index.?];
+                    adoptCanvasPacketBaseline(view, current.?, packet);
+                    switch (phase) {
+                        .patch => {
+                            view.gpu_present_packet_mode = .patch;
+                            view.gpu_present_patch_bytes = base.binary.len;
+                            view.gpu_present_patch_upsert_count = stats.upsert_count;
+                            view.gpu_present_patch_evict_count = stats.evict_count;
+                        },
+                        .full => {
+                            view.canvas_packet_generation = program.generation;
+                            recordCanvasPacketFullPresent(view);
+                        },
+                        else => @panic("invalid GPU baseline instruction"),
+                    }
+                }
+                if (program.full_present) if (view_index) |index| {
+                    recordCanvasPacketFullPresent(&self.views[index]);
+                };
+                switch (program.instruction) {
+                    .gather => {
+                        patch_begin = self.frame_profile.begin();
+                        current = if (view_index != null) gatherCanvasPacketCurrentCommands(canvas_frame) else null;
+                        facts.current = current != null;
+                        facts.count = if (current) |commands| commands.len else 0;
+                        phase = .gathered;
+                    },
+                    .edits => {
+                        stats = computeCanvasPacketPatchStats(&self.views[view_index.?], current.?, owner);
+                        facts.upserts = stats.upsert_count;
+                        self.frame_profile.end(.patch, patch_begin);
+                        phase = .edits;
+                    },
+                    .patch, .full, .binary, .json => {
+                        phase = switch (program.instruction) {
+                            .patch => .patch,
+                            .full => .full,
+                            .binary => .binary,
+                            .json => .json,
+                            else => unreachable,
+                        };
+                        if (program.instruction == .full) facts.generation = program.generation;
+                        var writer = std.Io.Writer.fixed(if (program.instruction == .json) json_buffer else binary_buffer);
+                        const encode_begin = self.frame_profile.begin();
+                        const encoded = switch (program.instruction) {
+                            .patch => writeCanvasPacketPatchBinary(&self.views[view_index.?], canvas_frame, packet, current.?, stats, &writer),
+                            .full => writeCanvasPacketFullBinary(canvas_frame, packet, current.?, facts.generation, &writer),
+                            .binary => packet.writeBinary(&writer),
+                            .json => packet.writeJson(&writer),
+                            else => unreachable,
+                        };
+                        if (encoded) |_| {} else |_| {
+                            outcome = .overflow;
+                            continue;
+                        }
+                        self.frame_profile.end(.encode, encode_begin);
+                        if (program.instruction == .json) {
+                            base.json = writer.buffered();
+                            base.binary = "";
+                        } else {
+                            base.binary = writer.buffered();
+                            base.json = "";
+                        }
+                        base.command_count = switch (program.instruction) {
+                            .patch, .full => current.?.len,
+                            else => packet.commandCount(),
+                        };
+                        const present_begin = self.frame_profile.begin();
+                        const presented = if (program.instruction == .json) services.presentGpuSurfacePacket(base) else services.presentGpuSurfacePacketBinary(base);
+                        if (presented) |_| {} else |err| switch (err) {
+                            error.UnsupportedService => {
+                                outcome = .unsupported;
+                                continue;
+                            },
+                            else => return err,
+                        }
+                        self.frame_profile.end(.present, present_begin);
+                    },
+                    .done => return true,
+                    .fallback => {
+                        const reason: CanvasPacketRefusal = switch (program.refusal) {
+                            .missing_service => .{ .reason = .missing_service },
+                            .binary_overflow => .{ .reason = .binary_overflow, .needed_bytes = if (phase == .full) canvasPacketFullBinaryByteSize(canvas_frame, packet, current.?, facts.generation) else canvasPacketEncodedByteSize(packet, .binary), .limit_bytes = binary_buffer.len },
+                            .json_overflow => .{ .reason = .json_overflow, .needed_bytes = canvasPacketEncodedByteSize(packet, .json), .limit_bytes = json_buffer.len },
+                            .original => refusal,
+                            .none => @panic("missing GPU refusal instruction"),
+                        };
+                        recordCanvasPacketFallback(self, window_id, label, reason);
+                        return false;
+                    },
+                }
+                outcome = .ok;
+            }
+        }
+
+        fn referencePresentCanvasPacketEncoded(
             self: *Runtime,
             window_id: platform.WindowId,
             label: []const u8,
@@ -1505,7 +1657,7 @@ fn gatherCanvasPacketCurrentCommandsFromPlan(render_commands: []const canvas.Ren
     const full_bounds = canvasFullRepaintBounds(surface_size, render_bounds) orelse return null;
     const scratch = canvas_frame_scratch.get();
     if (policy) |owner| {
-        const count = canvas.GpuPacketPreparationPolicy.gather(render_commands, full_bounds, &scratch.packet_current, owner) orelse return null;
+        const count = canvas.GpuPacketPreparationPolicy.gatherMaterialized(render_commands, full_bounds, &scratch.packet_current, &scratch.packet_commands, owner) orelse return null;
         return scratch.packet_current[0..count];
     }
     var count: usize = 0;
@@ -1515,6 +1667,7 @@ fn gatherCanvasPacketCurrentCommandsFromPlan(render_commands: []const canvas.Ren
         if (!gpu_command.supported()) return null;
         if (count >= scratch.packet_current.len) return null;
         const fingerprint = canvas.canvasGpuCommandFingerprint(gpu_command);
+        scratch.packet_commands[count] = gpu_command;
         scratch.packet_current[count] = .{
             .key = canvas.canvasGpuPacketCommandKey(gpu_command, fingerprint),
             .fingerprint = fingerprint,
@@ -1724,10 +1877,9 @@ fn writeCanvasPacketPatchBinary(
         if (!flag) try writer.writeInt(u64, baseline_keys[index], .little);
     }
     try writer.writeInt(u32, @intCast(stats.upsert_count), .little);
-    const render_commands = canvas_frame.render_plan.commands;
     for (current, 0..) |entry, index| {
         if (!upserts[index]) continue;
-        const command = canvas.canvasGpuCommandFromRenderCommand(render_commands[entry.render_index], entry.render_index);
+        const command = scratch.packet_commands[index];
         try canvas.writeCanvasGpuCommandBinaryKeyed(entry.key, command, writer);
     }
     try writer.writeInt(u32, @intCast(current.len), .little);
@@ -1750,9 +1902,9 @@ fn writeCanvasPacketFullBinary(
     // Load-action wire code 2 = clear (see serialization.zig's layout).
     try canvas.writeCanvasGpuPacketBinaryHeader(2, generation, scissor, &.{}, packet.images, packet.image_actions, writer);
     try writer.writeInt(u32, @intCast(current.len), .little);
-    const render_commands = canvas_frame.render_plan.commands;
-    for (current) |entry| {
-        const command = canvas.canvasGpuCommandFromRenderCommand(render_commands[entry.render_index], entry.render_index);
+    const scratch = canvas_frame_scratch.get();
+    for (current, 0..) |entry, index| {
+        const command = scratch.packet_commands[index];
         try canvas.writeCanvasGpuCommandBinaryKeyed(entry.key, command, writer);
     }
 }
