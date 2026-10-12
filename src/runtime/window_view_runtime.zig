@@ -653,7 +653,13 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
             // surface — cancellation zeroes the preedit length before
             // arming the grace, so both states gate the clear). The
             // buffer stays allocated; only the ownership state clears.
-            if ((self.targetless_ime_preedit_len > 0 or self.targetless_ime_commit_grace) and
+            const composition = @import("input_composition_policy.zig");
+            const view = &self.views[index];
+            const input = platform.GpuSurfaceInputEvent{ .window_id = view.window_id, .label = view.label, .kind = .ime_cancel_composition };
+            if (composition.plan(view.canvas_widget_surface_scope_policy, .retire, input, composition.observations(self, view))) |program| {
+                if (program.has(512)) self.targetless_ime_preedit_len = 0;
+                if (program.has(2048)) self.targetless_ime_commit_grace = false;
+            } else if ((self.targetless_ime_preedit_len > 0 or self.targetless_ime_commit_grace) and
                 self.targetless_ime_preedit_window == self.views[index].window_id and
                 std.mem.eql(
                     u8,

@@ -144,6 +144,16 @@ pub const CanvasWidgetClaimedKeyGrace = enum {
 /// the one focused now, so the grace and its owner pin die at blur (the
 /// target-less twin too, when the blurred view owns it).
 pub fn clearImeGraceOnViewBlur(runtime: anytype, view: *RuntimeView) void {
+    const composition = @import("input_composition_policy.zig");
+    const input = platform.GpuSurfaceInputEvent{ .window_id = view.window_id, .label = view.label, .kind = .ime_cancel_composition };
+    if (composition.plan(view.canvas_widget_surface_scope_policy, .retire, input, composition.observations(runtime, view))) |program| {
+        composition.installWidget(view, program);
+        view.canvas_widget_tab_input_focus_entry_held = false;
+        view.canvas_widget_terminal_paste_v_held = false;
+        if (program.has(512)) runtime.targetless_ime_preedit_len = 0;
+        if (program.has(2048)) runtime.targetless_ime_commit_grace = false;
+        return;
+    }
     // The owner pin clears UNCONDITIONALLY, not only when a grace is
     // armed: an active (never-cancelled) composition's owner surviving
     // a view blur would redirect post-refocus input to the stale editor

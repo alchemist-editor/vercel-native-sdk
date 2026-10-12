@@ -1312,6 +1312,13 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const input_composition_policy = @import("input_composition_policy.zig");
+    pub const clearInputCompositionOnBlur = runtime_view.clearImeGraceOnViewBlur;
+    pub const referenceInputPointer = canvas_frame_helpers.canvasWidgetPointerEventFromGpuInput;
+    pub const referenceInputKeyboard = canvas_frame_helpers.canvasWidgetKeyboardEventFromGpuInput;
+    pub const referenceInputText = canvas_frame_helpers.canvasWidgetTextInputEventFromGpuInput;
+    pub const referenceInputEscape = canvas_frame_helpers.canvasWidgetEscapeKey;
+    pub const referenceInputCommandModifier = canvas_frame_helpers.gpuInputHasTextCommandModifier;
     pub const scene_observation_policy = @import("canvas_scene_observation_policy.zig");
     pub const presentation_lifecycle_policy = @import("canvas_presentation_lifecycle_policy.zig");
     pub const referencePresentationFallback = @import("canvas_frame.zig").referencePresentationFallback;

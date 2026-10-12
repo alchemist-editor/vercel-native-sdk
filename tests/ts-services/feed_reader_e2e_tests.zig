@@ -8124,11 +8124,18 @@ test "compiled selection press consumers match native hits, exact identities and
 }
 
 test "compiled selection press decisions own the consumer and preserve borrowed routes" {
+    core.rt.frameReset();
+    defer core.rt.frameReset();
     const Spy = struct {
         var decision: u8 = 0;
         var calls: usize = 0;
+        var normalization_calls: usize = 0;
         var request: [5]u8 = undefined;
         fn policy(input: []const u8, output: []u8) usize {
+            if (input[0] != 32) {
+                if (input[0] == 78 and input[2] == 0) normalization_calls += 1;
+                return core.nativeSurfaceScopePolicy(input, output);
+            }
             std.debug.assert(input.len == request.len and output.len == 1);
             @memcpy(&request, input);
             output[0] = decision;
@@ -8150,6 +8157,7 @@ test "compiled selection press decisions own the consumer and preserve borrowed 
     harness.runtime.views[0].canvas_widget_surface_scope_policy = Spy.policy;
     var entries: [canvas.max_widget_depth * 2]canvas.WidgetEventRouteEntry = undefined;
     Spy.calls = 0;
+    Spy.normalization_calls = 0;
     for ([_]u8{ 0, 1 }) |decision| {
         Spy.decision = decision;
         const event = (try harness.runtime.routeCanvasWidgetPointerInput(.{ .window_id = 1, .label = "canvas", .kind = .pointer_up, .x = 30, .y = 30 }, &entries)).?;
@@ -8160,6 +8168,7 @@ test "compiled selection press decisions own the consumer and preserve borrowed 
         try std.testing.expectEqualSlices(u8, &.{ 32, 3, 39, 26, 0 }, &Spy.request);
     }
     try std.testing.expectEqual(@as(usize, 2), Spy.calls);
+    try std.testing.expectEqual(@as(usize, 2), Spy.normalization_calls);
 }
 
 test "compiled keyboard participation preserves borrowed core bytes and copied decisions" {

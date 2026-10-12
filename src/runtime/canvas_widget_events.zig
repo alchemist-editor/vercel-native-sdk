@@ -1,3 +1,4 @@
+const input_composition = @import("input_composition_policy.zig");
 const drag_policy = @import("canvas_drag_policy.zig");
 const keyboard_focus = @import("canvas_keyboard_focus_policy.zig");
 const std = @import("std");
@@ -60,10 +61,14 @@ pub fn canvasWidgetDragCrossedSlop(delta: geometry.OffsetF) bool {
 
 pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
     return struct {
+        fn normalizedInput(self: *const Runtime, input: GpuSurfaceInputEvent) ?input_composition.Program {
+            const index = runtimeFindViewIndex(self, input.window_id, input.label) orelse return null;
+            return input_composition.plan(self.views[index].canvas_widget_surface_scope_policy, .normalize, input, .{});
+        }
         pub fn routeCanvasWidgetPointerInput(self: *const Runtime, input_event: GpuSurfaceInputEvent, output: []canvas.WidgetEventRouteEntry) anyerror!?CanvasWidgetPointerEvent {
             try validateRuntimeViewParent(self, input_event.window_id);
             try validateViewLabel(input_event.label);
-            var pointer = canvasWidgetPointerEventFromGpuInput(input_event) orelse return null;
+            var pointer = (if (normalizedInput(self, input_event)) |program| input_composition.pointerEvent(program, input_event) else canvasWidgetPointerEventFromGpuInput(input_event)) orelse return null;
             const index = runtimeFindViewIndex(self, input_event.window_id, input_event.label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
             switch (pointer.phase) {
@@ -215,7 +220,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
             // keys select, arrows walk rows. Tree rows (role treeitem)
             // are exempt — their roving-focus keymap is the feature.
             if (canvasWidgetQuietListRowFocus(self, index, focused_id)) return null;
-            const keyboard = canvasWidgetKeyboardEventFromGpuInput(input_event, focused_id) orelse return null;
+            const keyboard = (if (normalizedInput(self, input_event)) |program| input_composition.keyboardEvent(program, input_event, focused_id, false) else canvasWidgetKeyboardEventFromGpuInput(input_event, focused_id)) orelse return null;
 
             const route = try self.views[index].widgetLayoutTree().routeKeyboardEvent(keyboard, output);
             if (route.target == null) return null;
@@ -246,7 +251,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
             // text_input is the sequence's own resolution — the hosts
             // never deliver ordinary typing while a composition is open.
             const ime_owner = self.views[index].canvas_widget_ime_owner_id;
-            const target_id = switch (input_event.kind) {
+            const target_id = if (input_composition.plan(self.views[index].canvas_widget_surface_scope_policy, .target, input_event, input_composition.observations(self, &self.views[index]))) |program| program.target else switch (input_event.kind) {
                 .ime_set_composition, .ime_commit_composition, .ime_cancel_composition, .text_input => id: {
                     if (ime_owner != 0) {
                         if (tree.findById(ime_owner)) |node| {
@@ -264,10 +269,12 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
             // text fall through to the app's target-less `on_text` seam
             // instead of being routed to a widget that drops it — the
             // terminal-with-a-focused-button case.
-            if (tree.findById(target_id)) |node| {
-                if (!canvas.isWidgetTextEntry(node.widget)) return null;
+            if (self.views[index].canvas_widget_surface_scope_policy == null) {
+                if (tree.findById(target_id)) |node| {
+                    if (!canvas.isWidgetTextEntry(node.widget)) return null;
+                }
             }
-            const keyboard = canvasWidgetTextInputEventFromGpuInput(input_event, target_id) orelse return null;
+            const keyboard = (if (normalizedInput(self, input_event)) |program| input_composition.keyboardEvent(program, input_event, target_id, true) else canvasWidgetTextInputEventFromGpuInput(input_event, target_id)) orelse return null;
 
             const route = try tree.routeKeyboardEvent(keyboard, output);
             if (route.target == null) return null;
@@ -470,7 +477,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
         /// the card under the pointer eases back into it.
         pub fn routeCanvasWidgetDragCancelFromKeyboardInput(self: *Runtime, input_event: GpuSurfaceInputEvent, output: []canvas.WidgetEventRouteEntry) anyerror!?CanvasWidgetDragEvent {
             const policy = if (runtimeFindViewIndex(self, input_event.window_id, input_event.label)) |view_index| self.views[view_index].canvas_widget_surface_scope_policy else null;
-            if (drag_policy.decide(policy, .{ .stage = .escape, .phase = if (input_event.kind == .key_down) 0 else 4, .facts = @intFromBool(canvasWidgetEscapeKey(input_event.key)), .modifiers = drag_policy.modifiers(input_event.modifiers) }) == 0) return null;
+            if (drag_policy.decide(policy, .{ .stage = .escape, .phase = if (input_event.kind == .key_down) 0 else 4, .facts = @intFromBool(if (normalizedInput(self, input_event)) |program| program.has(2) else canvasWidgetEscapeKey(input_event.key)), .modifiers = drag_policy.modifiers(input_event.modifiers) }) == 0) return null;
 
             try validateRuntimeViewParent(self, input_event.window_id);
             try validateViewLabel(input_event.label);
@@ -2597,7 +2604,7 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
             const keyboard = canvas.WidgetKeyboardEvent{
                 .phase = .key_down,
                 .key = input_event.key,
-                .modifiers = canvasWidgetKeyboardModifiers(input_event.modifiers),
+                .modifiers = if (normalizedInput(self, input_event)) |program| program.keyboardModifiers() else canvasWidgetKeyboardModifiers(input_event.modifiers),
             };
             const focused_index = self.views[index].canvasWidgetNodeIndexById(self.views[index].canvas_widget_focused_id);
             const action = (if (focused_index) |node_index|
@@ -2734,7 +2741,13 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
             // for a newly focused editor still routes to the canceled one.
             // Host IME cancel events keep their separate converted-commit
             // grace (cancel followed by text_input), handled by GPU routing.
-            if (edit == .cancel_composition and keyboard_event.keyboard.phase == .key_down and
+            var escape_facts = input_composition.observations(self, &self.views[index]);
+            escape_facts.claimed = edit == .cancel_composition;
+            escape_facts.routed_id = target.id;
+            const escape_input = GpuSurfaceInputEvent{ .window_id = keyboard_event.window_id, .label = keyboard_event.view_label, .kind = if (keyboard_event.keyboard.phase == .key_down) .key_down else .text_input };
+            if (input_composition.plan(self.views[index].canvas_widget_surface_scope_policy, .escape, escape_input, escape_facts)) |program| {
+                input_composition.installWidget(&self.views[index], program);
+            } else if (edit == .cancel_composition and keyboard_event.keyboard.phase == .key_down and
                 self.views[index].canvas_widget_ime_owner_id == target.id)
             {
                 self.views[index].canvas_widget_ime_owner_id = 0;
@@ -2941,10 +2954,10 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
         /// focus back on the trigger).
         pub fn dismissCanvasWidgetSurfaceFromKeyboardInput(self: *Runtime, input_event: GpuSurfaceInputEvent) anyerror!canvas.ObjectId {
             if (input_event.kind != .key_down) return 0;
-            const escape = canvasWidgetEscapeKey(input_event.key);
+            const escape = if (normalizedInput(self, input_event)) |program| program.has(2) else canvasWidgetEscapeKey(input_event.key);
             const tab = std.ascii.eqlIgnoreCase(input_event.key, "tab");
             if (!escape and !tab) return 0;
-            const modifiers = canvasWidgetKeyboardModifiers(input_event.modifiers);
+            const modifiers = if (normalizedInput(self, input_event)) |program| program.keyboardModifiers() else canvasWidgetKeyboardModifiers(input_event.modifiers);
             if (modifiers.hasNavigationModifier()) return 0;
             // Shift+Tab is still focus departure; Shift+Escape is not a
             // dismissal chord at all.
@@ -3096,6 +3109,14 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
         /// the clipboard pass later in this input cycle re-arms it when
         /// that fresh down is another terminal Paste.
         pub fn consumeCanvasWidgetTerminalPasteKeyLifetime(self: *Runtime, input_event: GpuSurfaceInputEvent) bool {
+            if (runtimeFindViewIndex(self, input_event.window_id, input_event.label)) |i| {
+                var facts = input_composition.observations(self, &self.views[i]);
+                facts.latch = self.views[i].canvas_widget_terminal_paste_v_held;
+                if (input_composition.plan(self.views[i].canvas_widget_surface_scope_policy, .paste, input_event, facts)) |program| {
+                    if (program.has(2048)) self.views[i].canvas_widget_terminal_paste_v_held = false;
+                    return program.has(8192);
+                }
+            }
             if (input_event.kind != .key_down and input_event.kind != .key_up) return false;
             if (!std.ascii.eqlIgnoreCase(input_event.key, "v")) return false;
             const index = runtimeFindViewIndex(self, input_event.window_id, input_event.label) orelse return false;
