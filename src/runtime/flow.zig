@@ -1,3 +1,4 @@
+const authorization = @import("authorization_policy.zig");
 const std = @import("std");
 const geometry = @import("geometry");
 const trace = @import("trace");
@@ -242,6 +243,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.shell_admission_policy = app.shell_admission_policy;
                     self.system_admission_policy = app.system_admission_policy;
                     self.bridge_descriptor_policy = app.bridge_descriptor_policy;
+                    self.authorization_policy = app.authorization_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
@@ -887,7 +889,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                 self.invalidateFor(.command, null);
                 return;
             }
-            const response = dispatcher.dispatch(message.bytes, .{ .origin = message.origin, .window_id = message.window_id, .webview_label = message.webview_label }, &response_buffer);
+            const response = authorization.dispatch(self.authorization_policy, dispatcher, message.bytes, .{ .origin = message.origin, .window_id = message.window_id, .webview_label = message.webview_label }, &response_buffer);
             try completeBridgeResponse(self, message.window_id, message.webview_label, response);
             self.invalidateFor(.command, null);
             log(self, "bridge.dispatch", "bridge request handled", &.{
@@ -899,7 +901,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
         fn handleAsyncBridgeMessage(self: *Runtime, dispatcher: bridge.Dispatcher, message: platform.BridgeMessage) anyerror!bool {
             const request = bridge.parseRequest(message.bytes) catch return false;
             const handler = dispatcher.async_registry.find(request.command) orelse return false;
-            if (!dispatcher.policy.allows(request.command, message.origin)) {
+            if (!authorization.bridgeAllows(self.authorization_policy, dispatcher.policy, request.command, message.origin)) {
                 var response_buffer: [bridge.max_response_bytes]u8 = undefined;
                 const response = bridge.writeErrorResponse(&response_buffer, request.id, .permission_denied, "Bridge command is not permitted");
                 try completeBridgeResponse(self, message.window_id, message.webview_label, response);

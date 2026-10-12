@@ -1,3 +1,4 @@
+const authorization = @import("authorization_policy.zig");
 const std = @import("std");
 const credentials_store = @import("credentials_store.zig");
 const json = @import("json");
@@ -585,13 +586,7 @@ fn statusItemSlot(self: anytype, status_item_id: platform.StatusItemId) !@TypeOf
 }
 
 fn validateExternalUrl(self: anytype, url: []const u8) !void {
-    if (url.len == 0) return error.InvalidExternalUrl;
-    if (url.len > platform.max_external_url_bytes) return error.ExternalUrlTooLarge;
-    if (!std.mem.startsWith(u8, url, "https://") and !std.mem.startsWith(u8, url, "http://")) return error.InvalidExternalUrl;
-    for (url) |ch| {
-        if (ch <= 0x20 or ch == 0x7f) return error.InvalidExternalUrl;
-    }
-    if (!security.allowsExternalUrl(self.options.security.navigation.external_links, url)) return error.NavigationDenied;
+    return authorization.validateExternalUrl(self.authorization_policy, self.options.security.navigation.external_links, url);
 }
 
 fn copyInto(buffer: []u8, value: []const u8) ![]const u8 {

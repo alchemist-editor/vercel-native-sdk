@@ -1,3 +1,4 @@
+const authorization = @import("authorization_policy.zig");
 const std = @import("std");
 const geometry = @import("geometry");
 const json = @import("json");
@@ -55,6 +56,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
         const Self = @This();
 
         pub fn allowsBuiltinBridgeCommand(self: *Runtime, command: []const u8, origin: []const u8, js_permission: ?[]const u8) bool {
+            if (self.authorization_policy) |compiled| return authorization.builtinAllows(compiled, self.options.builtin_bridge, self.options.security, self.options.js_window_api, command, origin, js_permission);
             var policy = self.options.builtin_bridge;
             if (self.options.security.permissions.len > 0) policy.permissions = self.options.security.permissions;
             if (policy.enabled) return policy.allows(command, origin);

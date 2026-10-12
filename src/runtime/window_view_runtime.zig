@@ -1,3 +1,4 @@
+const authorization = @import("authorization_policy.zig");
 const std = @import("std");
 const geometry = @import("geometry");
 const validation = @import("validation.zig");
@@ -11,7 +12,6 @@ const runtime_view = @import("view.zig");
 const runtime_window_storage = @import("window_storage.zig");
 const view_coordination = @import("view_coordination_policy.zig");
 const platform = @import("../platform/root.zig");
-const security = @import("../security/root.zig");
 
 const isMainWebViewLabel = validation.isMainWebViewLabel;
 
@@ -217,7 +217,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
             if (url.len > platform.max_webview_url_bytes) return error.WebViewUrlTooLarge;
             var origin_buffer: [512]u8 = undefined;
             const origin = try webViewUrlOrigin(self.bridge_descriptor_policy, url, &origin_buffer);
-            if (!security.allowsOrigin(self.options.security.navigation.allowed_origins, origin)) return error.NavigationDenied;
+            if (!authorization.allowsOrigin(self.authorization_policy, self.options.security.navigation.allowed_origins, origin)) return error.NavigationDenied;
         }
 
         pub fn writeWebViewListJson(self: *Runtime, source_window_id: platform.WindowId, output: []u8) ![]const u8 {

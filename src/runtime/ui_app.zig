@@ -29,6 +29,7 @@
 //! false })` so the watch machinery compiles out too). Setting both keeps
 //! the compiled view until the watched file first changes on disk.
 
+const authorization = @import("authorization_policy.zig");
 const std = @import("std");
 const builtin = @import("builtin");
 const geometry = @import("geometry");
@@ -522,6 +523,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             shell_admission_policy: ?*const fn ([]const u8, []u8) usize = null,
             system_admission_policy: ?*const fn ([]const u8, []u8) usize = null,
             bridge_descriptor_policy: ?*const fn ([]const u8, []u8) usize = null,
+            authorization_policy: ?*const fn ([]const u8, []u8) usize = null,
             /// Installed by TsUiApp for compiled command and status policy.
             command_policy: ?*const fn ([]const u8, []u8) usize = null,
             text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -1579,6 +1581,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .shell_admission_policy = self.options.shell_admission_policy,
                 .system_admission_policy = self.options.system_admission_policy,
                 .bridge_descriptor_policy = self.options.bridge_descriptor_policy,
+                .authorization_policy = self.options.authorization_policy,
                 .command_policy = self.options.command_policy,
                 .text_cache_policy = self.options.text_cache_policy,
                 .render_cache_policy = self.options.render_cache_policy,
@@ -1628,7 +1631,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .services = &runtime.options.platform.services,
                 .service = runtime.options.platform.app_info.bundle_id,
                 .permitted = runtime.options.credentials_enabled and
-                    security.hasPermission(runtime.options.security.permissions, security.permission_credentials),
+                    authorization.hasPermission(runtime.authorization_policy, runtime.options.security.permissions, security.permission_credentials),
             });
             if (runtime.options.file_access) |binding| {
                 self.effects.bindFileAccess(binding);
@@ -1638,7 +1641,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 // fake file requests must park without consulting live paths.
                 self.effects.bindFileAccess(.{
                     .roots = &.{},
-                    .permitted = security.hasPermission(runtime.options.security.permissions, security.permission_filesystem),
+                    .permitted = authorization.hasPermission(runtime.authorization_policy, runtime.options.security.permissions, security.permission_filesystem),
                     .enforce = true,
                 });
             }
@@ -6901,7 +6904,7 @@ fn effectsExecuteCapability(context: *anyopaque, name: []const u8, payload: []co
         return output[0..try desktop_files.replyHeaderFor(output, payload, "")];
     }
     if (std.mem.eql(u8, name, "native-sdk.dialog.openDirectory")) {
-        if (!security.hasPermission(runtime.options.security.permissions, security.permission_dialog)) return error.PermissionDenied;
+        if (!authorization.hasPermission(runtime.authorization_policy, runtime.options.security.permissions, security.permission_dialog)) return error.PermissionDenied;
         const title = try reader.field();
         const path = try reader.field();
         try reader.finish();
@@ -6917,7 +6920,7 @@ fn effectsExecuteCapability(context: *anyopaque, name: []const u8, payload: []co
         @memcpy(output[header + 2 ..][0..selected.len], selected);
         return output[0 .. header + 2 + selected.len];
     }
-    if (!security.hasPermission(runtime.options.security.permissions, security.permission_filesystem)) return error.PermissionDenied;
+    if (!authorization.hasPermission(runtime.authorization_policy, runtime.options.security.permissions, security.permission_filesystem)) return error.PermissionDenied;
     if (comptime builtin.os.tag == .macos or builtin.os.tag == .linux or builtin.os.tag == .windows) {
         var threaded = std.Io.Threaded.init(runtime.owned_allocator, .{});
         defer threaded.deinit();
