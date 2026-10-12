@@ -1,4 +1,5 @@
 const std = @import("std");
+const lifecycle = @import("window_lifecycle_policy.zig");
 const geometry = @import("geometry");
 const validation = @import("validation.zig");
 const shell_layout = @import("shell_layout.zig");
@@ -99,6 +100,7 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
         pub const viewTreeHasFocusedDepth = WindowViewRuntimeMethods.viewTreeHasFocusedDepth;
 
         pub fn closeWindow(self: *Runtime, window_id: platform.WindowId) anyerror!void {
+            if (self.window_lifecycle_policy) |policy| return Self.executeWindowCapability(self, policy, .close, window_id);
             const index = Self.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
             // Flip the runtime flag BEFORE the platform call: hosts that
             // run the close delegate synchronously (macOS `performClose`
@@ -143,6 +145,16 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
         /// platform. The journal supplies the outcome; native retains view
         /// ownership and applies the corresponding bookkeeping transition.
         pub fn restoreWindowCapabilityResult(self: *Runtime, label: []const u8, closed: bool) void {
+            if (self.window_lifecycle_policy) |policy| {
+                const program = lifecycle.plan(policy, self, .replay, .{ .label = label, .value = closed });
+                if (program.has(64)) return;
+                const index = program.selected.?;
+                program.apply(&self.windows[index].info);
+                if (program.has(1)) Self.removeWindowRuntimeViews(self, self.windows[index].info.id);
+                if (program.has(4)) Self.setFocusedIndex(self, index) catch return;
+                if (program.has(2)) self.invalidated = true;
+                return;
+            }
             const index = Self.findWindowIndexByLabel(self, label) orelse return;
             if (!self.windows[index].info.open) return;
             self.windows[index].info.hidden = false;
@@ -159,6 +171,7 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
         /// bookkeeping moves: a minimized window stays open and keeps
         /// its views — it comes back from the Dock/taskbar.
         pub fn minimizeWindow(self: *Runtime, window_id: platform.WindowId) anyerror!void {
+            if (self.window_lifecycle_policy) |policy| return Self.executeWindowCapability(self, policy, .minimize, window_id);
             const index = Self.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
             // The same liveness gate as showWindow below: a retained
             // closed slot must not reach the platform (the CEF host
@@ -171,6 +184,7 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
         /// `showWindow` brings it back. This is an app-driven hide, not a
         /// close, so identity and rendered state are retained.
         pub fn hideWindow(self: *Runtime, window_id: platform.WindowId) anyerror!void {
+            if (self.window_lifecycle_policy) |policy| return Self.executeWindowCapability(self, policy, .hide, window_id);
             const index = Self.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
             if (!self.windows[index].info.open) return error.WindowNotFound;
             const was_hidden = self.windows[index].info.hidden;
@@ -193,6 +207,7 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
         /// back on platform failure. A window that was never hidden
         /// just comes to the front.
         pub fn showWindow(self: *Runtime, window_id: platform.WindowId) anyerror!void {
+            if (self.window_lifecycle_policy) |policy| return Self.executeWindowCapability(self, policy, .show, window_id);
             const index = Self.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
             // A closed window keeps its table slot (the id and label
             // release lazily, at the next create), so resolving the id
@@ -217,6 +232,40 @@ pub fn RuntimeWindowViews(comptime Runtime: type) type {
                 try Self.setFocusedIndex(self, index);
             }
             self.invalidated = true;
+        }
+
+        /// Executes the capability sequence selected from fresh observations.
+        /// Outcome classification crosses the policy boundary; rollback fields,
+        /// replay exceptions and follow-up focus stay in the compiled program.
+        pub fn executeWindowCapability(self: *Runtime, policy: lifecycle.Policy, verb: lifecycle.Verb, window_id: platform.WindowId) anyerror!void {
+            const begin = lifecycle.plan(policy, self, .begin, .{ .id = window_id, .variant = @intFromEnum(verb) });
+            try begin.admitted();
+            const index = begin.selected.?;
+            const saved = lifecycle.flags(self.windows[index].info);
+            begin.apply(&self.windows[index].info);
+            if (begin.has(16)) try Self.showWindow(self, window_id);
+            var failure: ?anyerror = null;
+            switch (verb) {
+                .close => self.options.platform.services.closeWindow(window_id) catch |err| {
+                    failure = err;
+                },
+                .hide => self.options.platform.services.hideWindow(window_id) catch |err| {
+                    failure = err;
+                },
+                .show => self.options.platform.services.showWindow(window_id) catch |err| {
+                    failure = err;
+                },
+                .focus => self.options.platform.services.focusWindow(window_id) catch |err| {
+                    failure = err;
+                },
+                .minimize => return self.options.platform.services.minimizeWindow(window_id),
+            }
+            const finish = lifecycle.plan(policy, self, .finish, .{ .cursor = index, .variant = @intFromEnum(verb), .saved = saved, .value = self.replay_window_chrome_active, .outcome = if (failure) |err| (if (err == error.WindowNotFound) .window_not_found else .failed) else .success });
+            finish.apply(&self.windows[index].info);
+            if (finish.has(8)) return failure.?;
+            if (finish.has(1)) Self.removeWindowRuntimeViews(self, window_id);
+            if (finish.has(4)) try Self.setFocusedIndex(self, index);
+            if (finish.has(2)) self.invalidated = true;
         }
 
         /// The graceful app quit: ask the platform to terminate through

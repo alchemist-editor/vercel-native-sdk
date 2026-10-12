@@ -50,6 +50,7 @@ pub fn expectComplete(expected: anytype, actual: @TypeOf(expected)) anyerror!voi
 test {
     _ = @import("host_input_regions_e2e_tests.zig");
     _ = @import("view_coordination_e2e_tests.zig");
+    _ = @import("window_lifecycle_e2e_tests.zig");
     _ = @import("input_composition_e2e_tests.zig");
     _ = @import("semantic_tree_e2e_tests.zig");
     _ = @import("accessibility_publication_e2e_tests.zig");
@@ -236,6 +237,7 @@ test "TypeScript app adapter supplies placement through every theme path" {
         try std.testing.expect(app.app().render_plan_policy == core.nativeWindowPolicy);
         try std.testing.expect(app.app().render_override_policy == core.nativeWindowPolicy);
         try std.testing.expect(app.app().render_damage_policy == core.nativeWindowPolicy);
+        try std.testing.expect(app.app().window_lifecycle_policy == core.nativeWindowPolicy);
         const tokens = app.effectiveTokens().withOverrides(.{});
         try std.testing.expect(tokens.surface_layout_policy == core.nativeWindowPolicy);
         try std.testing.expect(tokens.grid_layout_policy == core.nativeWindowPolicy);
