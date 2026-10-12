@@ -430,6 +430,7 @@ pub fn App(comptime Runtime: type) type {
         shell_layout_policy: ?*const fn ([]const u8, []u8) usize = null,
         view_coordination_policy: ?*const fn ([]const u8, []u8) usize = null,
         window_lifecycle_policy: ?*const fn ([]const u8, []u8) usize = null,
+        image_registry_policy: ?*const fn ([]const u8, []u8) usize = null,
         /// Portable command routing and status-item selection. Native retains
         /// registry bytes, exact handles and OS capability execution.
         command_policy: ?*const fn ([]const u8, []u8) usize = null,

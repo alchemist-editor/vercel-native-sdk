@@ -24,6 +24,7 @@
   "src/host_input_regions.ts",
   "src/view_coordination.ts",
   "src/window_lifecycle.ts",
+  "src/image_registry.ts",
   "src/render_animation_lifecycle.ts",
   "src/motion_sampling.ts",
   "src/vector_raster.ts",

@@ -524,6 +524,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 stamped.view_coordination_policy = core.nativeWindowPolicy;
                 if (options.window_lifecycle_policy != null) @panic("TsUiApp owns window_lifecycle_policy - remove custom window lifecycle wiring");
                 stamped.window_lifecycle_policy = core.nativeWindowPolicy;
+                if (options.image_registry_policy != null) @panic("TsUiApp owns image_registry_policy - remove custom image registry wiring");
+                stamped.image_registry_policy = core.nativeWindowPolicy;
                 if (options.command_policy != null) @panic("TsUiApp owns command_policy - remove custom command wiring");
                 stamped.command_policy = core.nativeWindowPolicy;
                 if (options.text_cache_policy != null) @panic("TsUiApp owns text_cache_policy - remove custom text cache wiring");
