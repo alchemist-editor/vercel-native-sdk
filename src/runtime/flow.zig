@@ -1,3 +1,4 @@
+const builtin_coordination = @import("builtin_coordination_policy.zig");
 const authorization = @import("authorization_policy.zig");
 const std = @import("std");
 const geometry = @import("geometry");
@@ -244,6 +245,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.system_admission_policy = app.system_admission_policy;
                     self.bridge_descriptor_policy = app.bridge_descriptor_policy;
                     self.authorization_policy = app.authorization_policy;
+                    self.builtin_coordination_policy = app.builtin_coordination_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
@@ -1190,7 +1192,37 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
         const resolveWindowSelector = BuiltinBridgeMethods.resolveWindowSelector;
         const writeWindowListJson = BuiltinBridgeMethods.writeWindowListJson;
 
+        fn handleCompiledBuiltinBridgeMessage(self: *Runtime, app: App, message: platform.BridgeMessage) anyerror!bool {
+            const request = bridge.parseRequest(message.bytes) catch return false;
+            const plan = builtin_coordination.route(self.builtin_coordination_policy.?, .none, request.command);
+            if (plan.family() == .none) return false;
+            var response_buffer: [bridge.max_response_bytes]u8 = undefined;
+            var result_buffer: [bridge.max_result_bytes]u8 = undefined;
+            if (!allowsBuiltinBridgeCommand(self, request.command, message.origin, plan.permission())) {
+                const response = bridge.writeErrorResponse(&response_buffer, request.id, .permission_denied, plan.deniedMessage());
+                try completeBridgeResponse(self, message.window_id, message.webview_label, response);
+                self.invalidateFor(.command, null);
+                return true;
+            }
+            const response = switch (plan.family()) {
+                .none => unreachable,
+                .command => dispatchCommandBridgeCommand(self, app, request, message.window_id, message.webview_label, &result_buffer, &response_buffer),
+                .window => dispatchWindowBridgeCommand(self, request, &result_buffer, &response_buffer),
+                .view => dispatchViewBridgeCommand(self, request, message.window_id, &result_buffer, &response_buffer),
+                .webview => dispatchWebViewBridgeCommand(self, request, message.window_id, &result_buffer, &response_buffer),
+                .platform => dispatchPlatformBridgeCommand(self, request, &result_buffer, &response_buffer),
+                .dialog => dispatchDialogBridgeCommand(self, request, &result_buffer, &response_buffer),
+                .os => dispatchOsBridgeCommand(self, request, message.origin, &result_buffer, &response_buffer),
+                .clipboard => dispatchClipboardBridgeCommand(self, request, &result_buffer, &response_buffer),
+                .credentials => dispatchCredentialBridgeCommand(self, request, &result_buffer, &response_buffer),
+            };
+            try completeBridgeResponse(self, message.window_id, message.webview_label, response);
+            self.invalidateFor(.command, null);
+            return true;
+        }
+
         fn handleBuiltinBridgeMessage(self: *Runtime, app: App, message: platform.BridgeMessage) anyerror!bool {
+            if (self.builtin_coordination_policy != null) return handleCompiledBuiltinBridgeMessage(self, app, message);
             const request = bridge.parseRequest(message.bytes) catch return false;
             const is_command = std.mem.startsWith(u8, request.command, "native-sdk.command.");
             const is_window = std.mem.startsWith(u8, request.command, "native-sdk.window.");

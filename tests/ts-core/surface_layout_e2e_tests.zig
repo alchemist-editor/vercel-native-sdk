@@ -58,6 +58,7 @@ test {
     _ = @import("system_admission_e2e_tests.zig");
     _ = @import("bridge_descriptor_e2e_tests.zig");
     _ = @import("authorization_e2e_tests.zig");
+    _ = @import("builtin_coordination_e2e_tests.zig");
     _ = @import("input_composition_e2e_tests.zig");
     _ = @import("semantic_tree_e2e_tests.zig");
     _ = @import("accessibility_publication_e2e_tests.zig");
