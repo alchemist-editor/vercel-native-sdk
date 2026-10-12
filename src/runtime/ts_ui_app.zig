@@ -534,6 +534,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 stamped.shell_admission_policy = core.nativeWindowPolicy;
                 if (options.system_admission_policy != null) @panic("TsUiApp owns system_admission_policy - remove custom system admission wiring");
                 stamped.system_admission_policy = core.nativeWindowPolicy;
+                if (options.bridge_descriptor_policy != null) @panic("TsUiApp owns bridge_descriptor_policy - remove custom bridge descriptor wiring");
+                stamped.bridge_descriptor_policy = core.nativeWindowPolicy;
                 if (options.command_policy != null) @panic("TsUiApp owns command_policy - remove custom command wiring");
                 stamped.command_policy = core.nativeWindowPolicy;
                 if (options.text_cache_policy != null) @panic("TsUiApp owns text_cache_policy - remove custom text cache wiring");

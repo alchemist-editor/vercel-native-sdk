@@ -3,6 +3,7 @@ const geometry = @import("geometry");
 const json = @import("json");
 const validation = @import("validation.zig");
 const bridge_payload = @import("bridge_payload.zig");
+const bridge_descriptors = @import("bridge_descriptor_policy.zig");
 const bridge_responses = @import("bridge_responses.zig");
 const runtime_api = @import("api.zig");
 const runtime_system_services = @import("system_services.zig");
@@ -18,15 +19,15 @@ const jsonStringField = bridge_payload.jsonStringField;
 const jsonNumberField = bridge_payload.jsonNumberField;
 const jsonIntegerField = bridge_payload.jsonIntegerField;
 const jsonBoolField = bridge_payload.jsonBoolField;
-const webViewWindowIdFromJson = bridge_payload.webViewWindowIdFromJson;
-const viewWindowIdFromJson = bridge_payload.viewWindowIdFromJson;
-const viewKindFromString = bridge_payload.viewKindFromString;
-const windowTitlebarStyleFromString = bridge_payload.windowTitlebarStyleFromString;
-const gpuSurfaceOptionsFromJson = bridge_payload.gpuSurfaceOptionsFromJson;
-const viewFrameFromJson = bridge_payload.viewFrameFromJson;
-const viewLayerFromJson = bridge_payload.viewLayerFromJson;
-const webViewFrameFromJson = bridge_payload.webViewFrameFromJson;
-const webViewLayerFromJson = bridge_payload.webViewLayerFromJson;
+const webViewWindowIdFromJson = bridge_descriptors.webViewWindowIdFromJson;
+const viewWindowIdFromJson = bridge_descriptors.viewWindowIdFromJson;
+const viewKindFromString = bridge_descriptors.viewKindFromString;
+const windowTitlebarStyleFromString = bridge_descriptors.windowTitlebarStyleFromString;
+const gpuSurfaceOptionsFromJson = bridge_descriptors.gpuSurfaceOptionsFromJson;
+const viewFrameFromJson = bridge_descriptors.viewFrameFromJson;
+const viewLayerFromJson = bridge_descriptors.viewLayerFromJson;
+const webViewFrameFromJson = bridge_descriptors.webViewFrameFromJson;
+const webViewLayerFromJson = bridge_descriptors.webViewLayerFromJson;
 const writeWindowJson = bridge_responses.writeWindowJson;
 const writeWebViewJson = bridge_responses.writeWebViewJson;
 const writeViewJson = bridge_responses.writeViewJson;
@@ -249,7 +250,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             const y = requested_y orelse 0;
             const source = if (jsonStringField(payload, "url", &storage)) |url| platform.WebViewSource.url(url) else null;
             const titlebar = if (jsonStringField(payload, "titlebar", &storage)) |value|
-                windowTitlebarStyleFromString(value) orelse return error.InvalidWindowOptions
+                windowTitlebarStyleFromString(self.bridge_descriptor_policy, value) orelse return error.InvalidWindowOptions
             else
                 .standard;
             const info = try self.createWindow(.{
@@ -273,8 +274,8 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
             const kind_str = jsonStringField(payload, "kind", &storage) orelse return error.InvalidViewOptions;
-            const kind = viewKindFromString(kind_str) orelse return error.UnsupportedViewKind;
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
+            const kind = viewKindFromString(self.bridge_descriptor_policy, kind_str) orelse return error.UnsupportedViewKind;
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             const role = jsonStringField(payload, "role", &storage) orelse "";
             const accessibility_label = jsonStringField(payload, "accessibilityLabel", &storage) orelse jsonStringField(payload, "accessibility_label", &storage) orelse "";
             const text = jsonStringField(payload, "text", &storage) orelse "";
@@ -286,8 +287,8 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
                 .label = label,
                 .kind = kind,
                 .parent = parent,
-                .frame = (try viewFrameFromJson(payload, kind == .webview)) orelse geometry.RectF.init(0, 0, 0, 0),
-                .layer = try viewLayerFromJson(payload) orelse 0,
+                .frame = (try viewFrameFromJson(self.bridge_descriptor_policy, payload, kind == .webview)) orelse geometry.RectF.init(0, 0, 0, 0),
+                .layer = try viewLayerFromJson(self.bridge_descriptor_policy, payload) orelse 0,
                 .visible = jsonBoolField(payload, "visible") orelse true,
                 .enabled = jsonBoolField(payload, "enabled") orelse true,
                 .role = role,
@@ -297,7 +298,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
                 .url = url,
                 .transparent = jsonBoolField(payload, "transparent") orelse false,
                 .bridge_enabled = jsonBoolField(payload, "bridge") orelse false,
-                .gpu_surface = try gpuSurfaceOptionsFromJson(payload, &storage),
+                .gpu_surface = try gpuSurfaceOptionsFromJson(self.bridge_descriptor_policy, payload, &storage),
             });
             return writeViewJson(info, output);
         }
@@ -306,10 +307,10 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [platform.max_view_label_bytes + platform.max_view_role_bytes + platform.max_view_accessibility_label_bytes + platform.max_view_text_bytes + platform.max_view_command_bytes + platform.max_webview_url_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             const patch: platform.ViewPatch = .{
-                .frame = try viewFrameFromJson(payload, false),
-                .layer = try viewLayerFromJson(payload),
+                .frame = try viewFrameFromJson(self.bridge_descriptor_policy, payload, false),
+                .layer = try viewLayerFromJson(self.bridge_descriptor_policy, payload),
                 .visible = jsonBoolField(payload, "visible"),
                 .enabled = jsonBoolField(payload, "enabled"),
                 .role = jsonStringField(payload, "role", &storage),
@@ -326,8 +327,8 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [platform.max_view_label_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
-            const info = try self.updateView(window_id, label, .{ .frame = try viewFrameFromJson(payload, true) });
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
+            const info = try self.updateView(window_id, label, .{ .frame = try viewFrameFromJson(self.bridge_descriptor_policy, payload, true) });
             return writeViewJson(info, output);
         }
 
@@ -336,7 +337,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
             const visible = jsonBoolField(payload, "visible") orelse return error.InvalidViewOptions;
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             const info = try self.updateView(window_id, label, .{ .visible = visible });
             return writeViewJson(info, output);
         }
@@ -345,7 +346,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [platform.max_view_label_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             try self.focusView(window_id, label);
             var views_buffer: [platform.max_views + platform.max_webviews + 1]platform.ViewInfo = undefined;
             for (self.listViews(window_id, &views_buffer)) |view| {
@@ -355,13 +356,13 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
         }
 
         pub fn focusNextViewFromJson(self: *Runtime, payload: []const u8, source_window_id: platform.WindowId, output: []u8) ![]const u8 {
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             const info = try self.focusNextView(window_id);
             return writeViewJson(info, output);
         }
 
         pub fn focusPreviousViewFromJson(self: *Runtime, payload: []const u8, source_window_id: platform.WindowId, output: []u8) ![]const u8 {
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             const info = try self.focusPreviousView(window_id);
             return writeViewJson(info, output);
         }
@@ -370,7 +371,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [platform.max_view_label_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse return error.InvalidViewOptions;
-            const window_id = try viewWindowIdFromJson(payload, source_window_id);
+            const window_id = try viewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             var views_buffer: [platform.max_views + platform.max_webviews + 1]platform.ViewInfo = undefined;
             for (self.listViews(window_id, &views_buffer)) |view| {
                 if (std.mem.eql(u8, view.label, label)) {
@@ -404,9 +405,9 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse "webview";
             const url = jsonStringField(payload, "url", &storage) orelse return error.MissingWebViewUrl;
-            const window_id = try webViewWindowIdFromJson(payload, source_window_id);
-            const webview_frame = try webViewFrameFromJson(payload);
-            const layer = try webViewLayerFromJson(payload);
+            const window_id = try webViewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
+            const webview_frame = try webViewFrameFromJson(self.bridge_descriptor_policy, payload);
+            const layer = try webViewLayerFromJson(self.bridge_descriptor_policy, payload);
             const transparent = jsonBoolField(payload, "transparent") orelse false;
             const bridge_enabled = jsonBoolField(payload, "bridge") orelse false;
             try WindowViewMethods.validateWebViewParent(self, window_id);
@@ -442,8 +443,8 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [platform.max_webview_label_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse "webview";
-            const window_id = try webViewWindowIdFromJson(payload, source_window_id);
-            const webview_frame = try webViewFrameFromJson(payload);
+            const window_id = try webViewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
+            const webview_frame = try webViewFrameFromJson(self.bridge_descriptor_policy, payload);
             try WindowViewMethods.validateWebViewParent(self, window_id);
             try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             if (isMainWebViewLabel(label)) {
@@ -467,7 +468,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse "webview";
             const url = jsonStringField(payload, "url", &storage) orelse return error.MissingWebViewUrl;
-            const window_id = try webViewWindowIdFromJson(payload, source_window_id);
+            const window_id = try webViewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
             try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             try WindowViewMethods.validateWebViewUrl(self, url);
@@ -485,7 +486,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             const zoom_f32 = jsonNumberField(payload, "zoom") orelse return error.InvalidWebViewOptions;
             const zoom: f64 = @floatCast(zoom_f32);
             if (zoom < 0.25 or zoom > 5.0) return error.InvalidWebViewOptions;
-            const window_id = try webViewWindowIdFromJson(payload, source_window_id);
+            const window_id = try webViewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
             try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             if (isMainWebViewLabel(label)) {
@@ -504,10 +505,10 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [platform.max_webview_label_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse "webview";
-            const window_id = try webViewWindowIdFromJson(payload, source_window_id);
+            const window_id = try webViewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
             try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
-            const layer = try webViewLayerFromJson(payload);
+            const layer = try webViewLayerFromJson(self.bridge_descriptor_policy, payload);
             if (isMainWebViewLabel(label)) {
                 const window_index = WindowViewMethods.findWindowIndexById(self, window_id) orelse return error.WindowNotFound;
                 try self.options.platform.services.setWebViewLayer(window_id, label, layer);
@@ -524,7 +525,7 @@ pub fn RuntimeBuiltinBridge(comptime Runtime: type) type {
             var scratch: [platform.max_webview_label_bytes]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const label = jsonStringField(payload, "label", &storage) orelse "webview";
-            const window_id = try webViewWindowIdFromJson(payload, source_window_id);
+            const window_id = try webViewWindowIdFromJson(self.bridge_descriptor_policy, payload, source_window_id);
             try WindowViewMethods.validateWebViewParent(self, window_id);
             try @import("shell_admission_policy.zig").label(self.shell_admission_policy, 1, label);
             if (isMainWebViewLabel(label)) return error.InvalidWebViewOptions;

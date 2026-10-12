@@ -29,6 +29,7 @@
   "src/shell_coordination.ts",
   "src/shell_admission.ts",
   "src/system_admission.ts",
+  "src/bridge_descriptors.ts",
   "src/render_animation_lifecycle.ts",
   "src/motion_sampling.ts",
   "src/vector_raster.ts",

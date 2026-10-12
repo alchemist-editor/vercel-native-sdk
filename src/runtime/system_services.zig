@@ -6,6 +6,7 @@ const admission = @import("system_admission_policy.zig");
 const command_policy = @import("command_policy.zig");
 const status_validation = @import("status_validation.zig");
 const bridge_payload = @import("bridge_payload.zig");
+const bridge_descriptors = @import("bridge_descriptor_policy.zig");
 const bridge_responses = @import("bridge_responses.zig");
 const bridge = @import("../bridge/root.zig");
 const platform = @import("../platform/root.zig");
@@ -13,7 +14,7 @@ const security = @import("../security/root.zig");
 
 const jsonStringField = bridge_payload.jsonStringField;
 const jsonBoolField = bridge_payload.jsonBoolField;
-const platformFeatureFromString = bridge_payload.platformFeatureFromString;
+const platformFeatureFromString = bridge_descriptors.platformFeatureFromString;
 const writeBoolJson = bridge_responses.writeBoolJson;
 const writeTrueJson = bridge_responses.writeTrueJson;
 
@@ -279,7 +280,7 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
             var scratch: [64]u8 = undefined;
             var storage = json.StringStorage.init(&scratch);
             const feature_name = jsonStringField(payload, "feature", &storage) orelse jsonStringField(payload, "name", &storage) orelse return error.InvalidPlatformFeature;
-            const feature = platformFeatureFromString(feature_name) orelse return error.InvalidPlatformFeature;
+            const feature = platformFeatureFromString(self.bridge_descriptor_policy, feature_name) orelse return error.InvalidPlatformFeature;
             return writeBoolJson(self.supports(feature), output);
         }
 

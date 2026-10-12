@@ -2,7 +2,7 @@ const std = @import("std");
 const geometry = @import("geometry");
 const validation = @import("validation.zig");
 const runtime_api = @import("api.zig");
-const bridge_payload = @import("bridge_payload.zig");
+const bridge_descriptors = @import("bridge_descriptor_policy.zig");
 const bridge_responses = @import("bridge_responses.zig");
 const runtime_canvas_widget_events = @import("canvas_widget_events.zig");
 const runtime_clock = @import("clock.zig");
@@ -17,7 +17,7 @@ const isMainWebViewLabel = validation.isMainWebViewLabel;
 
 const validateCommandName = validation.validateCommandName;
 
-const webViewUrlOrigin = bridge_payload.webViewUrlOrigin;
+const webViewUrlOrigin = bridge_descriptors.webViewUrlOrigin;
 const writeWebViewJsonToWriter = bridge_responses.writeWebViewJsonToWriter;
 const viewInfoFromWebView = bridge_responses.viewInfoFromWebView;
 const RuntimeWebView = runtime_state.RuntimeWebView;
@@ -216,7 +216,7 @@ pub fn RuntimeWindowViewRuntime(comptime Runtime: type) type {
             if (url.len == 0) return error.MissingWebViewUrl;
             if (url.len > platform.max_webview_url_bytes) return error.WebViewUrlTooLarge;
             var origin_buffer: [512]u8 = undefined;
-            const origin = try webViewUrlOrigin(url, &origin_buffer);
+            const origin = try webViewUrlOrigin(self.bridge_descriptor_policy, url, &origin_buffer);
             if (!security.allowsOrigin(self.options.security.navigation.allowed_origins, origin)) return error.NavigationDenied;
         }
 

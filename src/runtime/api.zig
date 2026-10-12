@@ -435,6 +435,7 @@ pub fn App(comptime Runtime: type) type {
         shell_coordination_policy: ?*const fn ([]const u8, []u8) usize = null,
         shell_admission_policy: ?*const fn ([]const u8, []u8) usize = null,
         system_admission_policy: ?*const fn ([]const u8, []u8) usize = null,
+        bridge_descriptor_policy: ?*const fn ([]const u8, []u8) usize = null,
         /// Portable command routing and status-item selection. Native retains
         /// registry bytes, exact handles and OS capability execution.
         command_policy: ?*const fn ([]const u8, []u8) usize = null,
