@@ -16,6 +16,7 @@
   "src/render_resources.ts",
   "src/gpu_planning.ts",
   "src/gpu_packet_preparation.ts",
+  "src/render_animation_lifecycle.ts",
   "src/vector_raster.ts",
   "src/control_appearance.ts",
   "src/component_construction.ts",

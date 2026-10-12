@@ -925,6 +925,7 @@ test {
 
 test {
     _ = @import("render_override_e2e_tests.zig");
+    _ = @import("render_animation_e2e_tests.zig");
 }
 
 test {

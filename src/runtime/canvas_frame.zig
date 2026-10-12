@@ -2,6 +2,8 @@ const std = @import("std");
 const geometry = @import("geometry");
 const canvas = @import("canvas");
 const canvas_frame_helpers = @import("canvas_frame_helpers.zig");
+const render_animation_policy = @import("render_animation_policy.zig");
+pub const referenceAnimationScheduleDirtyBounds = canvasRenderAnimationScheduleDirtyBounds;
 const launch_timing = @import("launch_timing.zig");
 const platform = @import("../platform/root.zig");
 
@@ -146,13 +148,15 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             try validateViewLabel(label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
-            try validateCanvasRenderAnimations(animations);
+            const inert = if (self.render_override_policy) |owner|
+                try render_animation_policy.admit(animations, self.views[index].canvas_render_animation_count, self.views[index].canvas_frame_render_override_count, max_canvas_render_animations_per_view, owner)
+            else reference: {
+                try validateCanvasRenderAnimations(animations);
+                break :reference animations.len == 0 and self.views[index].canvas_render_animation_count == 0 and self.views[index].canvas_frame_render_override_count == 0;
+            };
             // Replacing NOTHING with NOTHING is a no-op: a rebuild that
             // never declared animations must not schedule work.
-            if (animations.len == 0 and
-                self.views[index].canvas_render_animation_count == 0 and
-                self.views[index].canvas_frame_render_override_count == 0)
-            {
+            if (inert) {
                 return self.views[index].info();
             }
             // Invalidate the AFFECTED commands, not the whole view: the
@@ -163,7 +167,10 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             // only schedules the repaint — but a UiApp rebuild re-bases
             // its animations on EVERY update, and a full-frame region
             // here silently defeated incremental presentation.
-            const dirty = canvasRenderAnimationScheduleDirtyBounds(&self.views[index], animations);
+            const dirty = if (self.render_override_policy) |owner|
+                render_animation_policy.schedule(&self.views[index], animations, owner)
+            else
+                canvasRenderAnimationScheduleDirtyBounds(&self.views[index], animations);
             try self.views[index].copyCanvasRenderAnimations(animations);
             if (dirty) |local_dirty| {
                 if (canvasDirtyRegionForView(self.views[index].frame, local_dirty)) |region| {
@@ -189,7 +196,11 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             try validateViewLabel(label);
             const index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[index].kind != .gpu_surface) return error.InvalidViewOptions;
-            if (self.views[index].canvas_render_animation_count == 0 and self.views[index].canvas_frame_render_override_count == 0) return self.views[index].info();
+            const inert = if (self.render_override_policy) |owner|
+                try render_animation_policy.admit(&.{}, self.views[index].canvas_render_animation_count, self.views[index].canvas_frame_render_override_count, max_canvas_render_animations_per_view, owner)
+            else
+                self.views[index].canvas_render_animation_count == 0 and self.views[index].canvas_frame_render_override_count == 0;
+            if (inert) return self.views[index].info();
             self.views[index].canvas_render_animation_count = 0;
             self.invalidateFor(.state, self.views[index].frame);
             try requestCanvasFrameForView(self, index);
@@ -1263,10 +1274,14 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 try self.views[index].copyPresentedCanvasSummary(display_list, canvas_frame.surface_size, canvas_frame.scale);
                 self.views[index].recordCanvasFrame(canvas_frame);
                 try self.views[index].copyCanvasFrameRenderOverrides(frame_options.render_overrides);
-                if (self.views[index].pruneCompletedNoopCanvasRenderAnimations(frame_options.timestamp_ns)) {
-                    self.views[index].compactCanvasFrameRenderOverrideNoops();
-                }
-                const render_animation_active = self.views[index].canvasRenderAnimationsActive(frame_options.timestamp_ns);
+                const render_animation_active = if (frame_options.render_override_policy) |owner|
+                    render_animation_policy.finishFrame(&self.views[index], frame_options.timestamp_ns, owner)
+                else reference: {
+                    if (self.views[index].pruneCompletedNoopCanvasRenderAnimations(frame_options.timestamp_ns)) {
+                        self.views[index].compactCanvasFrameRenderOverrideNoops();
+                    }
+                    break :reference self.views[index].canvasRenderAnimationsActive(frame_options.timestamp_ns);
+                };
                 // An armed tooltip show delay — and a running anchor-gap
                 // transit grace — only fire on a presented frame's
                 // timestamp, so frames must keep coming while either is
