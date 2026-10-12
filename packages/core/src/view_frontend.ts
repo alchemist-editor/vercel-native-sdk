@@ -1,7 +1,7 @@
 /** Native markup compiled beside the committed TypeScript core. Unsupported
  * constructs fail at build time; no bindings are evaluated by the native host.
  */
-import { readFileSync } from "node:fs";
+import { portableSourceText } from "./portable_sources.ts";
 
 interface Ref { kind: string; name?: string; elem?: Ref; inner?: Ref; class?: string; type?: Ref }
 interface Arm { name: string; member?: string; payload: Ref }
@@ -977,52 +977,4 @@ function compileViewFunction(source: string, contract: ViewContract, options: Vi
   return `${exported ? "export " : ""}function ${functionName}(nscvVideo: NscVideoPlaybackState, nscvVirtual?: NscVirtualBuild): Uint8Array {\nconst nscvNodes: NscViewNode[] = [];\n${output.join("\n")}\nif (nscvVirtual?.requestsOnly) return new TextEncoder().encode(JSON.stringify({ format: 1, requests: nscvVirtual.requests }));\nif (nscvVirtual !== undefined && (nscvVirtual.requests.length !== nscvVirtual.ranges.length || nscvVirtual.consumed.length !== nscvVirtual.requests.length)) throw new Error("virtual window context count mismatch");\nif (nscvNodes.length === 0 || nscvNodes[0]!.end !== nscvNodes.length) throw new Error("compiled view requires one rendered root");\nreturn new TextEncoder().encode(JSON.stringify({ format: 2, nodes: nscvNodes }));\n}\n`;
 }
 
-const viewPrelude = "\n// Portable Native components compiled beside the committed model.\n" +
-  readFileSync(new URL("./view_components.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./runtime_policy.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./command_coordination.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./status_validation.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./paragraph_layout.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./text_run_layout.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./text_query_layout.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./text_span_queries.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./text_measurement_cache.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./text_document_width.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./scalar_text.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./glyph_atlas.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./registered_font.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./vector_effects.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./render_resources.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./gpu_planning.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./gpu_packet_preparation.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./vector_raster.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./control_appearance.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./component_construction.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_motion.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./component_composition.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./code_content.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./chart_content.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("../sdk/internal/markdown_policy.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_audits.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_routing.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_changes.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_paint.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_presentation.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_paint_walk.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./control_geometry.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./control_content.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./surface_recipes.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./widget_metrics.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./intrinsic_measure.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./measurement_coordination.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./flow_measurement.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./layout_coordination.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./render_coordination.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./control_commands.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./control_payloads.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./control_primitives.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./leaf_plans.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./chart_plans.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./indicator_plans.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./effect_plans.ts", import.meta.url), "utf8") +
-  readFileSync(new URL("./stream_policy.ts", import.meta.url), "utf8");
+const viewPrelude = "\n// Portable Native components compiled beside the committed model.\n" + portableSourceText;

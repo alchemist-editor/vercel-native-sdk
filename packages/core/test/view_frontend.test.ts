@@ -6,6 +6,7 @@ import * as textLibrary from "../sdk/text.ts";
 import ts from "@typescript/old";
 import { compileView, compileViewBundle, type ViewContract } from "../src/view_frontend.ts";
 import { checkFile } from "../src/frontend.ts";
+import { portableSourceText } from "../src/portable_sources.ts";
 
 const runInNewContext = (code: string, context: Record<string, unknown>) => runView(code, {
   ...context,
@@ -337,12 +338,12 @@ test("hold coordination preserves cancellation, release suppression and missing-
 test("the view frontend and compiled portable component bundle typecheck", () => {
   const options: ts.CompilerOptions = {
     noEmit: true, strict: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.NodeNext,
+    allowImportingTsExtensions: true,
     types: ["node"], typeRoots: [new URL("../node_modules/@types", import.meta.url).pathname],
   };
   // Production joins these policies in one module before compiling the view.
   const bundlePath = new URL("../src/view_components_typecheck.ts", import.meta.url).pathname;
-  const bundle = ["view_components.ts", "runtime_policy.ts", "command_coordination.ts", "status_validation.ts", "scalar_text.ts", "glyph_atlas.ts", "registered_font.ts", "vector_effects.ts", "render_resources.ts", "gpu_planning.ts", "gpu_packet_preparation.ts", "vector_raster.ts", "text_run_layout.ts", "text_query_layout.ts", "text_span_queries.ts", "text_measurement_cache.ts", "text_document_width.ts", "paragraph_layout.ts", "control_appearance.ts", "component_construction.ts", "widget_motion.ts", "component_composition.ts", "code_content.ts", "chart_content.ts", "markdown_content.ts", "widget_audits.ts", "widget_routing.ts", "widget_changes.ts", "widget_paint.ts", "widget_presentation.ts", "widget_paint_walk.ts", "control_geometry.ts", "control_content.ts", "surface_recipes.ts", "widget_metrics.ts", "intrinsic_measure.ts", "measurement_coordination.ts", "flow_measurement.ts", "layout_coordination.ts", "render_coordination.ts", "control_commands.ts", "control_payloads.ts", "control_primitives.ts", "leaf_plans.ts", "chart_plans.ts", "indicator_plans.ts", "effect_plans.ts", "stream_policy.ts"]
-    .map(name => readFileSync(new URL(name === "markdown_content.ts" ? "../sdk/internal/markdown_policy.ts" : `../src/${name}`, import.meta.url), "utf8")).join("\n");
+  const bundle = portableSourceText;
   const host = ts.createCompilerHost(options);
   const readSource = host.getSourceFile.bind(host);
   host.getSourceFile = (name, languageVersion, onError, fresh) => name === bundlePath

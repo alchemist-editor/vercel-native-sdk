@@ -1244,55 +1244,7 @@ fn tsCoreStage(
     stage_run.addFileArg(facade);
     stage_run.addArg("--profile");
     stage_run.addFileArg(profile);
-    stage_run.addFileInput(dep.path("packages/core/src/view_frontend.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/view_components.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/runtime_policy.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/command_coordination.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/status_validation.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/paragraph_layout.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/text_run_layout.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/text_query_layout.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/text_span_queries.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/text_measurement_cache.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/text_document_width.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/scalar_text.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/glyph_atlas.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/registered_font.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/vector_effects.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/render_resources.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/gpu_planning.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/gpu_packet_preparation.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/vector_raster.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/control_appearance.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/component_construction.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_motion.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/component_composition.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/code_content.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/chart_content.ts"));
-    stage_run.addFileInput(dep.path("packages/core/sdk/internal/markdown_policy.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_audits.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_routing.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_changes.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_paint.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_presentation.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_paint_walk.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/control_geometry.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/control_content.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/surface_recipes.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/widget_metrics.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/intrinsic_measure.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/measurement_coordination.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/flow_measurement.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/layout_coordination.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/render_coordination.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/control_commands.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/control_payloads.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/control_primitives.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/leaf_plans.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/chart_plans.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/indicator_plans.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/effect_plans.ts"));
-    stage_run.addFileInput(dep.path("packages/core/src/stream_policy.ts"));
+    addViewFrontendInputs(b, dep.builder, stage_run);
     if (typescript_view) {
         stage_run.addArg("--view-markup");
         stage_run.addFileArg(b.path(appPath(b, app_root, "src/app.native")));
@@ -1524,6 +1476,21 @@ fn addAppCoreTsDirInputs(b: *std.Build, stage: *std.Build.Step.Run, src_path: []
         };
         if (std.mem.startsWith(u8, normalized, "services/")) continue;
         stage.addFileInput(b.path(b.fmt("{s}/{s}", .{ src_path, entry.path })));
+    }
+}
+
+/// Track exactly the ordered portable policies joined by the TypeScript view
+/// frontend. Both app and repository fixture stages use this inventory, so a
+/// policy edit or a new manifest entry invalidates a warm staging cache.
+pub fn addViewFrontendInputs(b: *std.Build, sdk_builder: *std.Build, stage: *std.Build.Step.Run) void {
+    const manifest = "packages/core/src/portable_sources.json";
+    const sources = std.json.parseFromSliceLeaky([]const []const u8, b.allocator, @embedFile("../packages/core/src/portable_sources.json"), .{}) catch
+        @panic("invalid portable source inventory");
+    stage.addFileInput(sdk_builder.path(manifest));
+    stage.addFileInput(sdk_builder.path("packages/core/src/portable_sources.ts"));
+    stage.addFileInput(sdk_builder.path("packages/core/src/view_frontend.ts"));
+    for (sources) |source| {
+        stage.addFileInput(sdk_builder.path(b.fmt("packages/core/{s}", .{source})));
     }
 }
 
