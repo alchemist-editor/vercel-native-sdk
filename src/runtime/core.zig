@@ -1312,6 +1312,11 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const syncHostInputDrivers = runtime_canvas_widget_scroll_drivers.RuntimeCanvasWidgetScrollDrivers(Runtime).syncCanvasWidgetScrollDriversForView;
+    pub const stampHostInputRegions = runtime_canvas_widget_scroll_drivers.RuntimeCanvasWidgetScrollDrivers(Runtime).stampCanvasWidgetNativeScroll;
+    pub const syncHostInputDragRegions = runtime_canvas_widget_events.RuntimeCanvasWidgetEvents(Runtime).syncCanvasWidgetWindowDragRegionsForView;
+    pub const host_input_regions_policy = @import("host_input_regions_policy.zig");
+    pub const referenceWindowDragRegions = @import("canvas_widget_events.zig").collectCanvasWidgetWindowDragRegions;
     pub const input_composition_policy = @import("input_composition_policy.zig");
     pub const clearInputCompositionOnBlur = runtime_view.clearImeGraceOnViewBlur;
     pub const referenceInputPointer = canvas_frame_helpers.canvasWidgetPointerEventFromGpuInput;

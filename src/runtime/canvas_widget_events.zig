@@ -1,3 +1,4 @@
+const host_regions = @import("host_input_regions_policy.zig");
 const input_composition = @import("input_composition_policy.zig");
 const drag_policy = @import("canvas_drag_policy.zig");
 const keyboard_focus = @import("canvas_keyboard_focus_policy.zig");
@@ -2397,10 +2398,20 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
             if (self.options.platform.services.set_window_drag_regions_fn == null) return;
             const view = &self.views[view_index];
             var regions: [canvas_limits.max_canvas_widget_window_drag_regions_per_view]platform.WindowDragRegion = undefined;
-            const count = collectCanvasWidgetWindowDragRegions(view.widgetLayoutTree(), &regions);
-            if (view.canvas_widget_drag_regions_pushed) {
+            const compiled = host_regions.plan(view.canvas_widget_surface_scope_policy, .drag, .{
+                .nodes = view.widgetLayoutTree().nodes,
+                .drag_service = true,
+                .drag_pushed = view.canvas_widget_drag_regions_pushed,
+                .previous = view.canvas_widget_drag_regions[0..view.canvas_widget_drag_region_count],
+            });
+            const count = if (compiled) |program| count: {
+                if (program.detail == 0) return;
+                @memcpy(regions[0..program.region_count], program.regions[0..program.region_count]);
+                break :count program.region_count;
+            } else collectCanvasWidgetWindowDragRegions(view.widgetLayoutTree(), &regions);
+            if (compiled == null and view.canvas_widget_drag_regions_pushed) {
                 if (count == view.canvas_widget_drag_region_count and windowDragRegionsEqual(regions[0..count], view.canvas_widget_drag_regions[0..count])) return;
-            } else if (count == 0) {
+            } else if (compiled == null and count == 0) {
                 return;
             }
             try self.options.platform.services.setWindowDragRegions(view.window_id, view.label, regions[0..count]);

@@ -21,6 +21,7 @@
   "src/canvas_scene_observation.ts",
   "src/canvas_presentation_lifecycle.ts",
   "src/input_composition.ts",
+  "src/host_input_regions.ts",
   "src/render_animation_lifecycle.ts",
   "src/motion_sampling.ts",
   "src/vector_raster.ts",

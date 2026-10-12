@@ -131,6 +131,7 @@ function nscvPush(nodes: NscViewNode[], node: NscViewNode): void {
  * 7 Home, 8 End, 9 A. Native retains insert bytes and geometry.
  */
 export function native_text_policy(request: Uint8Array): Uint8Array {
+  if (request[0] === 79) return nscvHostInputRegions(request);
   if (request[0] === 78) return nscvInputComposition(request);
   if (request[0] === 36) return nscvHoverCoordination(request);
   if (request[0] === 35) return nscvDragCoordination(request);

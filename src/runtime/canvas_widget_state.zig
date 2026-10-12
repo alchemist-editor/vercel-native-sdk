@@ -116,7 +116,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
             // regions before the copy so rebuild-time clamping and display
             // emission both see the flag (engine scrollbar + engine clamp
             // stand down; the OS scroller owns them).
-            ScrollDriverMethods(Runtime).stampCanvasWidgetNativeScroll(self, reconciled_nodes[0..reconciled_layout.nodes.len]);
+            ScrollDriverMethods(Runtime).stampCanvasWidgetNativeScroll(self, reconciled_nodes[0..reconciled_layout.nodes.len], self.views[index].canvas_widget_surface_scope_policy);
             // Engine-side rebuild clamp AFTER the stamp: natively driven
             // regions skip it, so a rebuild landing mid-rubber-band keeps
             // the OS scroller's overscrolled offset instead of clamping it
