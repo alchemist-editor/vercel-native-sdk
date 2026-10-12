@@ -265,6 +265,7 @@ export function native_window_policy(request: Uint8Array): Uint8Array {
   if (request[0] === 70) return nscvStatusValidation(request);
   if (request[0] === 71) return nscvGpuPacketPreparation(request);
   if (request[0] === 72) return nscvAnimationLifecycle(request);
+  if (request[0] === 73) return nscvMotionSampling(request);
   const data = new DataView(request.buffer, request.byteOffset, request.byteLength);
   let at = 0;
   const byte = (): number => {

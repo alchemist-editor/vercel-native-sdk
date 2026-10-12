@@ -930,9 +930,10 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             frame_options.previous_visual_effect_cache = self.views[index].canvasFrameVisualEffectCache();
             frame_options.previous_glyph_atlas_cache = self.views[index].canvasFrameGlyphAtlasCache();
             frame_options.previous_text_layout_cache = self.views[index].canvasFrameTextLayoutCache();
-            const scheduled_render_overrides = try self.views[index].sampleCanvasRenderAnimations(
+            const scheduled_render_overrides = try self.views[index].sampleCanvasRenderAnimationsWithPolicy(
                 frame_options.timestamp_ns,
                 &self.canvas_frame_render_override_samples,
+                frame_options.render_override_policy,
             );
             if (frame_options.previous_render_overrides.len == 0) frame_options.previous_render_overrides = self.views[index].canvasFrameRenderOverrides();
             const display_list = self.views[index].canvasDisplayList();

@@ -1,5 +1,6 @@
 const std = @import("std");
 const motion_policy = @import("widget_motion_policy.zig");
+const sampling_policy = @import("motion_sampling_policy.zig");
 const geometry = @import("geometry");
 const canvas = @import("canvas");
 const platform = @import("../platform/root.zig");
@@ -860,7 +861,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
             } else if (tween.start_ns == 0 or timestamp_ns < tween.start_ns) {
                 tween.start_ns = timestamp_ns;
             }
-            const progress = canvas.layoutTweenProgress(tween.easing, tween.spring, tween.start_ns, tween.duration_ms, timestamp_ns);
+            const progress = if (view.widget_tokens.widget_motion_policy) |policy| sampling_policy.progress(tween.easing, tween.spring, tween.start_ns, tween.duration_ms, timestamp_ns, policy) else canvas.layoutTweenProgress(tween.easing, tween.spring, tween.start_ns, tween.duration_ms, timestamp_ns);
             const done = if (view.widget_tokens.widget_motion_policy) |policy| motion_policy.pose(policy, 1, progress, 0, 0, 0, 0).done else progress >= 1;
             tween.progress = progress;
 
@@ -911,7 +912,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
                 if (view.widget_tokens.widget_motion_policy) |policy| {
                     motion.start_ns = motion_policy.clock(policy, motion.start_ns, timestamp_ns);
                 } else if (motion.start_ns == 0 or timestamp_ns < motion.start_ns) motion.start_ns = timestamp_ns;
-                const progress = canvas.layoutTweenProgress(motion.easing, motion.spring, motion.start_ns, motion.duration_ms, timestamp_ns);
+                const progress = if (view.widget_tokens.widget_motion_policy) |policy| sampling_policy.progress(motion.easing, motion.spring, motion.start_ns, motion.duration_ms, timestamp_ns, policy) else canvas.layoutTweenProgress(motion.easing, motion.spring, motion.start_ns, motion.duration_ms, timestamp_ns);
                 if (view.widget_tokens.widget_motion_policy) |policy| {
                     const pose = motion_policy.pose(policy, 3, progress, motion.from_offset.dx, 0, motion.from_offset.dy, 0);
                     if (pose.done) continue;
@@ -967,7 +968,7 @@ pub fn RuntimeCanvasWidgetState(comptime Runtime: type) type {
                 } else if (tween.start_ns == 0 or timestamp_ns < tween.start_ns) {
                     tween.start_ns = timestamp_ns;
                 }
-                const progress = canvas.layoutTweenProgress(tween.spec.easing, tween.spec.spring, tween.start_ns, tween.spec.duration_ms, timestamp_ns);
+                const progress = if (self.views[view_index].widget_tokens.widget_motion_policy) |policy| sampling_policy.progress(tween.spec.easing, tween.spec.spring, tween.start_ns, tween.spec.duration_ms, timestamp_ns, policy) else canvas.layoutTweenProgress(tween.spec.easing, tween.spec.spring, tween.start_ns, tween.spec.duration_ms, timestamp_ns);
                 const pose = if (self.views[view_index].widget_tokens.widget_motion_policy) |policy| motion_policy.pose(policy, 0, progress, tween.from, tween.spec.to, 0, 0) else motion_policy.Pose{ .done = progress >= 1, .a = if (progress >= 1) tween.spec.to else tween.from + (tween.spec.to - tween.from) * progress, .b = 0 };
                 const done = pose.done;
                 const value = pose.a;

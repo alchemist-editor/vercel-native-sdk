@@ -1313,6 +1313,7 @@ const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
     pub const render_animation_policy = @import("render_animation_policy.zig");
+    pub const motion_sampling_policy = @import("motion_sampling_policy.zig");
     pub const referenceAnimationScheduleDirtyBounds = @import("canvas_frame.zig").referenceAnimationScheduleDirtyBounds;
     pub const command_policy = @import("command_policy.zig");
     pub const status_validation = @import("status_validation.zig");

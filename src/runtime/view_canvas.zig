@@ -1,3 +1,4 @@
+const sampling_policy = @import("motion_sampling_policy.zig");
 const geometry = @import("geometry");
 const canvas = @import("canvas");
 const canvas_frame_helpers = @import("canvas_frame.zig");
@@ -433,6 +434,11 @@ pub fn RuntimeViewCanvasFrame(comptime RuntimeView: type) type {
 
         pub fn sampleCanvasRenderAnimations(self: *const RuntimeView, timestamp_ns: u64, output: []canvas.CanvasRenderOverride) anyerror![]const canvas.CanvasRenderOverride {
             return canvas.sampleCanvasRenderAnimations(self.canvasRenderAnimations(), timestamp_ns, output);
+        }
+
+        pub fn sampleCanvasRenderAnimationsWithPolicy(self: *const RuntimeView, timestamp_ns: u64, output: []canvas.CanvasRenderOverride, policy: ?sampling_policy.Policy) anyerror![]const canvas.CanvasRenderOverride {
+            if (policy) |owner| return sampling_policy.sample(self.canvasRenderAnimations(), timestamp_ns, output, owner);
+            return self.sampleCanvasRenderAnimations(timestamp_ns, output);
         }
 
         pub fn pruneCompletedNoopCanvasRenderAnimations(self: *RuntimeView, timestamp_ns: u64) bool {
