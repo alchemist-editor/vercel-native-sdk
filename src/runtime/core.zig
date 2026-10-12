@@ -271,6 +271,7 @@ pub const Runtime = struct {
     view_coordination_policy: ?*const fn ([]const u8, []u8) usize = null,
     window_lifecycle_policy: ?*const fn ([]const u8, []u8) usize = null,
     image_registry_policy: ?*const fn ([]const u8, []u8) usize = null,
+    font_registry_policy: ?*const fn ([]const u8, []u8) usize = null,
     command_policy: ?*const fn ([]const u8, []u8) usize = null,
     text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
     render_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -875,6 +876,14 @@ pub const Runtime = struct {
     /// pointers are stable for the runtime's lifetime and tokens stamped
     /// with them compare equal frame to frame.
     pub fn textMeasureProvider(self: *const Runtime) ?*const canvas.TextMeasureProvider {
+        if (self.font_registry_policy) |policy| {
+            const choice = @import("font_registry_policy.zig").plan(policy, .provider, &.{}, self.canvas_font_count, .{ .facts = @intFromBool(self.text_measure_provider != null) }).action;
+            return switch (choice) {
+                1 => if (self.text_measure_provider) |*provider| provider else unreachable,
+                2 => &self.canvas_font_measure_provider,
+                else => null,
+            };
+        }
         if (self.text_measure_provider) |*provider| return provider;
         if (self.canvas_font_count > 0) return &self.canvas_font_measure_provider;
         return null;
@@ -1323,6 +1332,7 @@ pub const testing = struct {
     pub const view_coordination_methods = @import("window_view_runtime.zig").RuntimeWindowViewRuntime(Runtime);
     pub const window_lifecycle_policy = @import("window_lifecycle_policy.zig");
     pub const image_registry_policy = @import("image_registry_policy.zig");
+    pub const font_registry_policy = @import("font_registry_policy.zig");
     pub const window_storage_methods = @import("window_storage.zig").RuntimeWindowStorage(Runtime);
     pub const referenceWindowDragRegions = @import("canvas_widget_events.zig").collectCanvasWidgetWindowDragRegions;
     pub const input_composition_policy = @import("input_composition_policy.zig");

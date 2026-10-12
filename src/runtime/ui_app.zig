@@ -517,6 +517,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             view_coordination_policy: ?*const fn ([]const u8, []u8) usize = null,
             window_lifecycle_policy: ?*const fn ([]const u8, []u8) usize = null,
             image_registry_policy: ?*const fn ([]const u8, []u8) usize = null,
+            font_registry_policy: ?*const fn ([]const u8, []u8) usize = null,
             /// Installed by TsUiApp for compiled command and status policy.
             command_policy: ?*const fn ([]const u8, []u8) usize = null,
             text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -1569,6 +1570,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .view_coordination_policy = self.options.view_coordination_policy,
                 .window_lifecycle_policy = self.options.window_lifecycle_policy,
                 .image_registry_policy = self.options.image_registry_policy,
+                .font_registry_policy = self.options.font_registry_policy,
                 .command_policy = self.options.command_policy,
                 .text_cache_policy = self.options.text_cache_policy,
                 .render_cache_policy = self.options.render_cache_policy,
@@ -4958,7 +4960,11 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 // job.
                 self.canvas_size = frame_event.size;
                 try self.rebuild(runtime, frame_event.window_id);
-            } else if (runtime.registeredCanvasFontCount() != self.fonts_built_count) {
+            } else if (if (self.options.font_registry_policy) |policy|
+                @import("font_registry_policy.zig").plan(policy, .refresh, &.{}, runtime.registeredCanvasFontCount(), .{ .built_count = self.fonts_built_count }).action != 0
+            else
+                runtime.registeredCanvasFontCount() != self.fonts_built_count)
+            {
                 // A face joined the registry after install (late
                 // registration through the runtime seam). The runtime
                 // already invalidated measurement caches and requested
@@ -5040,7 +5046,11 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 // stale bounds.
                 slot.canvas_size = frame_event.size;
                 try self.rebuildWindowSlot(runtime, slot);
-            } else if (runtime.registeredCanvasFontCount() != self.fonts_built_count) {
+            } else if (if (self.options.font_registry_policy) |policy|
+                @import("font_registry_policy.zig").plan(policy, .refresh, &.{}, runtime.registeredCanvasFontCount(), .{ .built_count = self.fonts_built_count }).action != 0
+            else
+                runtime.registeredCanvasFontCount() != self.fonts_built_count)
+            {
                 // Late registration, first observed on a secondary
                 // window's frame (registration requests frames for every
                 // open surface, and arrival order is the platform's):

@@ -237,6 +237,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.view_coordination_policy = app.view_coordination_policy;
                     self.window_lifecycle_policy = app.window_lifecycle_policy;
                     self.image_registry_policy = app.image_registry_policy;
+                    self.font_registry_policy = app.font_registry_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;

@@ -64,6 +64,7 @@ const std = @import("std");
 const canvas = @import("canvas");
 const canvas_frame_module = @import("canvas_frame.zig");
 const canvas_limits = @import("canvas_limits.zig");
+const registry_policy = @import("font_registry_policy.zig");
 
 pub const max_registered_canvas_fonts = canvas_limits.max_registered_canvas_fonts;
 pub const max_registered_canvas_font_bytes = canvas_limits.max_registered_canvas_font_bytes;
@@ -143,13 +144,22 @@ pub fn RuntimeCanvasFonts(comptime Runtime: type) type {
         /// and draws text host-side but has no font registration seam, so
         /// the face could not be honored pixel-honestly).
         pub fn registerCanvasFont(self: *Runtime, id: canvas.FontId, ttf: []const u8) anyerror!void {
-            if (id == 0) return error.InvalidFontId;
-            if (id < canvas.min_registered_font_id) return error.ReservedFontId;
-            if (ttf.len > max_registered_canvas_font_bytes) return error.FontTooLarge;
-            if (findCanvasFontIndex(self, id) != null) return error.FontIdInUse;
-            if (self.canvas_font_count >= max_registered_canvas_fonts) return error.FontRegistryFull;
-
-            const index = self.canvas_font_count;
+            var bind_provider = false;
+            const index = if (self.font_registry_policy) |policy| compiled: {
+                var scratch: [8]u64 = undefined;
+                const program = registry_policy.plan(policy, .register, registry_policy.registryIds(self, &scratch), self.canvas_font_count, .{ .id = id, .minimum_id = canvas.min_registered_font_id, .length = ttf.len, .budget = max_registered_canvas_font_bytes });
+                try program.admit();
+                bind_provider = program.action & 2 != 0;
+                break :compiled program.selected.?;
+            } else native: {
+                if (id == 0) return error.InvalidFontId;
+                if (id < canvas.min_registered_font_id) return error.ReservedFontId;
+                if (ttf.len > max_registered_canvas_font_bytes) return error.FontTooLarge;
+                if (findCanvasFontIndex(self, id) != null) return error.FontIdInUse;
+                if (self.canvas_font_count >= max_registered_canvas_fonts) return error.FontRegistryFull;
+                bind_provider = self.canvas_font_count == 0;
+                break :native self.canvas_font_count;
+            };
             // Exact-size heap copy, owned by the runtime until deinit
             // (registration is permanent — no unregister — so this is
             // the only allocation and the only free the registry ever
@@ -191,7 +201,9 @@ pub fn RuntimeCanvasFonts(comptime Runtime: type) type {
             // `CanvasFontEntry.host_registration_token`.
             const host_token: u64 = services.registerGpuSurfaceFont(.{ .id = id, .ttf = pooled }) catch |err| switch (err) {
                 error.UnsupportedService => blk: {
-                    if (services.measure_text_fn != null) return error.FontHostRegistrationUnsupported;
+                    if (self.font_registry_policy) |policy| {
+                        try registry_policy.plan(policy, .unsupported_host, &.{}, self.canvas_font_count, .{ .facts = @intFromBool(services.measure_text_fn != null) }).admit();
+                    } else if (services.measure_text_fn != null) return error.FontHostRegistrationUnsupported;
                     break :blk 0;
                 },
                 else => return err,
@@ -217,7 +229,7 @@ pub fn RuntimeCanvasFonts(comptime Runtime: type) type {
             // happens through a settled *Runtime), so the provider
             // pointer stamped into tokens stays valid for the runtime's
             // lifetime, matching the platform provider's contract.
-            if (index == 0) {
+            if (bind_provider) {
                 self.canvas_font_measure_provider = .{
                     .context = self,
                     .measure_fn = canvasFontMeasure,
@@ -385,6 +397,10 @@ pub fn RuntimeCanvasFonts(comptime Runtime: type) type {
         }
 
         fn findCanvasFontIndex(self: *const Runtime, id: canvas.FontId) ?usize {
+            if (self.font_registry_policy) |policy| {
+                var scratch: [8]u64 = undefined;
+                return registry_policy.plan(policy, .lookup, registry_policy.registryIds(self, &scratch), self.canvas_font_count, .{ .id = id }).selected;
+            }
             for (self.canvas_font_entries[0..self.canvas_font_count], 0..) |entry, index| {
                 if (entry.id == id) return index;
             }
@@ -408,7 +424,12 @@ pub fn RuntimeCanvasFonts(comptime Runtime: type) type {
             canvas.bumpTextMeasureGeneration();
             const frame_methods = canvas_frame_module.RuntimeCanvasFrames(Runtime);
             for (self.views[0..self.view_count], 0..) |*view, index| {
-                if (!view.open or view.kind != .gpu_surface) continue;
+                if (self.font_registry_policy) |policy| {
+                    // Sample the current slot after earlier callbacks, retaining
+                    // the original iterator extent and mutation ordering.
+                    const facts: u32 = @as(u32, @intFromBool(view.open)) | (@as(u32, @intFromBool(view.kind == .gpu_surface)) << 1);
+                    if (registry_policy.plan(policy, .repaint, &.{}, self.canvas_font_count, .{ .facts = facts }).action == 0) continue;
+                } else if (!view.open or view.kind != .gpu_surface) continue;
                 view.presented_canvas_valid = false;
                 self.invalidateFor(.state, view.frame);
                 frame_methods.requestCanvasFrameForView(self, index) catch {};
