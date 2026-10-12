@@ -135,7 +135,7 @@ test "compiled GPU presentation runtime preserves full patch refusal resync JSON
     defer std.testing.allocator.free(transport);
     var packets_a: [32]c.CanvasGpuCommand = undefined;
     var packets_b: [32]c.CanvasGpuCommand = undefined;
-    for (0..12) |scenario| {
+    for (0..20) |scenario| {
         @memset(pixels, 0xa5);
         const a = try sdk.runtime.TestHarness().create(std.testing.allocator, .{});
         defer a.destroy(std.testing.allocator);
@@ -145,9 +145,15 @@ test "compiled GPU presentation runtime preserves full patch refusal resync JSON
         for ([_]@TypeOf(a){ a, b }, 0..) |h, lane| {
             h.null_platform.gpu_surfaces = true;
             h.null_platform.gpu_surface_packet_binary = true;
-            try h.start(.{ .context = &context, .name = "gpu-presentation-parity", .source = sdk.platform.WebViewSource.html(""), .render_cache_policy = if (lane == 1) observed else null });
+            h.runtime.options.pixel_present_retained_baseline = scenario == 16;
+            try h.start(.{ .context = &context, .name = "gpu-presentation-parity", .source = sdk.platform.WebViewSource.html(""), .render_cache_policy = if (lane == 1 and scenario != 18) observed else null });
             _ = try h.runtime.createView(.{ .window_id = 1, .label = "canvas", .kind = .gpu_surface, .frame = .init(0, 0, 64, 48) });
             if (scenario == 6) h.runtime.views[0].canvas_packet_generation = 0xffffffffffffffff;
+            if (scenario == 12) h.runtime.views[0].gpu_requested_backend = .software;
+            if (scenario == 16 or scenario == 17) {
+                h.runtime.options.platform.services.present_gpu_surface_packet_fn = null;
+                h.runtime.options.platform.services.present_gpu_surface_packet_binary_fn = null;
+            }
         }
         for (0..4) |step| {
             errdefer std.debug.print("presentation scenario {d}, step {d}\n", .{ scenario, step });
@@ -164,6 +170,7 @@ test "compiled GPU presentation runtime preserves full patch refusal resync JSON
                         h.null_platform.gpu_surface_packets = false;
                     },
                     11 => h.runtime.options.platform.services.present_gpu_surface_packet_fn = null,
+                    19 => h.null_platform.gpu_surface_packet_binary = step % 2 == 0,
                     else => {},
                 };
             }
@@ -182,8 +189,10 @@ test "compiled GPU presentation runtime preserves full patch refusal resync JSON
             for ([_]@TypeOf(a){ a, b }) |h| _ = try h.runtime.setCanvasDisplayList(1, "canvas", .{ .commands = &scene });
             const options = c.CanvasFrameOptions{ .frame_index = step + 1, .timestamp_ns = (step + 1) * 16000, .surface_size = .init(64, 48) };
             const byte_limit = if ((scenario == 8 or scenario == 11) and step > 0) 16 else sdk.platform.max_gpu_surface_packet_binary_bytes;
-            const ar = a.runtime.presentNextCanvasFrame(1, "canvas", options, storage_a.value, &packets_a, transport[0..byte_limit], pixels[0 .. 64 * 48 * 4], pixels[64 * 48 * 4 .. 64 * 48 * 4 * 2], c.Color.rgb8(1, 2, 3), null);
-            const br = b.runtime.presentNextCanvasFrame(1, "canvas", options, storage_b.value, &packets_b, transport[sdk.platform.max_gpu_surface_packet_binary_bytes..][0..byte_limit], pixels[64 * 48 * 4 * 2 .. 64 * 48 * 4 * 3], pixels[64 * 48 * 4 * 3 ..], c.Color.rgb8(1, 2, 3), null);
+            var compiled_options = options;
+            if (scenario == 18) compiled_options.render_cache_policy = observed;
+            const ar = a.runtime.presentNextCanvasFrame(1, "canvas", options, storage_a.value, packets_a[0..if (scenario == 13) 0 else packets_a.len], transport[0..if (scenario == 14) 0 else byte_limit], pixels[0 .. 64 * 48 * 4], pixels[64 * 48 * 4 ..][0..if (scenario == 15) 0 else 64 * 48 * 4], c.Color.rgb8(1, 2, 3), null);
+            const br = b.runtime.presentNextCanvasFrame(1, "canvas", compiled_options, storage_b.value, packets_b[0..if (scenario == 13) 0 else packets_b.len], transport[sdk.platform.max_gpu_surface_packet_binary_bytes..][0..if (scenario == 14) 0 else byte_limit], pixels[64 * 48 * 4 * 2 .. 64 * 48 * 4 * 3], pixels[64 * 48 * 4 * 3 ..][0..if (scenario == 15) 0 else 64 * 48 * 4], c.Color.rgb8(1, 2, 3), null);
             if (ar) |value| {
                 const actual = try br;
                 try @import("render_cache_e2e_tests.zig").frameEqual(value.frame, actual.frame, observed);

@@ -1313,6 +1313,9 @@ const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
     pub const scene_observation_policy = @import("canvas_scene_observation_policy.zig");
+    pub const presentation_lifecycle_policy = @import("canvas_presentation_lifecycle_policy.zig");
+    pub const referencePresentationFallback = @import("canvas_frame.zig").referencePresentationFallback;
+    pub const compiledPresentationFallback = @import("canvas_frame.zig").compiledPresentationFallback;
     pub const referenceSceneDirtyProjection = @import("canvas_frame.zig").canvasDirtyRegionForView;
     pub const referenceSceneBlurExtent = @import("canvas_frame.zig").backdropBlurSampleExtentMultiplier;
     pub const referenceSceneColor = canvas_frame_helpers.canvasColorToRgba8;

@@ -1,4 +1,5 @@
 const scene_policy = @import("canvas_scene_observation_policy.zig");
+const presentation_lifecycle = @import("canvas_presentation_lifecycle_policy.zig");
 const std = @import("std");
 const geometry = @import("geometry");
 const canvas = @import("canvas");
@@ -60,6 +61,13 @@ fn canvasFramePixelSizeWithPolicy(frame: canvas.CanvasFrame) !CanvasPixelSize {
 /// missing view stays eligible so the presentation entry point can report
 /// its normal validation error instead of masking it as a backend choice.
 pub fn canvasGpuPacketPresentationRequested(runtime: anytype, window_id: platform.WindowId, label: []const u8) bool {
+    return canvasGpuPacketRequestedWithPolicy(runtime, window_id, label, runtime.render_cache_policy);
+}
+fn canvasGpuPacketRequestedWithPolicy(runtime: anytype, window_id: platform.WindowId, label: []const u8, owner: ?presentation_lifecycle.Policy) bool {
+    if (owner) |policy| {
+        const index = runtimeFindViewIndex(runtime, window_id, label);
+        return presentation_lifecycle.plan(.requested, .{ .view_exists = index != null, .software = if (index) |i| runtime.views[i].gpu_requested_backend == .software else false }, policy).instruction == .packet;
+    }
     return if (runtimeFindViewIndex(runtime, window_id, label)) |index|
         runtime.views[index].gpu_requested_backend != .software
     else
@@ -311,7 +319,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             try validateViewLabel(label);
             const view_index = runtimeFindViewIndex(self, window_id, label) orelse return error.ViewNotFound;
             if (self.views[view_index].kind != .gpu_surface) return error.InvalidViewOptions;
-            if (self.views[view_index].gpu_requested_backend == .software) return error.UnsupportedService;
+            if (!canvasGpuPacketRequestedWithPolicy(self, window_id, label, options.render_cache_policy orelse self.render_cache_policy)) return error.UnsupportedService;
             var canvas_frame = try planCanvasFrameForView(self, view_index, options, storage, true);
             recordCanvasClearColor(self, window_id, label, clear_color);
             const presentation_scale = normalizedCanvasPresentationScaleWithPolicy(packet_scale, canvas_frame.scale, canvas_frame.gpu_plan_policy);
@@ -323,10 +331,14 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 widenCanvasFrameDirtyForPresentationScale(&canvas_frame, presentation_scale);
             var packet = try canvas_frame.gpuPacket(output);
             packet.scale = presentation_scale;
-            if (!packet.requiresRender()) return packet;
+            const render = if (canvas_frame.gpu_plan_policy) |owner|
+                presentation_lifecycle.plan(.rendering, .{ .requires_render = packet.requiresRender() }, owner).instruction != .skipped
+            else
+                packet.requiresRender();
+            if (!render) return packet;
             uploadCanvasPacketImages(self, packet) catch |err| {
                 if (err == error.UnsupportedService) {
-                    recordCanvasPacketFallback(self, window_id, label, .{ .reason = .missing_service });
+                    recordCanvasPacketFallbackWithPolicy(self, window_id, label, .{ .reason = .missing_service }, canvas_frame.gpu_plan_policy);
                 }
                 return err;
             };
@@ -337,7 +349,8 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             // offered — the null platform accepts them for inspection —
             // but a real host's refusal is attributed to the command,
             // not to a missing service.
-            const refusal: CanvasPacketRefusal = if (packet.fullyRepresentable())
+            const compiled_refusal = if (canvas_frame.gpu_plan_policy) |owner| presentation_lifecycle.plan(.direct, .{ .representable = packet.fullyRepresentable() }, owner).refusal else null;
+            const refusal: CanvasPacketRefusal = if (if (compiled_refusal) |value| value == .missing_service else packet.fullyRepresentable())
                 .{ .reason = .missing_service }
             else
                 .{ .reason = .unsupported_command, .command_kind = firstUnsupportedCommandName(canvas_frame, packet) };
@@ -354,7 +367,91 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             return packet;
         }
 
+        /// Execute lifecycle instructions between explicit raster/GPU calls.
         pub fn presentNextCanvasFrame(
+            self: *Runtime,
+            window_id: platform.WindowId,
+            label: []const u8,
+            options: canvas.CanvasFrameOptions,
+            storage: canvas.CanvasFrameStorage,
+            gpu_commands: []canvas.CanvasGpuCommand,
+            packet_json_buffer: []u8,
+            pixels: []u8,
+            scratch: []u8,
+            clear_color: canvas.Color,
+            pixel_scale: ?f32,
+        ) anyerror!CanvasPresentationResult {
+            const owner = options.render_cache_policy orelse self.render_cache_policy orelse
+                return referencePresentNextCanvasFrame(self, window_id, label, options, storage, gpu_commands, packet_json_buffer, pixels, scratch, clear_color, pixel_scale);
+            var frame = try self.nextCanvasFrame(window_id, label, options, storage);
+            recordCanvasClearColor(self, window_id, label, clear_color);
+            const index = runtimeFindViewIndex(self, window_id, label);
+            const services = self.options.platform.services;
+            var program = presentation_lifecycle.plan(.start, .{
+                .requires_render = frame.requiresRender(),
+                .view_exists = index != null,
+                .software = if (index) |i| self.views[i].gpu_requested_backend == .software else false,
+                .packet_service = services.present_gpu_surface_packet_fn != null or services.present_gpu_surface_packet_binary_fn != null,
+                .command_capacity = gpu_commands.len,
+                .packet_capacity = packet_json_buffer.len,
+            }, owner);
+            if (program.instruction == .skipped) return .{ .frame = frame, .mode = .skipped };
+            const scale = normalizedCanvasPresentationScaleWithPolicy(pixel_scale, frame.scale, frame.gpu_plan_policy);
+            if (options.render_damage_policy orelse self.render_damage_policy) |damage|
+                canvas.RenderDamagePolicy.widen(&frame, scale, damage)
+            else
+                widenCanvasFrameDirtyForPresentationScale(&frame, scale);
+            if (program.refusal == .missing_service)
+                recordCanvasPacketFallbackWithPolicy(self, window_id, label, .{ .reason = .missing_service }, owner);
+            if (program.instruction == .packet) {
+                var packet = try frame.gpuPacket(gpu_commands);
+                packet.scale = scale;
+                const result = CanvasPresentationResult{
+                    .frame = frame,
+                    .mode = .gpu_packet,
+                    .packet_command_count = packet.commandCount(),
+                    .packet_cache_action_count = packet.cacheActionCount(),
+                    .packet_cached_resource_command_count = packet.cachedResourceCommandCount(),
+                    .packet_unsupported_command_count = packet.unsupported_command_count,
+                    .packet_representable = packet.fullyRepresentable(),
+                };
+                program = presentation_lifecycle.plan(.built, .{ .representable = packet.fullyRepresentable() }, owner);
+                if (program.refusal == .unsupported_command)
+                    recordCanvasPacketFallbackWithPolicy(self, window_id, label, .{ .reason = .unsupported_command, .command_kind = firstUnsupportedCommandName(frame, packet) }, owner);
+                if (program.instruction == .upload) {
+                    const uploaded = uploaded: {
+                        uploadCanvasPacketImages(self, packet) catch |err| switch (err) {
+                            error.UnsupportedService => break :uploaded false,
+                            else => return err,
+                        };
+                        break :uploaded true;
+                    };
+                    program = presentation_lifecycle.plan(.uploaded, .{ .ok = uploaded }, owner);
+                    if (program.refusal == .missing_service)
+                        recordCanvasPacketFallbackWithPolicy(self, window_id, label, .{ .reason = .missing_service }, owner);
+                    if (program.instruction == .encode) {
+                        const presented = try presentCanvasPacketEncoded(self, window_id, label, frame, packet, clear_color, packet_json_buffer, .{ .reason = .missing_service });
+                        program = presentation_lifecycle.plan(.encoded, .{ .ok = presented }, owner);
+                        if (program.instruction == .done) {
+                            if (runtimeFindViewIndex(self, window_id, label)) |i| {
+                                self.views[i].recordCanvasFramePresentationComplete(frame);
+                                self.views[i].gpu_present_path = .packet;
+                                clearCanvasPacketFallback(&self.views[i]);
+                                recordCanvasPresentInputLatency(&self.views[i]);
+                            }
+                            return result;
+                        }
+                    }
+                }
+            }
+            var pixel_frame = frame;
+            if (pixel_scale) |value| pixel_frame.scale = value;
+            try presentCanvasFramePixelsWithRecord(self, window_id, label, pixel_frame, frame, pixels, scratch, clear_color);
+            return .{ .frame = frame, .mode = .pixels, .packet_representable = false };
+        }
+
+        /// Independent native reference for the complete presentation entry.
+        fn referencePresentNextCanvasFrame(
             self: *Runtime,
             window_id: platform.WindowId,
             label: []const u8,
@@ -466,9 +563,12 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
             clear_color: canvas.Color,
         ) anyerror!void {
             recordCanvasClearColor(self, window_id, label, clear_color);
-            if (!canvas_frame.requiresRender()) return;
+            const owner = canvas_frame.gpu_plan_policy;
+            const render = if (owner) |policy| presentation_lifecycle.plan(.rendering, .{ .requires_render = canvas_frame.requiresRender() }, policy).instruction != .skipped else canvas_frame.requiresRender();
+            if (!render) return;
             const pixel_size = try canvasFramePixelSizeWithPolicy(canvas_frame);
-            var surface = if (scratch.len >= pixel_size.byte_len)
+            const use_scratch = if (owner) |policy| presentation_lifecycle.plan(.pixels, .{ .requires_render = true, .scratch_capacity = scratch.len, .pixel_bytes = pixel_size.byte_len }, policy).use_scratch else scratch.len >= pixel_size.byte_len;
+            var surface = if (use_scratch)
                 try canvas.ReferenceRenderSurface.initWithScratch(pixel_size.width, pixel_size.height, pixels, scratch)
             else
                 try canvas.ReferenceRenderSurface.init(pixel_size.width, pixel_size.height, pixels);
@@ -503,7 +603,15 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 // changed on a Msg rebuild). The pixel adoption is marked
                 // so the packet patch gate can never encode against it.
                 var baseline_adopted = false;
-                if (self.options.pixel_present_retained_baseline) {
+                if (record_frame.gpu_plan_policy) |policy| {
+                    const start = presentation_lifecycle.plan(.baseline, .{ .retained_pixels = self.options.pixel_present_retained_baseline }, policy);
+                    const current = if (start.instruction == .gather) gatherCanvasPacketCurrentCommands(record_frame) else null;
+                    const done = presentation_lifecycle.plan(.gathered, .{ .current = current != null }, policy);
+                    if (done.instruction == .adopt) {
+                        adoptCanvasPixelPresentBaseline(&self.views[index], current.?, record_frame.surface_size, record_frame.scale);
+                    } else self.views[index].canvas_packet_baseline_valid = false;
+                    baseline_adopted = true;
+                } else if (self.options.pixel_present_retained_baseline) {
                     if (gatherCanvasPacketCurrentCommands(record_frame)) |current| {
                         adoptCanvasPixelPresentBaseline(&self.views[index], current, record_frame.surface_size, record_frame.scale);
                         baseline_adopted = true;
@@ -551,6 +659,20 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
         /// fallback.
         fn uploadCanvasPacketImages(self: *Runtime, packet: canvas.CanvasGpuPacket) anyerror!void {
             for (packet.image_actions) |action| {
+                if (packet.preparation_policy) |owner| {
+                    const admission = presentation_lifecycle.plan(.image_action, .{
+                        .image_upload = action.kind == .upload,
+                        .image_index_present = action.image_index != null,
+                        .image_index = action.image_index orelse 0,
+                        .image_count = packet.images.len,
+                    }, owner);
+                    if (admission.instruction != .observe_image) continue;
+                    const image = packet.images[action.image_index.?];
+                    const upload = presentation_lifecycle.plan(.image, .{ .image_width = image.width, .image_height = image.height, .image_bytes = image.pixels.len }, owner);
+                    if (upload.instruction != .upload) continue;
+                    try self.options.platform.services.uploadGpuSurfaceImage(.{ .id = image.image_id, .width = image.width, .height = image.height, .rgba8 = image.pixels });
+                    continue;
+                }
                 if (action.kind != .upload) continue;
                 const image_index = action.image_index orelse continue;
                 if (image_index >= packet.images.len) continue;
@@ -645,7 +767,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                 if (program.invalidate_baseline) if (view_index) |index| {
                     self.views[index].canvas_packet_baseline_valid = false;
                 };
-                if (program.patch_refused) recordCanvasPacketFallback(self, window_id, label, .{ .reason = .patch_refused });
+                if (program.patch_refused) recordCanvasPacketFallbackWithPolicy(self, window_id, label, .{ .reason = .patch_refused }, owner);
                 if (program.adopt_baseline) {
                     const view = &self.views[view_index.?];
                     adoptCanvasPacketBaseline(view, current.?, packet);
@@ -734,7 +856,7 @@ pub fn RuntimeCanvasFrames(comptime Runtime: type) type {
                             .original => refusal,
                             .none => @panic("missing GPU refusal instruction"),
                         };
-                        recordCanvasPacketFallback(self, window_id, label, reason);
+                        recordCanvasPacketFallbackWithPolicy(self, window_id, label, reason, owner);
                         return false;
                     },
                 }
@@ -2053,6 +2175,36 @@ fn recordCanvasPacketFallback(self: anytype, window_id: platform.WindowId, label
         view.gpu_present_fallback_frame_count - view.gpu_present_fallback_logged_count >= canvas_packet_fallback_log_interval_frames;
     if (!should_log) return;
     view.gpu_present_fallback_logged_count = view.gpu_present_fallback_frame_count;
+    emitCanvasPacketFallback(label, refusal, view.gpu_present_fallback_frame_count);
+}
+
+fn recordCanvasPacketFallbackWithPolicy(self: anytype, window_id: platform.WindowId, label: []const u8, refusal: CanvasPacketRefusal, owner: ?presentation_lifecycle.Policy) void {
+    const policy = owner orelse return recordCanvasPacketFallback(self, window_id, label, refusal);
+    const index = runtimeFindViewIndex(self, window_id, label) orelse return;
+    const view = &self.views[index];
+    const program = presentation_lifecycle.plan(.fallback, .{
+        .fallback_count = view.gpu_present_fallback_frame_count,
+        .logged_count = view.gpu_present_fallback_logged_count,
+        .previous_reason = view.gpu_present_fallback_reason,
+        .reason = refusal.reason,
+        .detail_bytes = refusal.command_kind.len,
+        .detail_capacity = view.gpu_present_fallback_command_kind_storage.len,
+    }, policy);
+    if (program.detail_bytes > refusal.command_kind.len or program.detail_bytes > view.gpu_present_fallback_command_kind_storage.len) @panic("invalid presentation detail extent");
+    view.gpu_present_fallback_reason = refusal.reason;
+    view.gpu_present_fallback_needed_bytes = refusal.needed_bytes;
+    view.gpu_present_fallback_limit_bytes = refusal.limit_bytes;
+    @memcpy(view.gpu_present_fallback_command_kind_storage[0..program.detail_bytes], refusal.command_kind[0..program.detail_bytes]);
+    view.gpu_present_fallback_command_kind_len = program.detail_bytes;
+    view.gpu_present_fallback_frame_count = program.fallback_count;
+    if (program.overflow) @panic("presentation fallback counter overflow");
+    view.gpu_present_fallback_logged_count = program.logged_count;
+    if (program.should_log) emitCanvasPacketFallback(label, refusal, view.gpu_present_fallback_frame_count);
+}
+pub const referencePresentationFallback = recordCanvasPacketFallback;
+pub const compiledPresentationFallback = recordCanvasPacketFallbackWithPolicy;
+
+fn emitCanvasPacketFallback(label: []const u8, refusal: CanvasPacketRefusal, count: usize) void {
     canvas_frame_log.debug(
         "gpu packet present fell back to the CPU pixel path for view \"{s}\": reason={s} needed={d}B limit={d}B command={s} fallback_frames={d} - the pixel path rasterizes text and shapes differently, so a steady fallback reads as flickering glyphs; snapshots carry the same fields as present_fallback= on the view line",
         .{
@@ -2061,7 +2213,7 @@ fn recordCanvasPacketFallback(self: anytype, window_id: platform.WindowId, label
             refusal.needed_bytes,
             refusal.limit_bytes,
             refusal.command_kind,
-            view.gpu_present_fallback_frame_count,
+            count,
         },
     );
 }

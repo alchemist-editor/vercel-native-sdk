@@ -19,6 +19,7 @@
   "src/gpu_presentation.ts",
   "src/canvas_frame_coordination.ts",
   "src/canvas_scene_observation.ts",
+  "src/canvas_presentation_lifecycle.ts",
   "src/render_animation_lifecycle.ts",
   "src/motion_sampling.ts",
   "src/vector_raster.ts",
