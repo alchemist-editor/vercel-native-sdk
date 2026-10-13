@@ -45,3 +45,6 @@ export function contractIntake(input: string, mode: string): string {
   if (mode === "service") return JSON.stringify(serviceIntake(input));
   throw new Error("unknown contract intake mode");
 }
+
+import { entryPolicy as coordinateEntry } from "./entry_coordination.ts";
+export function entryPolicy(input: string): string { return coordinateEntry(input); }

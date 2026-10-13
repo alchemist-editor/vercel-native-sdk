@@ -13,6 +13,14 @@ fn panicSink(_: ?*anyopaque, message: [*]const u8, len: usize, _: u64) callconv(
 }
 
 pub fn validate(arena: std.mem.Allocator, contract: anytype, writer: *std.Io.Writer) error{ InvalidContract, OutOfMemory, WriteFailed }!void {
+    const diagnostic = try diagnostics(arena, contract);
+    if (diagnostic.len != 0) {
+        try writer.writeAll(diagnostic);
+        return error.InvalidContract;
+    }
+}
+
+pub fn diagnostics(arena: std.mem.Allocator, contract: anytype) error{OutOfMemory}![]const u8 {
     const basenames = try arena.alloc([]const u8, contract.operations.len);
     for (contract.operations, 0..) |op, index| basenames[index] = std.fs.path.basename(op.module);
     // Paths are OS facts and i64 spellings must remain exact even beyond
@@ -30,11 +38,7 @@ pub fn validate(arena: std.mem.Allocator, contract: anytype, writer: *std.Io.Wri
     var len: usize = 0;
     nsc_profile_validate_services(input.ptr, input.len, &ptr, &len);
     // Copy while the result arena is live; writer buffers may retain bytes.
-    const diagnostic = try arena.dupe(u8, ptr[0..len]);
-    if (diagnostic.len != 0) {
-        try writer.writeAll(diagnostic);
-        return error.InvalidContract;
-    }
+    return arena.dupe(u8, ptr[0..len]);
 }
 
 pub fn generate(arena: std.mem.Allocator, input: []const u8, projection: []const u8, optimization: []const u8) error{OutOfMemory}![]const u8 {

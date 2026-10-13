@@ -1613,11 +1613,28 @@ pub fn build(b: *std.Build) void {
         const corewire_reference_mod = module(b, b.graph.host, optimize, "tools/corewire/main_reference.zig");
         @import("build/corewire.zig").linkProfile(corewire_reference_mod, ts_core_artifacts.profile_archive);
         const corewire_reference = b.addExecutable(.{ .name = "corewire-reference", .root_module = corewire_reference_mod });
+        const entry_tests = b.addSystemCommand(&.{b.findProgram(&.{"node"}, &.{}) catch unreachable});
+        entry_tests.addFileArg(b.path("tools/corewire/entry.test.ts"));
+        entry_tests.addArtifactArg(ts_core_artifacts.corewire);
+        entry_tests.addArtifactArg(corewire_reference);
+        for ([_][]const u8{ "entry_coordination.ts", "invocation.ts", "invocation_fixture.ts", "invocation_cases.ts", "core_cases.ts", "service_cases.ts" }) |source| entry_tests.addFileInput(b.path(b.fmt("tools/corewire/{s}", .{source})));
+        entry_tests.setCwd(b.path("."));
+        entry_tests.has_side_effects = true;
+        const entry_step = b.step("test-corewire-entry", "Test complete compiled corewire entry coordination against the native reference");
+        entry_step.dependOn(&entry_tests.step);
+        core_policy_step.dependOn(&entry_tests.step);
+        test_step.dependOn(&entry_tests.step);
+        const entry_mod = module(b, b.graph.host, optimize, "tools/corewire/entry_coordination.zig");
+        @import("build/corewire.zig").linkProfile(entry_mod, ts_core_artifacts.profile_archive);
+        const entry_run = b.addRunArtifact(testArtifact(b, entry_mod));
+        entry_step.dependOn(&entry_run.step);
+        core_policy_step.dependOn(&entry_run.step);
+        test_step.dependOn(&entry_run.step);
         const filesystem_tests = b.addSystemCommand(&.{b.findProgram(&.{"node"}, &.{}) catch unreachable});
         filesystem_tests.addFileArg(b.path("tools/corewire/filesystem.test.ts"));
         filesystem_tests.addArtifactArg(ts_core_artifacts.corewire);
         filesystem_tests.addArtifactArg(corewire_reference);
-        for ([_][]const u8{ "filesystem_coordination.ts", "invocation_cases.ts", "invocation_fixture.ts", "core_cases.ts", "service_cases.ts" }) |source| {
+        for ([_][]const u8{ "entry_coordination.ts", "filesystem_coordination.ts", "invocation_cases.ts", "invocation_fixture.ts", "core_cases.ts", "service_cases.ts" }) |source| {
             filesystem_tests.addFileInput(b.path(b.fmt("tools/corewire/{s}", .{source})));
         }
         filesystem_tests.has_side_effects = true;
@@ -1625,6 +1642,7 @@ pub fn build(b: *std.Build) void {
         const filesystem_step = b.step("test-corewire-filesystem", "Compare complete compiled filesystem coordination with the independent native reference");
         filesystem_step.dependOn(&filesystem_tests.step);
         core_policy_step.dependOn(&filesystem_tests.step);
+        entry_step.dependOn(&filesystem_tests.step);
         test_step.dependOn(&filesystem_tests.step);
         for ([_][]const u8{ "contract_intake.zig", "sidecar.zig", "emit.zig", "emit_facade.zig", "invocation_tests.zig" }) |source| {
             const policy_mod = module(b, b.graph.host, optimize, b.fmt("tools/corewire/{s}", .{source}));
