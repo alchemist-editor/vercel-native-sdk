@@ -116,7 +116,7 @@ pub const SessionRecorder = struct {
         @memcpy(&self.credentials_salt, salt_digest[0..self.credentials_salt.len]);
         var preamble_buffer: [journal.preamble_len]u8 = undefined;
         self.write(journal.writePreambleWithPolicy(self.recording_policy, &preamble_buffer));
-        const payload = journal.encodeHeader(header, &self.small_buffer) catch {
+        const payload = journal.encodeHeaderWithPolicy(self.recording_policy, header, &self.small_buffer) catch {
             return self.fail("session header does not fit its record budget");
         };
         self.writeRecord(.header, payload);
@@ -170,7 +170,7 @@ pub const SessionRecorder = struct {
                     self.staged_lens[self.depth] = 0;
                 },
                 .proceed => {
-                    const encoded = journal.encodeEvent(event, &self.staged[self.depth]) catch
+                    const encoded = journal.encodeEventWithPolicy(self.recording_policy, event, &self.staged[self.depth]) catch
                         return self.fail("a platform event exceeded max_session_event_bytes");
                     self.staged_lens[self.depth] = encoded.len;
                     self.staged_suppressed[self.depth] = false;
@@ -192,7 +192,7 @@ pub const SessionRecorder = struct {
             self.depth += 1;
             return;
         }
-        const encoded = journal.encodeEvent(event, &self.staged[self.depth]) catch {
+        const encoded = journal.encodeEventWithPolicy(self.recording_policy, event, &self.staged[self.depth]) catch {
             return self.fail("a platform event exceeded max_session_event_bytes");
         };
         self.staged_lens[self.depth] = encoded.len;
@@ -224,7 +224,7 @@ pub const SessionRecorder = struct {
         // commits its own facts first; suppressed accessibility children
         // contribute to their outer action in the original query order.
         for (self.staged_chrome[self.depth][0..self.staged_chrome_counts[self.depth]]) |record| {
-            const payload = journal.encodeWindowChrome(record, &self.small_buffer) catch return self.fail("window chrome record over budget");
+            const payload = journal.encodeWindowChromeWithPolicy(self.recording_policy, record, &self.small_buffer) catch return self.fail("window chrome record over budget");
             self.writeRecord(.window_chrome, payload);
             self.window_chrome_count = self.nextCount(self.window_chrome_count);
         }
@@ -270,7 +270,7 @@ pub const SessionRecorder = struct {
     pub fn recordCheckpoint(self: *SessionRecorder, frame_index: u64, fingerprint: u64) void {
         if (!self.active(.checkpoint)) return;
         self.last_checkpoint_frame = frame_index;
-        const payload = journal.encodeCheckpoint(.{
+        const payload = journal.encodeCheckpointWithPolicy(self.recording_policy, .{
             .event_ordinal = self.event_count,
             .frame_index = frame_index,
             .fingerprint = fingerprint,
@@ -285,7 +285,7 @@ pub const SessionRecorder = struct {
     /// and compares hashes.
     pub fn recordScreenshot(self: *SessionRecorder, view_label: []const u8, scale: f32, png_hash: u64, png_len: u64) void {
         if (!self.active(.screenshot)) return;
-        const payload = journal.encodeScreenshot(.{
+        const payload = journal.encodeScreenshotWithPolicy(self.recording_policy, .{
             .event_ordinal = self.event_count,
             .view_label = view_label,
             .scale = scale,
@@ -387,7 +387,7 @@ pub const SessionRecorder = struct {
             journaled.db_blob_len = record.payload.len;
             journaled.payload = "";
         }
-        const payload = journal.encodeEffect(journaled, &self.effect_buffer) catch {
+        const payload = journal.encodeEffectWithPolicy(self.recording_policy, journaled, &self.effect_buffer) catch {
             return self.fail("an effect result exceeded max_session_record_bytes");
         };
         self.writeRecord(.effect, payload);
@@ -410,7 +410,7 @@ pub const SessionRecorder = struct {
     pub fn finish(self: *SessionRecorder) void {
         if (!self.active(.finish)) return;
         self.finished = true;
-        const payload = journal.encodeEnd(.{
+        const payload = journal.encodeEndWithPolicy(self.recording_policy, .{
             .event_count = self.event_count,
             .effect_count = self.effect_count,
             .checkpoint_count = self.checkpoint_count,

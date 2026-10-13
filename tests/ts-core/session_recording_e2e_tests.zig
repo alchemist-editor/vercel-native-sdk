@@ -5,6 +5,7 @@ const p = sdk.runtime.testing.recording_policy;
 const journal = sdk.runtime.session_journal;
 const exact = @import("surface_layout_e2e_tests.zig").expectComplete;
 var stages: [13]usize = @splat(0);
+var codec_calls: [8][2]usize = @splat(.{ 0, 0 });
 pub fn observed(input: []const u8, output: []u8) usize {
     if (input.len == 0) @panic("empty recording test policy request");
     switch (input[0]) {
@@ -14,6 +15,10 @@ pub fn observed(input: []const u8, output: []u8) usize {
         },
         26 => if (input.len != 160 or input[1] > 4 or output.len != 80) @panic("invalid journal test policy request"),
         28 => if (input.len < 64 or input[1] != 1 or input[2] > 12 or output.len != 1136) @panic("invalid blob test policy request"),
+        30 => {
+            if (input.len < 24 or input[1] != 1 or input[2] > 1 or input[3] == 0 or input[3] > 7 or output.len < 16) @panic("invalid codec test policy request");
+            codec_calls[input[3]][input[2]] += 1;
+        },
         else => @panic("unexpected recording test policy opcode"),
     }
     return core.nativeEffectPolicy(input, output);
@@ -79,6 +84,7 @@ test "compiled session recording preserves nested ordering, suppression, chrome 
     _ = core.initialModel();
     defer core.rt.frameReset();
     stages = @splat(0);
+    codec_calls = @splat(.{ 0, 0 });
     const pair = try Pair.create();
     defer pair.destroy();
     try pair.begin();
@@ -108,13 +114,15 @@ test "compiled session recording preserves nested ordering, suppression, chrome 
     try pair.apply("stageEvent", .{sdk.platform.Event.wake});
     try pair.apply("recordCheckpoint", .{ @as(u64, 1), @as(u64, 1) });
     try std.testing.expectEqualSlices(u8, saved, pair.sinks[1].bytes.items);
-    var reader = try journal.Reader.init(saved);
+    var reader = try journal.Reader.initWithPolicy(saved, observed);
     _ = (try reader.next()).?;
     try std.testing.expect((try reader.next()).? == .effect);
     try std.testing.expectEqual(std.math.maxInt(u64), (try reader.next()).?.window_chrome.window_id);
     try std.testing.expect((try reader.next()).?.event == .widget_accessibility_action);
     try std.testing.expectEqual(@as(u64, 9007199254740993), (try reader.next()).?.window_chrome.window_id);
     try std.testing.expect((try reader.next()).?.event == .frame_requested);
+    while (try reader.next()) |_| {}
+    for (codec_calls[1..]) |counts| for (counts) |count| try std.testing.expect(count > 0);
     for (stages[0..11]) |count| try std.testing.expect(count > 0);
     try std.testing.expect(stages[12] > 0);
 }

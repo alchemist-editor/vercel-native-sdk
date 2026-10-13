@@ -10076,3 +10076,180 @@ test "compiled callback coordination preserves complete timer timestamps and ret
     };
     try std.testing.expectEqual(@as(usize, 42720), count);
 }
+
+// The reference is the original complete codec block, independent of the
+// portable schema and native storage adapter.
+const journal_codec_reference = @import("native_sdk").runtime.session_codec_reference;
+fn journalCodecInitial(comptime T: type) T {
+    return switch (@typeInfo(T)) {
+        .@"struct" => |st| blk: {
+            var result: T = undefined;
+            inline for (st.fields) |field| @field(result, field.name) = if (field.default_value_ptr) |ptr| @as(*const field.type, @ptrCast(@alignCast(ptr))).* else journalCodecInitial(field.type);
+            break :blk result;
+        },
+        .@"enum" => std.meta.tags(T)[0],
+        .pointer => |p| if (p.size == .slice) &.{} else @compileError("missing native pointer default"),
+        else => std.mem.zeroes(T),
+    };
+}
+fn journalCodecFixture(comptime T: type) T {
+    return switch (@typeInfo(T)) {
+        .@"struct" => |st| blk: {
+            var result: T = undefined;
+            inline for (st.fields) |field| @field(result, field.name) = journalCodecFixture(field.type);
+            break :blk result;
+        },
+        .void => {},
+        .bool => true,
+        .int => |i| if (i.signedness == .signed) std.math.minInt(T) else std.math.maxInt(T),
+        .float => @as(f32, @bitCast(@as(u32, 0x80000000))),
+        .@"enum" => std.meta.tags(T)[std.meta.tags(T).len - 1],
+        .optional => |o| if (@typeInfo(o.child) == .pointer and @typeInfo(o.child).pointer.size != .slice) null else journalCodecFixture(o.child),
+        .array => |a| if (a.child == u8) @splat(0xff) else @compileError("unsupported codec fixture"),
+        .pointer => |p| if (p.size == .slice and p.child == u8) "\x00\xff\xef\xbb\xbf\xc3\xa9" else if (p.size == .slice and p.child == []const u8) &.{ "\x00\xff", "\xef\xbb\xbf", "", "\xc3\xa9" } else null,
+        else => @compileError("unsupported codec fixture"),
+    };
+}
+fn journalCodecEqual(expected: anytype, actual: @TypeOf(expected)) !void {
+    const T = @TypeOf(expected);
+    switch (@typeInfo(T)) {
+        .float => try std.testing.expectEqual(@as(u32, @bitCast(expected)), @as(u32, @bitCast(actual))),
+        .@"struct" => |st| inline for (st.fields) |field| try journalCodecEqual(@field(expected, field.name), @field(actual, field.name)),
+        .@"union" => {
+            try std.testing.expectEqual(std.meta.activeTag(expected), std.meta.activeTag(actual));
+            switch (expected) {
+                inline else => |v, tag| try journalCodecEqual(v, @field(actual, @tagName(tag))),
+            }
+        },
+        .optional => {
+            try std.testing.expectEqual(expected != null, actual != null);
+            if (expected) |v| try journalCodecEqual(v, actual.?);
+        },
+        else => try std.testing.expectEqualDeep(expected, actual),
+    }
+}
+fn journalCodecCompare(comptime name: []const u8, value: anytype) !void {
+    const journal = native_sdk.runtime.session_journal;
+    const T = @TypeOf(value);
+    const reference_encode = @field(journal_codec_reference, "encode" ++ name);
+    const compiled_encode = @field(journal, "encode" ++ name ++ "WithPolicy");
+    const reference_decode = @field(journal_codec_reference, "decode" ++ name);
+    const compiled_decode = @field(journal, "decode" ++ name ++ "WithPolicy");
+    var expected_buffer: [4096]u8 = @splat(0xa5);
+    var actual_buffer: [4096]u8 = @splat(0xa5);
+    const bytes = try reference_encode(value, &expected_buffer);
+    const actual = try compiled_encode(core.nativeEffectPolicy, value, &actual_buffer);
+    try std.testing.expectEqualSlices(u8, bytes, actual);
+    const borrowed = try compiled_encode(core.nativeEffectPolicy, value, &actual_buffer);
+    try std.testing.expectEqual(actual_buffer[0..borrowed.len].ptr, borrowed.ptr);
+    // The complete buffer includes every untouched suffix and failed prefix.
+    for (0..bytes.len + 2) |capacity| {
+        @memset(&expected_buffer, 0xa5);
+        @memset(&actual_buffer, 0xa5);
+        const expected_outcome = reference_encode(value, expected_buffer[0..capacity]);
+        const actual_outcome = compiled_encode(core.nativeEffectPolicy, value, actual_buffer[0..capacity]);
+        if (expected_outcome) |e| {
+            try std.testing.expectEqualSlices(u8, e, try actual_outcome);
+        } else |e| {
+            try std.testing.expectError(e, actual_outcome);
+        }
+        try std.testing.expectEqualSlices(u8, &expected_buffer, &actual_buffer);
+    }
+    _ = try reference_encode(value, &expected_buffer);
+    for (0..bytes.len + 2) |length| {
+        var a: journal.EventDecodeStorage = .{};
+        var b: journal.EventDecodeStorage = .{};
+        for (&a.drop_paths, &b.drop_paths) |*x, *y| {
+            x.* = "unchanged";
+            y.* = "unchanged";
+        }
+        const payload = expected_buffer[0..length];
+        const e = if (T == native_sdk.platform.Event) reference_decode(payload, &a) else reference_decode(payload);
+        const v = if (T == native_sdk.platform.Event) compiled_decode(core.nativeEffectPolicy, payload, &b) else compiled_decode(core.nativeEffectPolicy, payload);
+        if (e) |expected| {
+            try journalCodecEqual(expected, try v);
+        } else |err| {
+            try std.testing.expectError(err, v);
+        }
+        try std.testing.expectEqualDeep(a.drop_paths, b.drop_paths);
+    }
+    // Each byte mutation is admitted or refused identically, with all borrowed
+    // payloads and scratch writes retained. No roundtrip-only oracle is used.
+    for (0..bytes.len) |at| for ([_]u8{ 0, 1, 2, 31, 255 }) |replacement| {
+        const old = expected_buffer[at];
+        expected_buffer[at] = replacement;
+        defer expected_buffer[at] = old;
+        var a: journal.EventDecodeStorage = .{};
+        var b: journal.EventDecodeStorage = .{};
+        for (&a.drop_paths, &b.drop_paths) |*x, *y| {
+            x.* = "unchanged";
+            y.* = "unchanged";
+        }
+        const payload = expected_buffer[0..bytes.len];
+        const e = if (T == native_sdk.platform.Event) reference_decode(payload, &a) else reference_decode(payload);
+        const v = if (T == native_sdk.platform.Event) compiled_decode(core.nativeEffectPolicy, payload, &b) else compiled_decode(core.nativeEffectPolicy, payload);
+        if (e) |expected| {
+            try journalCodecEqual(expected, try v);
+        } else |err| {
+            try std.testing.expectError(err, v);
+        }
+        try std.testing.expectEqualDeep(a.drop_paths, b.drop_paths);
+    };
+}
+
+test "compiled journal codec preserves all 29 event layouts and native default telemetry" {
+    const Event = native_sdk.platform.Event;
+    inline for (@typeInfo(Event).@"union".fields) |field| {
+        try journalCodecCompare("Event", @unionInit(Event, field.name, journalCodecInitial(field.type)));
+        try journalCodecCompare("Event", @unionInit(Event, field.name, journalCodecFixture(field.type)));
+    }
+}
+test "compiled journal codec preserves all 20 effect kinds and conditional suffixes" {
+    const effects = native_sdk.runtime;
+    const Record = native_sdk.runtime.session_journal.EffectResultRecord;
+    inline for (std.meta.tags(@FieldType(Record, "kind"))) |kind| {
+        var value = journalCodecInitial(Record);
+        value.kind = kind;
+        try journalCodecCompare("Effect", value);
+        value = journalCodecFixture(Record);
+        value.kind = kind;
+        try journalCodecCompare("Effect", value);
+    }
+    _ = effects;
+}
+test "compiled journal codec preserves headers checkpoints screenshots chrome and seals" {
+    const journal = native_sdk.runtime.session_journal;
+    inline for (.{ .{ "Header", journal.Header }, .{ "Checkpoint", journal.Checkpoint }, .{ "Screenshot", journal.ScreenshotMark }, .{ "WindowChrome", journal.WindowChromeRecord }, .{ "End", journal.End } }) |row| {
+        try journalCodecCompare(row[0], journalCodecInitial(row[1]));
+        try journalCodecCompare(row[0], journalCodecFixture(row[1]));
+    }
+}
+
+test "compiled journal codec borrows caller payloads without collecting the app cycle" {
+    core.rt.frameReset();
+    _ = core.initialModel();
+    const cycle = core.bootCommand();
+    const saved = try std.testing.allocator.dupe(u8, cycle);
+    defer std.testing.allocator.free(saved);
+    const journal = native_sdk.runtime.session_journal;
+    var first: [4096]u8 = undefined;
+    var second: [4096]u8 = undefined;
+    var storage: journal.EventDecodeStorage = .{};
+    const bytes = try journal.encodeEventWithPolicy(core.nativeEffectPolicy, .{ .files_dropped = .{ .window_id = 0xffff_ffff_ffff_ffff, .view_label = "raw\x00\xff", .paths = &.{ "first\x00", "\xffsecond" } } }, &first);
+    const decoded = try journal.decodeEventWithPolicy(core.nativeEffectPolicy, bytes, &storage);
+    const label = decoded.files_dropped.view_label;
+    for (decoded.files_dropped.paths) |path| {
+        const begin = @intFromPtr(path.ptr);
+        try std.testing.expect(begin >= @intFromPtr(bytes.ptr) and begin + path.len <= @intFromPtr(bytes.ptr) + bytes.len);
+    }
+    try std.testing.expect(@intFromPtr(label.ptr) >= @intFromPtr(bytes.ptr) and @intFromPtr(label.ptr) + label.len <= @intFromPtr(bytes.ptr) + bytes.len);
+    for (0..16) |_| {
+        const other = try journal.encodeEffectWithPolicy(core.nativeEffectPolicy, journalCodecFixture(journal.EffectResultRecord), &second);
+        _ = try journal.decodeEffectWithPolicy(core.nativeEffectPolicy, other);
+        try std.testing.expectEqualSlices(u8, saved, cycle);
+        try std.testing.expectEqualStrings("raw\x00\xff", label);
+        try std.testing.expectEqualStrings("first\x00", decoded.files_dropped.paths[0]);
+        try std.testing.expectEqualStrings("\xffsecond", decoded.files_dropped.paths[1]);
+    }
+    core.rt.frameReset();
+}

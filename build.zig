@@ -1502,6 +1502,9 @@ pub fn build(b: *std.Build) void {
         ts_core_e2e_step.dependOn(&markdown_view_run.step);
         test_step.dependOn(&markdown_view_run.step);
         const feed_reader_e2e_run = b.addRunArtifact(ts_core_artifacts.feed_reader);
+        const journal_codecs_run = b.addRunArtifact(ts_core_artifacts.journal_codecs);
+        const journal_codecs_step = b.step("test-ts-journal-codecs", "Compare complete compiled journal codecs with the independent native reference");
+        journal_codecs_step.dependOn(&journal_codecs_run.step);
         const file_reference_files = b.addWriteFiles();
         const callback_reference_files = b.addWriteFiles();
         ts_core_artifacts.feed_reader.root_module.addImport("callback_policy_reference", b.createModule(.{ .root_source_file = callback_reference_files.addCopyFile(b.path("src/runtime/callback_policy_test_reference.zig"), "callback_policy_reference.zig"), .target = target, .optimize = optimize }));
@@ -4400,6 +4403,7 @@ const TsCoreE2eArtifacts = struct {
     /// loopback Cmd.fetch, the generated typed client into a real service
     /// child, the shipping markup, and record→replay without either.
     feed_reader: *std.Build.Step.Compile,
+    journal_codecs: *std.Build.Step.Compile,
     shell_layout: *std.Build.Step.Compile,
     surface_layout: *std.Build.Step.Compile,
     typography: *std.Build.Step.Compile,
@@ -5401,6 +5405,7 @@ fn tsCoreE2eArtifact(
         .corewire = corewire_exe,
         .profile_archive = profile_archive,
         .ai_chat = filteredTestArtifact(b, ai_chat_mod, "ts-ai-chat-e2e-tests", &.{}),
+        .journal_codecs = filteredTestArtifact(b, feed_reader_mod, "ts-journal-codecs-tests", &.{"compiled journal codec"}),
         .feed_reader = filteredTestArtifact(b, feed_reader_mod, "ts-feed-reader-e2e-tests", &.{}),
         .shell_layout = filteredTestArtifact(b, shell_layout_mod, "ts-shell-layout-e2e-tests", &.{}),
         .typography = filteredTestArtifact(b, typography_mod, "ts-typography-e2e-tests", &.{}),

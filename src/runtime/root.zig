@@ -209,6 +209,7 @@ const runtime_persist_store = @import("persist_store.zig");
 const runtime_record_store = @import("record_store.zig");
 const runtime_relational_store = @import("relational_store.zig");
 pub const session_journal = runtime_session_journal;
+pub const session_codec_reference = @import("session_codec_reference.zig");
 pub const session_blobs = runtime_session_blobs;
 pub const persist_store = runtime_persist_store;
 pub const PersistStore = runtime_persist_store.Store;
