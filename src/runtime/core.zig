@@ -1334,6 +1334,9 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const markup_development_policy = @import("markup_development_policy.zig");
+    pub const markup_provenance = @import("ui_app_provenance.zig");
+    pub const markup_provenance_reference = @import("ui_app_provenance_reference.zig");
     pub const host_flow_reference = @import("flow_reference.zig");
     pub const host_event_pump = @import("host_event_pump.zig");
     pub const host_event_pump_reference = @import("host_event_pump_reference.zig");

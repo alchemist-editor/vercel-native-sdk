@@ -49,6 +49,7 @@ const launch_timing = @import("launch_timing.zig");
 const runtime_effects = @import("effects.zig");
 const terminal_session = @import("terminal_session.zig");
 const ui_app_provenance = @import("ui_app_provenance.zig");
+const markup_development = @import("markup_development_policy.zig");
 
 const Runtime = core.Runtime;
 const App = core.App;
@@ -531,6 +532,8 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             automation_interaction_policy: ?*const fn ([]const u8, []u8) usize = null,
             snapshot_policy: ?*const fn ([]const u8, []u8) usize = null,
             host_flow_policy: ?*const fn ([]const u8, []u8) usize = null,
+            /// Copied root/fragment reload and complete provenance programs.
+            markup_development_policy: markup_development.Policy = null,
             /// Installed by TsUiApp for compiled command and status policy.
             command_policy: ?*const fn ([]const u8, []u8) usize = null,
             text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -1449,6 +1452,8 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             return .{
                 .model = model,
                 .options = options,
+                .provenance = if (comptime features.runtime_markup) .{ .policy = options.markup_development_policy, .allocator = backing } else {},
+                .provenance_closure = if (comptime features.runtime_markup) .{ .policy = options.markup_development_policy } else {},
                 .backing = backing,
                 .arenas = .{
                     std.heap.ArenaAllocator.init(backing),
@@ -1515,6 +1520,8 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             self.* = .{
                 .model = undefined,
                 .options = options,
+                .provenance = if (comptime features.runtime_markup) .{ .policy = options.markup_development_policy, .allocator = backing } else {},
+                .provenance_closure = if (comptime features.runtime_markup) .{ .policy = options.markup_development_policy } else {},
                 .backing = backing,
                 .arenas = .{
                     std.heap.ArenaAllocator.init(backing),
@@ -3752,6 +3759,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             const sources: []const canvas.ui_markup.SourceFile = if (self.options.markup) |markup_options| markup_options.sources else &.{};
             var set_loader = canvas.ui_markup.SourceSetLoader{ .set = sources };
             var hashing = HashingLoader.init(set_loader.loader(), source, "");
+            hashing.policy = self.options.markup_development_policy;
             if (comptime features.runtime_markup) {
                 self.provenance_closure.reset();
                 hashing.closure = &self.provenance_closure;
@@ -3762,17 +3770,43 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             const owned_source = try arena.dupe(u8, source);
             var diagnostic: canvas.ui_markup.MarkupErrorInfo = .{};
             const document = canvas.ui_markup.resolveImports(arena, "", owned_source, hashing.loader(), &diagnostic) catch |err| {
-                if (err == error.MarkupSyntax or err == error.MarkupImport) self.recordMarkupDiagnostic(diagnostic);
+                if (self.options.markup_development_policy) |callback| {
+                    const program = markup_development.reload(callback, 0, true, true, err == error.MarkupSyntax or err == error.MarkupImport, false, self.installed);
+                    for (program) |byte| switch (@as(markup_development.Action, @enumFromInt(byte))) {
+                        .end => break,
+                        .diagnostic => self.recordMarkupDiagnostic(diagnostic),
+                        else => unreachable,
+                    };
+                } else if (err == error.MarkupSyntax or err == error.MarkupImport) self.recordMarkupDiagnostic(diagnostic);
                 return err;
             };
             // The typed-document pass: attribute expressions parse once
             // here instead of on every frame's build.
+            if (self.options.markup_development_policy) |callback| {
+                try self.applyRootMarkupProgram(callback, 0, document, arena, next_index, hashing.hasher.final(), "", owned_source, null, 0);
+                return;
+            }
             const canonical = try canvas.ui_markup.canonicalize(arena, document);
             self.adoptMarkupDocument(canonical, next_index, hashing.hasher.final());
             // Embedded resolve: root nodes carry an empty src_path, and
             // imported entries are markup-root-relative (joined onto the
             // watched file's directory for their on-disk location).
             self.commitProvenanceFiles("", owned_source, false);
+        }
+
+        fn applyRootMarkupProgram(self: *Self, callback: *const fn ([]const u8, []u8) usize, kind: u8, document: canvas.ui_markup.MarkupDocument, arena: std.mem.Allocator, next_index: usize, hash: u64, path: []const u8, source: []const u8, runtime: ?*Runtime, window_id: platform.WindowId) anyerror!void {
+            const program = markup_development.reload(callback, kind, kind == 0 or hash != self.markup_source_hash, false, false, false, self.installed);
+            var canonical = document;
+            for (program) |byte| switch (@as(markup_development.Action, @enumFromInt(byte))) {
+                .end => break,
+                .canonicalize => canonical = if (kind == 0) try canvas.ui_markup.canonicalize(arena, document) else canvas.ui_markup.canonicalize(arena, document) catch document,
+                .adopt_root => self.adoptMarkupDocument(canonical, next_index, hash),
+                .provenance => self.commitProvenanceFiles(path, source, kind == 1),
+                .rebuild_root => if (runtime) |value| {
+                    self.rebuild(value, window_id) catch {};
+                },
+                else => unreachable,
+            };
         }
 
         /// Activate a resolved document built into `arena_index`'s arena.
@@ -3799,6 +3833,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             /// resolver-relative path and content hash is recorded so the
             /// adopt step can commit them as write-back anchors.
             closure: ?*ui_app_provenance.ClosureFiles = null,
+            policy: markup_development.Policy = null,
 
             fn init(inner: canvas.ui_markup.ImportLoader, root_source: []const u8, strip_prefix: []const u8) HashingLoader {
                 var hasher = std.hash.Wyhash.init(0);
@@ -3814,7 +3849,9 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 const self: *HashingLoader = @ptrCast(@alignCast(@constCast(context)));
                 const source = self.inner.load(self.inner.context, arena, path) orelse return null;
                 var hashed_path = path;
-                if (self.strip_prefix.len > 0 and path.len > self.strip_prefix.len and
+                if (self.policy) |callback| {
+                    hashed_path = markup_development.stripPrefix(callback, self.strip_prefix, path);
+                } else if (self.strip_prefix.len > 0 and path.len > self.strip_prefix.len and
                     std.mem.startsWith(u8, path, self.strip_prefix) and path[self.strip_prefix.len] == '/')
                 {
                     hashed_path = path[self.strip_prefix.len + 1 ..];
@@ -3846,7 +3883,16 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             for (self.provenance_closure.entries[0..self.provenance_closure.len]) |*entry| {
                 const stamped = entry.path[0..entry.path_len];
                 var disk_buffer: [ui_app_provenance.max_path_bytes]u8 = undefined;
-                const disk: []const u8 = if (entries_are_disk_paths)
+                const disk: []const u8 = if (self.options.markup_development_policy) |callback| blk: {
+                    var input: [2 * ui_app_provenance.max_path_bytes + 16]u8 = undefined;
+                    var writer = std.Io.Writer.fixed(&input);
+                    const r = markup_development.Request.begin(&writer, 10) catch unreachable;
+                    r.byte(@intFromBool(entries_are_disk_paths)) catch unreachable;
+                    r.byte(@intFromBool(watch_path != null)) catch unreachable;
+                    r.blob(disk_prefix[0..@min(disk_prefix.len, ui_app_provenance.max_path_bytes + 1)]) catch unreachable;
+                    r.blob(stamped) catch unreachable;
+                    break :blk markup_development.evaluate(callback, writer.buffered(), &disk_buffer);
+                } else if (entries_are_disk_paths)
                     stamped
                 else if (watch_path == null)
                     ""
@@ -3881,12 +3927,37 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         /// sites) and the arena resets on the next reload attempt, so the
         /// stored copy owns its bytes.
         fn recordMarkupDiagnostic(self: *Self, info: canvas.ui_markup.MarkupErrorInfo) void {
-            const already_reported = if (self.markup_diagnostic) |current|
-                current.line == info.line and current.column == info.column and
-                    std.mem.eql(u8, current.message, info.message) and std.mem.eql(u8, current.path, info.path)
-            else
-                false;
-            if (!already_reported) {
+            var should_report: bool = undefined;
+            var message_len: usize = @min(info.message.len, self.markup_diagnostic_message_storage.len);
+            var path_len: usize = @min(info.path.len, self.markup_diagnostic_path_storage.len);
+            if (self.options.markup_development_policy) |callback| {
+                var input: [8192]u8 = undefined;
+                var writer = std.Io.Writer.fixed(&input);
+                const r = markup_development.Request.begin(&writer, 2) catch unreachable;
+                const current = self.markup_diagnostic;
+                r.byte(@intFromBool(current != null)) catch unreachable;
+                r.byte(@intFromBool(if (current) |value| value.line == info.line else false)) catch unreachable;
+                r.byte(@intFromBool(if (current) |value| value.column == info.column else false)) catch unreachable;
+                r.blob(if (current) |value| value.message else "") catch unreachable;
+                r.blob(info.message[0..@min(info.message.len, self.markup_diagnostic_message_storage.len + 1)]) catch unreachable;
+                r.blob(if (current) |value| value.path else "") catch unreachable;
+                r.blob(info.path[0..@min(info.path.len, self.markup_diagnostic_path_storage.len + 1)]) catch unreachable;
+                r.word(self.markup_diagnostic_message_storage.len) catch unreachable;
+                r.word(self.markup_diagnostic_path_storage.len) catch unreachable;
+                var output: [12]u8 = undefined;
+                const result = markup_development.evaluate(callback, writer.buffered(), &output);
+                if (result.len != 12 or markup_development.word(result, 0) > 1 or markup_development.word(result, 4) > message_len or markup_development.word(result, 8) > path_len) @panic("invalid markup diagnostic extent");
+                should_report = markup_development.word(result, 0) != 0;
+                message_len = markup_development.word(result, 4);
+                path_len = markup_development.word(result, 8);
+            } else {
+                should_report = if (self.markup_diagnostic) |current|
+                    !(current.line == info.line and current.column == info.column and
+                        std.mem.eql(u8, current.message, info.message) and std.mem.eql(u8, current.path, info.path))
+                else
+                    true;
+            }
+            if (should_report) {
                 // std.debug.print, not std.log: the default scaffold app is
                 // ReleaseFast (std.log only passes .err there), while
                 // logged errors fail test suites that exercise bad markup
@@ -3897,9 +3968,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                     std.debug.print("markup view failed to build ({d}:{d}): {s}\n", .{ info.line, info.column, info.message });
                 }
             }
-            const message_len = @min(info.message.len, self.markup_diagnostic_message_storage.len);
             @memcpy(self.markup_diagnostic_message_storage[0..message_len], info.message[0..message_len]);
-            const path_len = @min(info.path.len, self.markup_diagnostic_path_storage.len);
             @memcpy(self.markup_diagnostic_path_storage[0..path_len], info.path[0..path_len]);
             self.markup_diagnostic = .{
                 .line = info.line,
@@ -3919,7 +3988,9 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 markup_options.watch_path != null and markup_options.io != null
             else
                 false;
-            if (root_armed) {
+            const count = if (comptime fragment_watch_enabled) (if (self.options.fragment_watch) |watch| watch.fragments.len else 0) else 0;
+            const plan = if (self.options.markup_development_policy) |callback| markup_development.watch(callback, root_armed, self.options.view != null, self.markup_source_hash == 0, fragment_watch_enabled and self.options.fragment_watch != null, count, max_watched_fragments) else null;
+            if (if (plan) |value| value[0] != 0 else root_armed and self.options.view != null and self.markup_source_hash == 0) {
                 const markup_options = self.options.markup.?;
                 // With a compiled `view` also set, the embedded sources are
                 // the baseline: the interpreter only takes over once the
@@ -3927,12 +3998,10 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 // be computed the way the poll computes it — over the whole
                 // resolved import closure — or the first poll would flag a
                 // phantom change.
-                if (self.options.view != null and self.markup_source_hash == 0) {
-                    self.markup_source_hash = self.embeddedMarkupClosureHash(markup_options);
-                }
+                self.markup_source_hash = self.embeddedMarkupClosureHash(markup_options);
             }
             const fragments_armed = self.armFragmentWatch();
-            if (!root_armed and !fragments_armed) return;
+            if (if (plan) |value| value[1] == 0 else !root_armed and !fragments_armed) return;
             runtime.startTimer(markup_watch_timer_id, markup_watch_interval_ns, true) catch {};
             // Make the armed watch observable: the automation snapshot
             // header reports `markup_watch=armed|off`, so a dev loop can
@@ -3953,19 +4022,20 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
         fn armFragmentWatch(self: *Self) bool {
             if (comptime !fragment_watch_enabled) return false;
             const fragment_watch = self.options.fragment_watch orelse return false;
-            if (fragment_watch.fragments.len > max_watched_fragments) {
+            const plan = if (self.options.markup_development_policy) |callback| markup_development.watch(callback, false, false, false, true, fragment_watch.fragments.len, max_watched_fragments) else null;
+            if (if (plan) |value| value[3] != 0 else fragment_watch.fragments.len > max_watched_fragments) {
                 ui_app_log.warn(
                     "fragment watch: {d} fragments registered but the watch budget is {d} (max_watched_fragments) - the rest stay compiled-only; consolidate fragments or raise the budget",
                     .{ fragment_watch.fragments.len, max_watched_fragments },
                 );
             }
-            const count = @min(fragment_watch.fragments.len, max_watched_fragments);
+            const count: usize = if (plan) |value| value[2] else @min(fragment_watch.fragments.len, max_watched_fragments);
             for (fragment_watch.fragments[0..count], self.markup_fragment_slots[0..count]) |spec, *slot| {
                 // Baseline into the slot's inactive arena — reset on the
                 // next reload attempt, so this costs nothing durable.
                 const scratch_index = slot.arena_index ^ 1;
                 _ = slot.arenas[scratch_index].reset(.retain_capacity);
-                slot.baseline_hash = embeddedClosureHash(slot.arenas[scratch_index].allocator(), spec.source, spec.sources);
+                slot.baseline_hash = embeddedClosureHash(slot.arenas[scratch_index].allocator(), spec.source, spec.sources, self.options.markup_development_policy);
                 slot.hash = slot.baseline_hash;
             }
             return count > 0;
@@ -3976,18 +4046,19 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             // hashing side effect; the arena resets on the next reload.
             const scratch_index = self.markup_arena_index ^ 1;
             _ = self.markup_arenas[scratch_index].reset(.retain_capacity);
-            return embeddedClosureHash(self.markup_arenas[scratch_index].allocator(), markup_options.source, markup_options.sources);
+            return embeddedClosureHash(self.markup_arenas[scratch_index].allocator(), markup_options.source, markup_options.sources, self.options.markup_development_policy);
         }
 
         /// Hash an embedded source closure exactly like the disk poll
         /// hashes the on-disk one: root bytes plus every loaded file's
         /// root-relative path and bytes, in resolution order.
-        fn embeddedClosureHash(arena: std.mem.Allocator, source: []const u8, sources: []const canvas.ui_markup.SourceFile) u64 {
+        fn embeddedClosureHash(arena: std.mem.Allocator, source: []const u8, sources: []const canvas.ui_markup.SourceFile, policy: markup_development.Policy) u64 {
             if (sources.len == 0) {
                 return std.hash.Wyhash.hash(0, source);
             }
             var set_loader = canvas.ui_markup.SourceSetLoader{ .set = sources };
             var hashing = HashingLoader.init(set_loader.loader(), source, "");
+            hashing.policy = policy;
             var diagnostic: canvas.ui_markup.MarkupErrorInfo = .{};
             _ = canvas.ui_markup.resolveImports(
                 arena,
@@ -4018,6 +4089,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             var disk_loader = DiskImportLoader{ .io = io };
             const watch_dir = std.fs.path.dirname(watch_path) orelse "";
             var hashing = HashingLoader.init(disk_loader.loader(), source, watch_dir);
+            hashing.policy = self.options.markup_development_policy;
             if (comptime features.runtime_markup) {
                 self.provenance_closure.reset();
                 hashing.closure = &self.provenance_closure;
@@ -4025,6 +4097,16 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             var diagnostic: canvas.ui_markup.MarkupErrorInfo = .{};
             const document = canvas.ui_markup.resolveImports(arena, watch_path, source, hashing.loader(), &diagnostic) catch |err| {
                 const hash = hashing.hasher.final();
+                if (self.options.markup_development_policy) |callback| {
+                    const program = markup_development.reload(callback, 1, hash != self.markup_source_hash, true, err == error.MarkupSyntax or err == error.MarkupImport, false, self.installed);
+                    for (program) |byte| switch (@as(markup_development.Action, @enumFromInt(byte))) {
+                        .end => break,
+                        .observed_hash => self.markup_source_hash = hash,
+                        .diagnostic => self.recordMarkupDiagnostic(diagnostic),
+                        else => unreachable,
+                    };
+                    return;
+                }
                 if (hash == self.markup_source_hash) return;
                 self.markup_source_hash = hash;
                 if (err == error.MarkupSyntax or err == error.MarkupImport) {
@@ -4033,6 +4115,10 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 return;
             };
             const hash = hashing.hasher.final();
+            if (self.options.markup_development_policy) |callback| {
+                self.applyRootMarkupProgram(callback, 1, document, arena, next_index, hash, watch_path, source, runtime, window_id) catch {};
+                return;
+            }
             if (hash == self.markup_source_hash) return;
             // Canonicalize for per-frame cost only; on OOM the raw
             // document builds identically through attrTyped's fallback.
@@ -4066,9 +4152,20 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 var disk_loader = DiskImportLoader{ .io = fragment_watch.io };
                 const watch_dir = std.fs.path.dirname(spec.path) orelse "";
                 var hashing = HashingLoader.init(disk_loader.loader(), source, watch_dir);
+                hashing.policy = self.options.markup_development_policy;
                 var diagnostic: canvas.ui_markup.MarkupErrorInfo = .{};
                 const document = canvas.ui_markup.resolveImports(arena, spec.path, source, hashing.loader(), &diagnostic) catch |err| {
                     const hash = hashing.hasher.final();
+                    if (self.options.markup_development_policy) |callback| {
+                        const program = markup_development.reload(callback, 2, hash != slot.hash, true, err == error.MarkupSyntax or err == error.MarkupImport, false, self.installed);
+                        for (program) |byte| switch (@as(markup_development.Action, @enumFromInt(byte))) {
+                            .end => break,
+                            .observed_hash => slot.hash = hash,
+                            .diagnostic => self.recordMarkupDiagnostic(diagnostic),
+                            else => unreachable,
+                        };
+                        continue;
+                    }
                     if (hash == slot.hash) continue;
                     slot.hash = hash;
                     if (err == error.MarkupSyntax or err == error.MarkupImport) {
@@ -4077,6 +4174,22 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                     continue;
                 };
                 const hash = hashing.hasher.final();
+                if (self.options.markup_development_policy) |callback| {
+                    const program = markup_development.reload(callback, 2, hash != slot.hash, false, false, hash == slot.baseline_hash, self.installed);
+                    var canonical = document;
+                    for (program) |byte| switch (@as(markup_development.Action, @enumFromInt(byte))) {
+                        .end => break,
+                        .observed_hash => slot.hash = hash,
+                        .canonicalize => canonical = canvas.ui_markup.canonicalize(arena, document) catch document,
+                        .restore_fragment => slot.document = null,
+                        .adopt_fragment => slot.document = canonical,
+                        .switch_arena => slot.arena_index = next_index,
+                        .clear_diagnostic => self.markup_diagnostic = null,
+                        .adopted_fragment => any_adopted = true,
+                        else => unreachable,
+                    };
+                    continue;
+                }
                 if (hash == slot.hash) continue;
                 slot.hash = hash;
                 if (hash == slot.baseline_hash) {
@@ -4100,7 +4213,14 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             // Fragments build wherever the app's views embed them — the
             // main canvas and declared windows — so a reload re-derives
             // every open view.
-            if (any_adopted and self.installed) self.rebuildAllViews(runtime) catch {};
+            const should_rebuild = if (self.options.markup_development_policy) |callback| blk: {
+                const input = [_]u8{ 32, 1, 11, 0, @intFromBool(any_adopted), @intFromBool(self.installed) };
+                var output: [4]u8 = undefined;
+                const result = markup_development.evaluate(callback, &input, &output);
+                if (result.len != 4 or markup_development.word(result, 0) > 1) @panic("invalid markup rebuild result");
+                break :blk markup_development.word(result, 0) != 0;
+            } else any_adopted and self.installed;
+            if (should_rebuild) self.rebuildAllViews(runtime) catch {};
         }
 
         /// The `override` half of the fragment hot-reload seam (see

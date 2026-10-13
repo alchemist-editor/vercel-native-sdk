@@ -607,6 +607,7 @@ function dbPolicyLookup(request: Uint8Array, positions: DataView, keyStart: numb
  * neither mutates its borrowed input nor resets the dispatch frame.
  */
 export function native_effect_policy(request: Uint8Array): Uint8Array {
+  if (request[0] === 32) return markupDevelopmentPolicy(request);
   if (request[0] === 31) return hostFlowPolicy(request);
   if (request[0] === 30) return sessionCodecPolicy(request);
   if (request[0] === 29) return snapshotSerializationPolicy(request);

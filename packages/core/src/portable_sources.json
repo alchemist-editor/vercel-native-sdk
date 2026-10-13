@@ -3,6 +3,7 @@
   "src/runtime_policy.ts",
   "src/session_codecs.ts",
   "src/host_flow.ts",
+  "src/markup_development.ts",
   "src/command_coordination.ts",
   "src/status_validation.ts",
   "src/paragraph_layout.ts",

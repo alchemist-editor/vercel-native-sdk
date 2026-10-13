@@ -508,6 +508,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 stamped.app_dispatch_policy = core.nativeEffectPolicy;
                 if (options.host_flow_policy != null) @panic("TsUiApp owns host_flow_policy - remove custom host flow wiring");
                 stamped.host_flow_policy = core.nativeEffectPolicy;
+                if (options.markup_development_policy != null) @panic("TsUiApp owns markup_development_policy - remove custom markup development wiring");
+                stamped.markup_development_policy = core.nativeEffectPolicy;
                 if (options.replay_policy != null) @panic("TsUiApp owns replay_policy - remove custom replay wiring");
                 stamped.replay_policy = core.nativeEffectPolicy;
                 if (options.recording_policy != null) @panic("TsUiApp owns recording_policy - remove custom recording wiring");
