@@ -6,18 +6,16 @@
      Verify without writing:
        node packages/core/scripts/gen_service_surface.mjs --check -->
 
-# Service compile surface — scriptc 0.2.10
+# Service compile surface — scriptc 0.3.0
 
 What TypeScript under `src/services/` can use, as stated by the pinned
-compiler itself (surface manifest schema 1, 651 entries:
-522 static, 14 dynamic-only, 115 unsupported).
+compiler itself (surface manifest schema 2, 650 entries:
+522 static, 128 unsupported).
 
 How to read the tables:
 
 - **static** — compiles in the engine-free static tier services use.
-- **dynamic-only** — needs the embedded dynamic engine (`--dynamic`),
-  which Native SDK builds never pass, so for services this means
-  **unavailable** until the entry goes static.
+- Compilation is native-only; unsupported dependencies receive build diagnostics.
 - **unsupported** — refused with the listed SC code. A status describes
   where the named code is *raised*: forms outside the supported subset
   refuse with that code, while supported forms appear as their own
@@ -68,7 +66,7 @@ each one refuses.
 
 | Entry id | Surface | Status | Refusal code | Notes |
 |---|---|---|---|---|
-| `diagnostic.sc1010` | package imports | unsupported | `SC1010` | relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, module, and console modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported |
+| `diagnostic.sc1010` | package imports | unsupported | `SC1010` | relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), statically compiled npm packages, and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, module, and console modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported |
 | `diagnostic.sc1012` | default exports/imports | unsupported | `SC1012` | use named exports: export function f() {} / import { f } from "./m" |
 | `diagnostic.sc1013` | namespace imports (* as ns) | unsupported | `SC1013` |  |
 | `diagnostic.sc1014` | re-exports and export lists | unsupported | `SC1014` | export declarations directly: export function f() {} |
@@ -101,12 +99,11 @@ each one refuses.
 | `diagnostic.sc2007` | values of overloaded function type (a compiled function value is one signature) | unsupported | `SC2007` |  |
 | `diagnostic.sc2008` | intersection types with no resolved lowering | unsupported | `SC2008` |  |
 | `diagnostic.sc2009` | supported container and function shapes over a component type outside its slot | unsupported | `SC2009` |  |
-| `diagnostic.sc2010` | constructs that exist only in the embedded dynamic engine | dynamic-only | `SC2010` |  |
-| `diagnostic.sc2011` | 'any'-typed values and the operations on them | dynamic-only | `SC2011` |  |
-| `diagnostic.sc2012` | standard-library surface that runs in the embedded dynamic engine | dynamic-only | `SC2012` |  |
-| `diagnostic.sc2013` | npm package imports and values (the package's implementation runs in the embedded engine) | dynamic-only | `SC2013` |  |
+| `diagnostic.sc2010` | runtime JavaScript execution | unsupported | `SC2010` |  |
+| `diagnostic.sc2011` | 'any'-typed values and the operations on them | unsupported | `SC2011` |  |
+| `diagnostic.sc2012` | standard-library forms without native lowering | unsupported | `SC2012` |  |
+| `diagnostic.sc2013` | npm package imports and values without native lowering | unsupported | `SC2013` |  |
 | `diagnostic.sc2020` | standard-library or @types/node surface with no lowering | unsupported | `SC2020` |  |
-| `diagnostic.sc2030` | npm package code that cannot be embedded for the dynamic engine | unsupported | `SC2030` |  |
 
 ## Node built-in modules
 
@@ -290,7 +287,7 @@ manifest row in the Notes column:
 | `node-builtin.http.maxHeaderSize` | http.maxHeaderSize | static |  | constant value read |
 | `node-builtin.http2.connect` | http2.connect | unsupported | `SC2020` | HTTP/2 client sessions have no lowering — the lowered http2 surface is the SERVER side: createSecureServer({ allowHTTP1: true, cert, key }), which serves HTTP/1.1 only (ALPN never offers h2 — h2-capable clients negotiate down); an HTTP/1.1 client is https.request |
 | `node-builtin.http2.createServer` | http2.createServer | unsupported | `SC2020` | cleartext (h2c) servers have no lowering — the lowered http2 surface is createSecureServer({ allowHTTP1: true, cert, key }), which serves HTTP/1.1 over TLS (plain HTTP/1.1 is http.createServer) |
-| `node-builtin.module.createRequire` | module.createRequire | unsupported | `SC2020` | the lowered shape is a const binding (or a proven stable top-level let/var) over createRequire(import.meta.url) (or __filename) whose require calls take STATIC string literals — builtins, project modules (including #imports), relative .json documents, --npm-static packages, and installed npm packages under --dynamic resolve at build time; dynamic specifiers cannot exist in a compiled binary's fixed module graph |
+| `node-builtin.module.createRequire` | module.createRequire | unsupported | `SC2020` | the lowered shape is a const binding (or a proven stable top-level let/var) over createRequire(import.meta.url) (or __filename) whose require calls take STATIC string literals — builtins, project modules (including #imports), relative .json documents and natively compiled npm packages resolve at build time; dynamic specifiers cannot exist in a compiled binary's fixed module graph |
 | `node-builtin.module.isBuiltin` | module.isBuiltin | unsupported | `SC2020` | the lowered call checks a string against the baked Node v24 list, including bare/node: aliases and prefix-only builtins |
 | `node-builtin.module.syncBuiltinESMExports` | module.syncBuiltinESMExports | unsupported | `SC2020` | the direct zero-argument call is a no-op because compiled builtin exports are immutable and cannot become stale |
 | `node-builtin.net.getDefaultAutoSelectFamilyAttemptTimeout` | net.getDefaultAutoSelectFamilyAttemptTimeout | static |  |  |
@@ -451,7 +448,7 @@ manifest row in the Notes column:
 | `stdlib.abort-signal.aborted` | AbortSignal.aborted | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: generated:webidl-operations |
 | `stdlib.abort-signal.add-event-listener` | AbortSignal.addEventListener | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, identity, callback-order, callback-this; differential evidence: generated:abort-events, fixture:static-listener-this, fixture:static-listener-noncallable |
 | `stdlib.abort-signal.any` | AbortSignal.any | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, missing-arguments, surplus-arguments, property-read; differential evidence: generated:webidl-operations, fixture:static-stream-this |
-| `stdlib.abort-signal.constructor` | AbortSignal constructor | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Node exposes the interface object but constructing it throws; neither compiler tier currently preserves that constructor behavior |
+| `stdlib.abort-signal.constructor` | AbortSignal constructor | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Node exposes the interface object but constructing it throws; the compiler does not preserve that constructor behavior |
 | `stdlib.abort-signal.dispatch-event` | AbortSignal.dispatchEvent | static |  | Node 24.15.0 / Undici 7.24.4; facets: callback-order, callback-this, error-shape; differential evidence: fixture:static-dispatch-throw |
 | `stdlib.abort-signal.onabort` | AbortSignal.onabort | static |  | Node 24.15.0 / Undici 7.24.4; facets: callback-order, callback-this, mutation, property-read; differential evidence: generated:abort-events, fixture:static-listener-this |
 | `stdlib.abort-signal.reason` | AbortSignal.reason | static |  | Node 24.15.0 / Undici 7.24.4; facets: identity, liveness, property-read; differential evidence: generated:webidl-operations, fixture:static-stream-this |
@@ -515,33 +512,33 @@ manifest row in the Notes column:
 | `stdlib.date.valueOf` | Date.prototype.valueOf | static |  | the same millisecond read as getTime() |
 | `stdlib.fetch` | fetch | static |  | Node 24.15.0 / Undici 7.24.4; facets: argument-evaluation, webidl-conversion, surplus-arguments, promise-settlement, transport, error-shape; differential evidence: fixture:static, fixture:static-coercion, fixture:static-network-error |
 | `stdlib.fetch.request-init.body` | RequestInit.body | static |  | Node 24.15.0 / Undici 7.24.4; conversion: string, Uint8Array, ReadableStream, or null; differential evidence: fixture:static, fixture:static-stream, fixture:static-coercion |
-| `stdlib.fetch.request-init.cache` | RequestInit.cache | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
-| `stdlib.fetch.request-init.credentials` | RequestInit.credentials | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
-| `stdlib.fetch.request-init.dispatcher` | RequestInit.dispatcher | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; the dynamic tier recognizes Vercel CLI's EnvProxyDispatcher and applies equivalent native environment-proxy routing |
+| `stdlib.fetch.request-init.cache` | RequestInit.cache | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.credentials` | RequestInit.credentials | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.dispatcher` | RequestInit.dispatcher | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; custom dispatchers are unsupported; native environment-proxy routing uses NODE_USE_ENV_PROXY |
 | `stdlib.fetch.request-init.duplex` | RequestInit.duplex | static |  | Node 24.15.0 / Undici 7.24.4; conversion: WebIDL enum; 'half' required for streaming bodies; differential evidence: fixture:static-stream, fixture:static-coercion |
 | `stdlib.fetch.request-init.headers` | RequestInit.headers | static |  | Node 24.15.0 / Undici 7.24.4; conversion: Headers, record, or sequence-of-pairs snapshot; differential evidence: fixture:static, fixture:static-coercion |
-| `stdlib.fetch.request-init.integrity` | RequestInit.integrity | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
-| `stdlib.fetch.request-init.keepalive` | RequestInit.keepalive | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.integrity` | RequestInit.integrity | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.keepalive` | RequestInit.keepalive | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
 | `stdlib.fetch.request-init.method` | RequestInit.method | static |  | Node 24.15.0 / Undici 7.24.4; conversion: WebIDL ByteString after all call arguments evaluate; differential evidence: fixture:static-coercion |
-| `stdlib.fetch.request-init.mode` | RequestInit.mode | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
-| `stdlib.fetch.request-init.priority` | RequestInit.priority | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.mode` | RequestInit.mode | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.priority` | RequestInit.priority | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
 | `stdlib.fetch.request-init.redirect` | RequestInit.redirect | static |  | Node 24.15.0 / Undici 7.24.4; conversion: WebIDL enum: follow, error, or manual; differential evidence: fixture:static, fixture:static-coercion |
-| `stdlib.fetch.request-init.referrer` | RequestInit.referrer | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
-| `stdlib.fetch.request-init.referrerPolicy` | RequestInit.referrerPolicy | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.referrer` | RequestInit.referrer | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.referrerPolicy` | RequestInit.referrerPolicy | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
 | `stdlib.fetch.request-init.signal` | RequestInit.signal | static |  | Node 24.15.0 / Undici 7.24.4; conversion: native AbortSignal handle or absent; differential evidence: fixture:static, fixture:static-abort-throw |
-| `stdlib.fetch.request-init.window` | RequestInit.window | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; neither compiler tier preserves this RequestInit member's conversion or transport behavior |
+| `stdlib.fetch.request-init.window` | RequestInit.window | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the compiler does not preserve this RequestInit member's conversion or transport behavior |
 | `stdlib.headers.append` | Headers.append | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, mutation, error-shape; differential evidence: fixture:static, fixture:static-coercion |
 | `stdlib.headers.constructor` | Headers constructor | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, mutation, identity; supported scope: Record and iterable header pairs, including copying native Headers; differential evidence: fixture:static-request |
 | `stdlib.headers.delete` | Headers.delete | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, mutation, error-shape; differential evidence: fixture:static, fixture:static-coercion |
-| `stdlib.headers.entries` | Headers.entries | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not yet expose a static iterator handle |
+| `stdlib.headers.entries` | Headers.entries | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not yet expose a static iterator handle |
 | `stdlib.headers.forEach` | Headers.forEach | static |  | Node 24.15.0 / Undici 7.24.4; facets: callback-order, callback-this, mutation; differential evidence: fixture:static, fixture:static-coercion |
 | `stdlib.headers.get` | Headers.get | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, missing-arguments, property-read; differential evidence: fixture:static, fixture:static-coercion |
 | `stdlib.headers.getSetCookie` | Headers.getSetCookie | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, mutation, error-shape; differential evidence: fixture:static, fixture:static-coercion |
 | `stdlib.headers.has` | Headers.has | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, missing-arguments, property-read; differential evidence: fixture:static, fixture:static-coercion |
-| `stdlib.headers.keys` | Headers.keys | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not yet expose a static iterator handle |
+| `stdlib.headers.keys` | Headers.keys | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not yet expose a static iterator handle |
 | `stdlib.headers.set` | Headers.set | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, mutation, error-shape; differential evidence: fixture:static, fixture:static-coercion |
-| `stdlib.headers.symbol.iterator` | Headers.[Symbol.iterator] | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not expose an engine-free iterator handle |
-| `stdlib.headers.values` | Headers.values | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not yet expose a static iterator handle |
+| `stdlib.headers.symbol.iterator` | Headers.[Symbol.iterator] | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not expose an engine-free iterator handle |
+| `stdlib.headers.values` | Headers.values | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; native Headers iteration does not yet expose a static iterator handle |
 | `stdlib.map.clear` | Map.prototype.clear | static |  |  |
 | `stdlib.map.delete` | Map.prototype.delete | static |  |  |
 | `stdlib.map.entries` | Map.prototype.entries | static |  | live native iterators support next(), for...of, and drains; iterator helper methods are refused |
@@ -559,52 +556,52 @@ manifest row in the Notes column:
 | `stdlib.math.PI` | Math.PI | static |  | the constant read compiles to a numeric literal; no runtime Math read is performed |
 | `stdlib.math.SQRT1_2` | Math.SQRT1_2 | static |  | the constant read compiles to a numeric literal; no runtime Math read is performed |
 | `stdlib.math.SQRT2` | Math.SQRT2 | static |  | the constant read compiles to a numeric literal; no runtime Math read is performed |
-| `stdlib.math.abs` | Math.abs | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.acos` | Math.acos | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.acosh` | Math.acosh | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.asin` | Math.asin | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.asinh` | Math.asinh | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.atan` | Math.atan | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.atan2` | Math.atan2 | static |  | compiles statically at arity 2; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.atanh` | Math.atanh | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.cbrt` | Math.cbrt | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.ceil` | Math.ceil | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.clz32` | Math.clz32 | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.cos` | Math.cos | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.cosh` | Math.cosh | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.exp` | Math.exp | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.expm1` | Math.expm1 | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
+| `stdlib.math.abs` | Math.abs | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.acos` | Math.acos | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.acosh` | Math.acosh | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.asin` | Math.asin | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.asinh` | Math.asinh | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.atan` | Math.atan | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.atan2` | Math.atan2 | static |  | compiles statically at arity 2; other declared call shapes are refused with SC2012 |
+| `stdlib.math.atanh` | Math.atanh | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.cbrt` | Math.cbrt | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.ceil` | Math.ceil | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.clz32` | Math.clz32 | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.cos` | Math.cos | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.cosh` | Math.cosh | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.exp` | Math.exp | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.expm1` | Math.expm1 | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
 | `stdlib.math.floor` | Math.floor | static |  | compiles statically at arity 1 |
-| `stdlib.math.fround` | Math.fround | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
+| `stdlib.math.fround` | Math.fround | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
 | `stdlib.math.hypot` | Math.hypot | static |  | compiles statically at any arity, including number[] spreads |
-| `stdlib.math.imul` | Math.imul | static |  | compiles statically at arity 2; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.log` | Math.log | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.log10` | Math.log10 | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.log1p` | Math.log1p | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.log2` | Math.log2 | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
+| `stdlib.math.imul` | Math.imul | static |  | compiles statically at arity 2; other declared call shapes are refused with SC2012 |
+| `stdlib.math.log` | Math.log | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.log10` | Math.log10 | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.log1p` | Math.log1p | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.log2` | Math.log2 | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
 | `stdlib.math.max` | Math.max | static |  | compiles statically at arity 2 |
 | `stdlib.math.min` | Math.min | static |  | compiles statically at arity 2 |
-| `stdlib.math.pow` | Math.pow | static |  | compiles statically at arity 2; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
+| `stdlib.math.pow` | Math.pow | static |  | compiles statically at arity 2; other declared call shapes are refused with SC2012 |
 | `stdlib.math.random` | Math.random | static |  | compiles statically at arity 0 |
-| `stdlib.math.round` | Math.round | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.sign` | Math.sign | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.sin` | Math.sin | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.sinh` | Math.sinh | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.sqrt` | Math.sqrt | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.tan` | Math.tan | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.tanh` | Math.tanh | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
-| `stdlib.math.trunc` | Math.trunc | static |  | compiles statically at arity 1; other declared call shapes run only in the embedded dynamic engine (SC2012 without --dynamic) |
+| `stdlib.math.round` | Math.round | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.sign` | Math.sign | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.sin` | Math.sin | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.sinh` | Math.sinh | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.sqrt` | Math.sqrt | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.tan` | Math.tan | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.tanh` | Math.tanh | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
+| `stdlib.math.trunc` | Math.trunc | static |  | compiles statically at arity 1; other declared call shapes are refused with SC2012 |
 | `stdlib.number.toFixed` | number.prototype.toFixed | static |  | the lowered call form takes 0 to 1 arguments |
-| `stdlib.number.toPrecision` | number.prototype.toPrecision | dynamic-only | `SC2012` |  |
-| `stdlib.number.toString` | number.prototype.toString | dynamic-only | `SC2012` |  |
+| `stdlib.number.toPrecision` | number.prototype.toPrecision | unsupported | `SC2012` |  |
+| `stdlib.number.toString` | number.prototype.toString | unsupported | `SC2012` |  |
 | `stdlib.readable-stream-default-controller.close` | ReadableStreamDefaultController.close | static |  | Node 24.15.0 / Undici 7.24.4; facets: state-machine, error-shape; differential evidence: generated:stream-traces, fixture:static-stream |
-| `stdlib.readable-stream-default-controller.constructor` | ReadableStreamDefaultController constructor | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the constructor object is unavailable in the dynamic engine; static controller handles come from underlying-source callbacks |
+| `stdlib.readable-stream-default-controller.constructor` | ReadableStreamDefaultController constructor | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; controller handles come from underlying-source callbacks; the constructor object is unsupported |
 | `stdlib.readable-stream-default-controller.desired-size` | ReadableStreamDefaultController.desiredSize | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; differential evidence: generated:stream-traces |
 | `stdlib.readable-stream-default-controller.enqueue` | ReadableStreamDefaultController.enqueue | static |  | Node 24.15.0 / Undici 7.24.4; facets: identity, liveness, state-machine, error-shape; differential evidence: generated:stream-traces, fixture:static-stream |
 | `stdlib.readable-stream-default-controller.error` | ReadableStreamDefaultController.error | static |  | Node 24.15.0 / Undici 7.24.4; facets: identity, promise-settlement, state-machine; differential evidence: generated:stream-traces, fixture:static-stream |
 | `stdlib.readable-stream-default-reader.cancel` | ReadableStreamDefaultReader.cancel | static |  | Node 24.15.0 / Undici 7.24.4; facets: identity, promise-settlement, state-machine; differential evidence: generated:stream-traces, fixture:static-stream |
 | `stdlib.readable-stream-default-reader.closed` | ReadableStreamDefaultReader.closed | static |  | Node 24.15.0 / Undici 7.24.4; facets: promise-settlement, property-read, state-machine; differential evidence: generated:stream-traces, fixture:static-stream |
-| `stdlib.readable-stream-default-reader.constructor` | ReadableStreamDefaultReader constructor | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the constructor object is unavailable in the dynamic engine; static reader handles come from ReadableStream.getReader() |
+| `stdlib.readable-stream-default-reader.constructor` | ReadableStreamDefaultReader constructor | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; reader handles come from ReadableStream.getReader(); the constructor object is unsupported |
 | `stdlib.readable-stream-default-reader.read` | ReadableStreamDefaultReader.read | static |  | Node 24.15.0 / Undici 7.24.4; facets: identity, promise-settlement, state-machine; differential evidence: generated:stream-traces, fixture:static-stream |
 | `stdlib.readable-stream-default-reader.release-lock` | ReadableStreamDefaultReader.releaseLock | static |  | Node 24.15.0 / Undici 7.24.4; facets: promise-settlement, state-machine, error-shape; differential evidence: generated:stream-traces, fixture:static-stream |
 | `stdlib.readable-stream.cancel` | ReadableStream.cancel | static |  | Node 24.15.0 / Undici 7.24.4; facets: identity, promise-settlement, state-machine; differential evidence: generated:stream-traces, fixture:static-stream |
@@ -612,24 +609,24 @@ manifest row in the Notes column:
 | `stdlib.readable-stream.from` | ReadableStream.from | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, missing-arguments, surplus-arguments, liveness; differential evidence: generated:webidl-operations, generated:stream-traces |
 | `stdlib.readable-stream.get-reader` | ReadableStream.getReader | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, identity, state-machine, error-shape; differential evidence: generated:stream-traces, fixture:static-stream |
 | `stdlib.readable-stream.locked` | ReadableStream.locked | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; differential evidence: generated:stream-traces |
-| `stdlib.readable-stream.pipeThrough` | ReadableStream.pipeThrough | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; the wider Web Streams graph is outside the native readable-stream slice |
-| `stdlib.readable-stream.pipeTo` | ReadableStream.pipeTo | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the dynamic Web Streams bridge exposes only an explicit unsupported stub for this operation |
-| `stdlib.readable-stream.symbol.asyncIterator` | ReadableStream.[Symbol.asyncIterator] | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; direct for-await consumption compiles statically; explicit symbol access and stored iterator handles have no compiler lowering in either tier |
-| `stdlib.readable-stream.tee` | ReadableStream.tee | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the dynamic Web Streams bridge exposes only an explicit unsupported stub for this operation |
-| `stdlib.readable-stream.values` | ReadableStream.values | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; direct for-await consumption compiles statically; storing or driving the first-class iterator handle requires --dynamic |
+| `stdlib.readable-stream.pipeThrough` | ReadableStream.pipeThrough | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the wider Web Streams graph is outside the native readable-stream slice |
+| `stdlib.readable-stream.pipeTo` | ReadableStream.pipeTo | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; this operation is outside the native readable-stream implementation |
+| `stdlib.readable-stream.symbol.asyncIterator` | ReadableStream.[Symbol.asyncIterator] | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; direct for-await consumption compiles statically; explicit symbol access and stored iterator handles have no compiler lowering |
+| `stdlib.readable-stream.tee` | ReadableStream.tee | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; this operation is outside the native readable-stream implementation |
+| `stdlib.readable-stream.values` | ReadableStream.values | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; direct for-await consumption compiles statically; storing or driving the first-class iterator handle is unsupported |
 | `stdlib.request.arrayBuffer` | Request.arrayBuffer | static |  | Node 24.15.0 / Undici 7.24.4; facets: body-consumption, promise-settlement, state-machine, error-shape; differential evidence: fixture:static-request |
-| `stdlib.request.attribute` | Request.attribute | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier |
-| `stdlib.request.blob` | Request.blob | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier |
+| `stdlib.request.attribute` | Request.attribute | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface |
+| `stdlib.request.blob` | Request.blob | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface |
 | `stdlib.request.body` | Request.body | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
 | `stdlib.request.bodyUsed` | Request.bodyUsed | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
 | `stdlib.request.bytes` | Request.bytes | static |  | Node 24.15.0 / Undici 7.24.4; facets: body-consumption, promise-settlement, state-machine, error-shape; differential evidence: fixture:static-request |
 | `stdlib.request.cache` | Request.cache | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
-| `stdlib.request.clone` | Request.clone | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier |
+| `stdlib.request.clone` | Request.clone | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface |
 | `stdlib.request.constructor` | Request constructor | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, body-consumption, error-shape; supported scope: Absolute URLs with method, headers, body, duplex, redirect, and signal; other RequestInit members retain explicit fences; differential evidence: fixture:static-request |
 | `stdlib.request.credentials` | Request.credentials | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
 | `stdlib.request.destination` | Request.destination | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
 | `stdlib.request.duplex` | Request.duplex | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
-| `stdlib.request.formData` | Request.formData | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface in either tier |
+| `stdlib.request.formData` | Request.formData | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; typed source has no compiler bridge for this interface |
 | `stdlib.request.headers` | Request.headers | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
 | `stdlib.request.integrity` | Request.integrity | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
 | `stdlib.request.isHistoryNavigation` | Request.isHistoryNavigation | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read, state-machine; supported scope: Reads on native Requests within the constructor's supported RequestInit subset; differential evidence: fixture:static-request |
@@ -648,24 +645,24 @@ manifest row in the Notes column:
 | `stdlib.response-init.status` | ResponseInit.status | static |  | Node 24.15.0 / Undici 7.24.4; conversion: WebIDL unsigned-short conversion followed by the 200–599 range check; differential evidence: fixture:static |
 | `stdlib.response-init.statusText` | ResponseInit.statusText | static |  | Node 24.15.0 / Undici 7.24.4; conversion: WebIDL ByteString with HTTP reason-phrase validation; differential evidence: fixture:static |
 | `stdlib.response.arrayBuffer` | Response.arrayBuffer | static |  | Node 24.15.0 / Undici 7.24.4; facets: body-consumption, promise-settlement, state-machine, error-shape; differential evidence: fixture:static |
-| `stdlib.response.blob` | Response.blob | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the dynamic fetch bridge does not implement this Response operation |
+| `stdlib.response.blob` | Response.blob | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the native fetch runtime does not implement this Response operation |
 | `stdlib.response.body` | Response.body | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
 | `stdlib.response.bodyUsed` | Response.bodyUsed | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
 | `stdlib.response.bytes` | Response.bytes | static |  | Node 24.15.0 / Undici 7.24.4; facets: body-consumption, promise-settlement, state-machine, error-shape; differential evidence: fixture:static, fixture:static-stream |
-| `stdlib.response.clone` | Response.clone | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the dynamic fetch bridge does not implement this Response operation |
+| `stdlib.response.clone` | Response.clone | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the native fetch runtime does not implement this Response operation |
 | `stdlib.response.constructor` | Response constructor | static |  | Node 24.15.0 / Undici 7.24.4; facets: webidl-conversion, body-consumption, state-machine, error-shape; supported scope: BodyInit is string, Uint8Array/Buffer, ReadableStream&lt;Uint8Array&gt;, null/undefined, or a checked-dynamic value that follows the supported WebIDL string conversion; ResponseInit is headers/status/statusText; differential evidence: fixture:static |
-| `stdlib.response.formData` | Response.formData | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the dynamic fetch bridge does not implement this Response operation |
+| `stdlib.response.formData` | Response.formData | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the native fetch runtime does not implement this Response operation |
 | `stdlib.response.headers` | Response.headers | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
 | `stdlib.response.json` | Response.json | static |  | Node 24.15.0 / Undici 7.24.4; facets: body-consumption, promise-settlement, state-machine, error-shape; differential evidence: fixture:static, fixture:static-stream |
 | `stdlib.response.ok` | Response.ok | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
 | `stdlib.response.redirected` | Response.redirected | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
-| `stdlib.response.static.error` | Response.error | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Response static constructor-object operations have no compiler lowering in either tier |
-| `stdlib.response.static.json` | Response.json | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Response static constructor-object operations have no compiler lowering in either tier |
-| `stdlib.response.static.redirect` | Response.redirect | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Response static constructor-object operations have no compiler lowering in either tier |
+| `stdlib.response.static.error` | Response.error | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Response static constructor-object operations have no compiler lowering |
+| `stdlib.response.static.json` | Response.json | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Response static constructor-object operations have no compiler lowering |
+| `stdlib.response.static.redirect` | Response.redirect | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; Response static constructor-object operations have no compiler lowering |
 | `stdlib.response.status` | Response.status | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
 | `stdlib.response.statusText` | Response.statusText | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
 | `stdlib.response.text` | Response.text | static |  | Node 24.15.0 / Undici 7.24.4; facets: body-consumption, promise-settlement, state-machine, error-shape; differential evidence: fixture:static, fixture:static-stream |
-| `stdlib.response.type` | Response.type | dynamic-only | `SC2020` | Node 24.15.0 / Undici 7.24.4; the member is outside the native static handle projection |
+| `stdlib.response.type` | Response.type | unsupported | `SC2020` | Node 24.15.0 / Undici 7.24.4; the member is outside the native static handle projection |
 | `stdlib.response.url` | Response.url | static |  | Node 24.15.0 / Undici 7.24.4; facets: property-read; differential evidence: fixture:static |
 | `stdlib.set.add` | Set.prototype.add | static |  |  |
 | `stdlib.set.clear` | Set.prototype.clear | static |  |  |
@@ -719,10 +716,9 @@ statuses promise, verbatim:
 - Absence from this manifest means 'not projected', never 'unsupported'. Surfaces lowered through dedicated code paths rather than tables are not yet projected: console, JSON, Promise/async and the timer surface, the net/http/tls/https/dgram/dns/assert/test/stream/readline module member surfaces, template literals, the regex slice, global functions (parseInt, parseFloat, isNaN, isFinite), and the process surface outside its ambient slice.
 - The ambient-nondeterminism and ambient-authority surfaces the library sidecar's determinism attestation scans ARE projected even where they lower through dedicated code paths — the Date compositions (stdlib.date.*), perf_hooks' performance.now, and the process global's ambient reads and authority calls (node-builtin.process.*) — so a determinism fence can name every surface the attestation demotes on.
 - stdlib and node-builtin member entries name surface whose LOWERED call forms are constrained (arity, argument shapes); declared call forms outside the lowered set are refused per site, with code SC2020 for standard-library and node-builtin surface.
-- Entries with status 'unsupported' or 'dynamic-only' describe where the named code is raised: forms of the construct outside the supported subset are refused with that code — not that every form of the named feature is refused. Supported forms appear as their own static entries where a table projects them.
-- Entries with status 'dynamic-only' compile when the build embeds the dynamic engine (--dynamic); without the flag each use site is refused with the entry's code.
+- Entries with status 'unsupported' describe where the named code is raised: forms of the construct outside the supported subset are refused with that code — not that every form of the named feature is refused. Supported forms appear as their own static entries where a table projects them.
 - The engine-free fetch projection targets Node 24.15.0 with bundled Undici 7.24.4. Each projected row names the differential evidence that guards it; changing the pinned Node or Undici version is an explicit profile update.
-- The fetch profile also contains a runtime-reflected census of the selected fetch, abort, Headers, and readable-stream interfaces plus RequestInit/ResponseInit dictionary reads. Static, dynamic-only, and unsupported census rows are projected here; its explicitly out-of-scope metadata rows and adjacent-interface exclusions remain in the profile so absence is deliberate rather than ambiguous.
+- The fetch profile also contains a runtime-reflected census of the selected fetch, abort, Headers, and readable-stream interfaces plus RequestInit/ResponseInit dictionary reads. Static and unsupported census rows are projected here; its explicitly out-of-scope metadata rows and adjacent-interface exclusions remain in the profile so absence is deliberate rather than ambiguous.
 - Process-level diagnostic codes are not surface entries: SC0001-SC0004 are preflight gates, SC1110 is a comptime evaluation failure, SC3001/SC3002 are backend/target tier refusals, SC9001/SC9002 are internal errors.
 - Entry statuses are projected for the desktop targets. The mobile targets (aarch64-apple-ios, aarch64-apple-ios-simulator, aarch64-linux-android) compile library-mode archives only: the library-admissible surface (what SC4005's async_free requirement and the library link set admit) is supported there, the executable lane refuses those triples with SC3002, and no entry outside the library-admissible surface carries a mobile support claim. iOS archives build for iOS 15.0 on darwin hosts; Android archives build against NDK API level 26.
 - No scheduling metadata is published; entry ids are the stable diff keys across releases.

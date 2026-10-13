@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Mechanical diff of two scriptc surface manifests, keyed by their
 // stable entry ids — the pre-flight for every compiler pin move. The
-// manifest (schemaVersion 1) is the compiler's own machine-readable
-// statement of what compiles (`static`), what needs the dynamic engine
-// this SDK never enables (`dynamic-only`), and what refuses with which
+// manifests (schemaVersion 1 or 2) are the compiler's own machine-readable
+// statement of what compiles (`static`), historical dynamic engine entries
+// (`dynamic-only`, schema 1 only), and what refuses with which
 // SC code (`unsupported`); diffing old pin against candidate turns
 // "what changed upstream?" into a checklist instead of folklore:
 //
@@ -43,7 +43,7 @@ import { compilerSurfacePath } from "./scriptc_toolchain.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const KNOWN_SCHEMA_VERSION = 1;
+const KNOWN_SCHEMA_VERSIONS = [1, 2];
 const coreRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let pinnedManifestPath;
 try {
@@ -86,10 +86,12 @@ function loadManifest(file, spec) {
   } catch (error) {
     fail(`cannot read manifest for '${spec}' at ${file}: ${error.message}`);
   }
-  if (manifest.schemaVersion !== KNOWN_SCHEMA_VERSION) {
-    fail(`'${spec}' has manifest schemaVersion ${manifest.schemaVersion}; this tool knows version ${KNOWN_SCHEMA_VERSION} — update the tool before trusting the diff`);
+  if (!KNOWN_SCHEMA_VERSIONS.includes(manifest.schemaVersion)) {
+    fail(`'${spec}' has manifest schemaVersion ${manifest.schemaVersion}; this tool knows versions ${KNOWN_SCHEMA_VERSIONS.join(", ")} — update the tool before trusting the diff`);
   }
   if (!Array.isArray(manifest.entries)) fail(`'${spec}' has no entries array`);
+  const statuses = manifest.schemaVersion === 1 ? ["static", "dynamic-only", "unsupported"] : ["static", "unsupported"];
+  if (manifest.entries.some(entry => !statuses.includes(entry.status))) fail(`'${spec}' has an invalid status for schemaVersion ${manifest.schemaVersion}`);
   return { file, manifest };
 }
 
@@ -168,8 +170,8 @@ const summarize = (e) => ({
 });
 
 const diff = {
-  old: { version: oldSide.manifest.compilerVersion, entries: oldSide.manifest.entries.length, file: oldSide.file },
-  new: { version: newSide.manifest.compilerVersion, entries: newSide.manifest.entries.length, file: newSide.file },
+  old: { version: oldSide.manifest.compilerVersion, schemaVersion: oldSide.manifest.schemaVersion, entries: oldSide.manifest.entries.length, file: oldSide.file },
+  new: { version: newSide.manifest.compilerVersion, schemaVersion: newSide.manifest.schemaVersion, entries: newSide.manifest.entries.length, file: newSide.file },
   flippedToStatic: [],   // any status -> static
   tierRegressions: [],   // static -> dynamic-only/unsupported, dynamic-only -> unsupported
   otherTierMoves: [],    // unsupported -> dynamic-only (eased, but still unusable without --dynamic)

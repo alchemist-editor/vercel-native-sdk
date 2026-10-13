@@ -29,13 +29,14 @@ function writeManifest(
   version: string,
   entries: unknown[],
   coverage: string[] = [],
+  schemaVersion = 1,
 ): string {
   const file = path.join(dir, name);
-  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, compilerVersion: version, coverage, entries }));
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion, compilerVersion: version, coverage, entries }));
   return file;
 }
 
-function generatorFixture(entries: unknown[]) {
+function generatorFixture(entries: unknown[], schemaVersion = 1) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "surface-generator-"));
   const core = path.join(root, "packages", "core");
   const scriptDir = path.join(core, "scripts");
@@ -46,7 +47,7 @@ function generatorFixture(entries: unknown[]) {
   fs.copyFileSync(genScript, path.join(scriptDir, "gen_service_surface.mjs"));
   fs.writeFileSync(path.join(core, "package.json"), JSON.stringify({ dependencies: { scriptc: scriptcPin } }));
   fs.writeFileSync(path.join(manifestDir, "surface-manifest.json"), JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion,
     compilerVersion: scriptcPin,
     coverage: [],
     entries,
@@ -153,10 +154,56 @@ test("surface_manifest_diff refuses unknown schema versions", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "surface-diff-"));
   const good = writeManifest(dir, "good.json", "0.0.1", []);
   const bad = path.join(dir, "bad.json");
-  fs.writeFileSync(bad, JSON.stringify({ schemaVersion: 2, compilerVersion: "9.9.9", entries: [] }));
+  fs.writeFileSync(bad, JSON.stringify({ schemaVersion: 3, compilerVersion: "9.9.9", entries: [] }));
   const run = spawnSync(process.execPath, [diffScript, good, bad], { encoding: "utf8" });
   assert.equal(run.status, 2);
-  assert.match(run.stderr, /schemaVersion 2/);
+  assert.match(run.stderr, /schemaVersion 3/);
+});
+
+test("schema 1 to 2 keeps stable-id changes and removed dynamic entries visible", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "surface-schema-upgrade-"));
+  try {
+    const oldManifest = writeManifest(dir, "old.json", "0.2.10", [
+      { id: "stdlib.lookup", kind: "stdlib", name: "lookup", status: "static" },
+      { id: "syntax.fallback", kind: "syntax", name: "fallback", status: "dynamic-only" },
+    ]);
+    const newManifest = writeManifest(dir, "new.json", "0.3.0", [
+      { id: "stdlib.lookup", kind: "stdlib", name: "lookup", status: "static", note: "native lookup" },
+    ], ["Compilation is native-only."], 2);
+    const run = spawnSync(process.execPath, [diffScript, oldManifest, newManifest, "--json"], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const diff = JSON.parse(run.stdout);
+    assert.equal(diff.old.schemaVersion, 1);
+    assert.equal(diff.new.schemaVersion, 2);
+    assert.deepEqual(diff.removed.map((entry: { id: string }) => entry.id), ["syntax.fallback"]);
+    assert.deepEqual(diff.noteChanges.map((entry: { id: string }) => entry.id), ["stdlib.lookup"]);
+    assert.deepEqual(diff.tierRegressions, []);
+    assert.deepEqual(diff.coverageChanges.added, ["Compilation is native-only."]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("schema 2 reference describes native compilation and rejects dynamic-only entries", () => {
+  for (const status of ["static", "dynamic-only"]) {
+    const fixture = generatorFixture([{ id: "stdlib.lookup", kind: "stdlib", name: "lookup", status }], 2);
+    try {
+      const run = spawnSync(process.execPath, [fixture.script], { encoding: "utf8" });
+      if (status === "static") {
+        assert.equal(run.status, 0, run.stderr);
+        const rendered = fs.readFileSync(fixture.output, "utf8");
+        assert.match(rendered, /schema 2, 1 entries/);
+        assert.match(rendered, /1 static, 0 unsupported/);
+        assert.match(rendered, /Compilation is native-only/);
+        assert.doesNotMatch(rendered, /dynamic-only|--dynamic|embedded dynamic engine/);
+      } else {
+        assert.equal(run.status, 2);
+        assert.match(run.stderr, /invalid entries or status for schemaVersion 2/);
+        const manifest = path.join(fixture.root, "packages/core/node_modules/@scriptc/compiler/surface-manifest.json");
+        const diff = spawnSync(process.execPath, [diffScript, manifest, manifest], { encoding: "utf8" });
+        assert.equal(diff.status, 2);
+        assert.match(diff.stderr, /invalid status for schemaVersion 2/);
+      }
+    } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
+  }
 });
 
 test("surface_manifest_diff refuses a stale install for the pinned spec", () => {

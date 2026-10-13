@@ -243,14 +243,14 @@ test("completed installations reject mixed runtime ABIs and missing contract or 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-scriptc-matching-"));
   try {
     fs.mkdirSync(path.join(root, "scripts"));
-    fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ nativeToolchain: { scriptc: "0.2.10" } }));
+    fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ nativeToolchain: { scriptc: "0.3.0" } }));
     fs.writeFileSync(path.join(root, "scripts", "scriptc-toolchain.json"), JSON.stringify({
-      schemaVersion: 1, version: "0.2.10", runtimeAbi: 13,
+      schemaVersion: 1, version: "0.3.0", runtimeAbi: 14,
       releases: { "linux-x64-gnu": {} },
       packages: {
-        compiler: { name: "@scriptc/compiler", version: "0.2.10" },
-        types: { name: "@scriptc/types", version: "0.2.10" },
-        threads: { name: "@scriptc/threads", version: "0.2.10" },
+        compiler: { name: "@scriptc/compiler", version: "0.3.0" },
+        types: { name: "@scriptc/types", version: "0.3.0" },
+        threads: { name: "@scriptc/threads", version: "0.3.0" },
         typescript5: { name: "typescript", version: "5.9.3" },
       },
     }));
@@ -263,18 +263,18 @@ test("completed installations reject mixed runtime ABIs and missing contract or 
       fs.writeFileSync(file, JSON.stringify(value));
       return file;
     };
-    put("installed.json", { manifestSha256: config.identity, host: config.host, version: "0.2.10", complete: true, runtimeAbi: 13, runtimePacks: ["runtime-linux-x64-gnu"] });
-    for (const [key, name, version] of [["compiler", "@scriptc/compiler", "0.2.10"], ["types", "@scriptc/types", "0.2.10"], ["threads", "@scriptc/threads", "0.2.10"], ["typescript5", "typescript", "5.9.3"]]) {
+    put("installed.json", { manifestSha256: config.identity, host: config.host, version: "0.3.0", complete: true, runtimeAbi: 14, runtimePacks: ["runtime-linux-x64-gnu"] });
+    for (const [key, name, version] of [["compiler", "@scriptc/compiler", "0.3.0"], ["types", "@scriptc/types", "0.3.0"], ["threads", "@scriptc/threads", "0.3.0"], ["typescript5", "typescript", "5.9.3"]]) {
       put(`api/node_modules/${name.startsWith("@scriptc/") ? name : key}/package.json`, { name, version });
     }
     for (const file of ["release/bin/scriptc.json", "release/bin/scriptc", "api/node_modules/@scriptc/compiler/dist/index.js", "api/node_modules/@scriptc/compiler/surface-manifest.json", "api/node_modules/typescript/package.json", "api/node_modules/@scriptc/types/index.d.ts", "api/node_modules/@scriptc/threads/index.d.ts", "api/node_modules/@scriptc/threads/index.js"]) put(file);
-    const pack = put("api/node_modules/@scriptc/runtime-linux-x64-gnu/runtime-pack.json", { version: "0.2.10", runtime_abi: { version: 13 } });
+    const pack = put("api/node_modules/@scriptc/runtime-linux-x64-gnu/runtime-pack.json", { version: "0.3.0", runtime_abi: { version: 14 } });
     assert.equal(installedRelease(origin, options)!.root, config.root);
-    for (const incompatible of [{ version: "0.2.9", runtime_abi: { version: 13 } }, { version: "0.2.10", runtime_abi: { version: 12 } }]) {
+    for (const incompatible of [{ version: "0.2.10", runtime_abi: { version: 13 } }, { version: "0.3.0", runtime_abi: { version: 13 } }]) {
       fs.writeFileSync(pack, JSON.stringify(incompatible));
       assert.throws(() => installedRelease(origin, options), /incompatible runtime pack/);
     }
-    fs.writeFileSync(pack, JSON.stringify({ version: "0.2.10", runtime_abi: { version: 13 } }));
+    fs.writeFileSync(pack, JSON.stringify({ version: "0.3.0", runtime_abi: { version: 14 } }));
     for (const name of ["types/index.d.ts", "threads/index.js"]) {
       const file = path.join(config.root, "api/node_modules/@scriptc", name);
       fs.unlinkSync(file);

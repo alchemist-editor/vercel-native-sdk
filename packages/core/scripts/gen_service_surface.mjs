@@ -34,7 +34,7 @@ import { compilerSurfacePath } from "./scriptc_toolchain.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const KNOWN_SCHEMA_VERSION = 1;
+const KNOWN_SCHEMA_VERSIONS = [1, 2];
 const coreRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(coreRoot, "..", "..");
 let manifestPath;
@@ -60,8 +60,13 @@ try {
   console.error(`gen_service_surface: cannot read ${manifestPath}: ${error.message}`);
   process.exit(2);
 }
-if (manifest.schemaVersion !== KNOWN_SCHEMA_VERSION) {
-  console.error(`gen_service_surface: manifest schemaVersion ${manifest.schemaVersion} is unknown (this tool knows ${KNOWN_SCHEMA_VERSION}) — update the tool before regenerating`);
+if (!KNOWN_SCHEMA_VERSIONS.includes(manifest.schemaVersion)) {
+  console.error(`gen_service_surface: manifest schemaVersion ${manifest.schemaVersion} is unknown (this tool knows ${KNOWN_SCHEMA_VERSIONS.join(", ")}) — update the tool before regenerating`);
+  process.exit(2);
+}
+const statuses = manifest.schemaVersion === 1 ? ["static", "dynamic-only", "unsupported"] : ["static", "unsupported"];
+if (!Array.isArray(manifest.entries) || manifest.entries.some(entry => !statuses.includes(entry.status))) {
+  console.error(`gen_service_surface: invalid entries or status for schemaVersion ${manifest.schemaVersion}`);
   process.exit(2);
 }
 
@@ -119,14 +124,14 @@ sections.push(`<!-- GENERATED FILE — do not edit by hand.
 
 What TypeScript under \`src/services/\` can use, as stated by the pinned
 compiler itself (surface manifest schema ${manifest.schemaVersion}, ${manifest.entries.length} entries:
-${counts.static} static, ${counts["dynamic-only"]} dynamic-only, ${counts.unsupported} unsupported).
+${counts.static} static, ${manifest.schemaVersion === 1 ? `${counts["dynamic-only"]} dynamic-only, ` : ""}${counts.unsupported} unsupported).
 
 How to read the tables:
 
 - **static** — compiles in the engine-free static tier services use.
-- **dynamic-only** — needs the embedded dynamic engine (\`--dynamic\`),
+${manifest.schemaVersion === 1 ? `- **dynamic-only** — needs the embedded dynamic engine (\`--dynamic\`),
   which Native SDK builds never pass, so for services this means
-  **unavailable** until the entry goes static.
+  **unavailable** until the entry goes static.` : "- Compilation is native-only; unsupported dependencies receive build diagnostics."}
 - **unsupported** — refused with the listed SC code. A status describes
   where the named code is *raised*: forms outside the supported subset
   refuse with that code, while supported forms appear as their own
