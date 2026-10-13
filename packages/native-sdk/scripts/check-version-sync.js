@@ -3,7 +3,7 @@
 // Verify every version stamped by sync-version.js matches
 // packages/native-sdk/package.json: the CLI source, the per-platform
 // binary packages, the bundled @native-sdk/core (manifest + lockfile,
-// the version every TS scaffold and example pin follows), and the
+// the version every TS scaffold, example and test app pin follows), and the
 // optionalDependencies pins. Also verify each
 // platform package's repository.url and homepage match the main package,
 // because npm validates repository.url against publish provenance and a
@@ -73,8 +73,27 @@ for (const [name, pin] of Object.entries(packageJson.optionalDependencies ?? {})
   }
 }
 
+const cliLock = JSON.parse(readFileSync(join(projectRoot, 'package-lock.json'), 'utf-8'));
+if (cliLock.version !== expectedVersion || cliLock.packages?.['']?.version !== expectedVersion) {
+  console.error(`Version mismatch: packages/native-sdk/package-lock.json=${cliLock.version}/${cliLock.packages?.['']?.version}, expected ${expectedVersion}`);
+  errors++;
+}
+const lockedPins = cliLock.packages?.['']?.optionalDependencies ?? {};
+const expectedPins = packageJson.optionalDependencies ?? {};
+for (const name of new Set([...Object.keys(lockedPins), ...Object.keys(expectedPins)])) {
+  if (lockedPins[name] !== expectedPins[name]) {
+    console.error(`Pin mismatch: packages/native-sdk/package-lock.json optionalDependencies["${name}"]=${lockedPins[name]}, expected ${expectedPins[name]}`);
+    errors++;
+  }
+  const resolved = cliLock.packages?.[`node_modules/${name}`];
+  if (resolved && resolved.version !== expectedVersion) {
+    console.error(`Version mismatch: packages/native-sdk/package-lock.json resolves ${name} ${resolved.version}, expected ${expectedVersion}`);
+    errors++;
+  }
+}
+
 // The bundled @native-sdk/core rides the release version (manifest and
-// lockfile own-package fields), and the committed TS examples pin it
+// lockfile own-package fields), and the committed TS examples and test apps pin it
 // exactly — half-bumped, a published CLI would scaffold pins npm cannot
 // resolve to the matching @native-sdk/core release.
 const coreJson = JSON.parse(readFileSync(join(repoRoot, 'packages', 'core', 'package.json'), 'utf-8'));
@@ -136,18 +155,19 @@ if (coreLock.version !== expectedVersion || coreLock.packages?.['']?.version !==
   console.error(`Version mismatch: packages/core/package-lock.json=${coreLock.version}/${coreLock.packages?.['']?.version}, expected ${expectedVersion}`);
   errors++;
 }
-const examplesDir = join(repoRoot, 'examples');
-for (const entry of readdirSync(examplesDir, { withFileTypes: true })) {
-  if (!entry.isDirectory()) continue;
-  const examplePath = join(examplesDir, entry.name, 'package.json');
-  if (!existsSync(examplePath)) continue;
-  const exampleJson = JSON.parse(readFileSync(examplePath, 'utf-8'));
-  if (!exampleJson.dependencies?.['@native-sdk/core']) continue;
-  const example = `examples/${entry.name}`;
-  const pin = exampleJson.dependencies?.['@native-sdk/core'];
-  if (pin !== expectedVersion) {
-    console.error(`Version mismatch: ${example}/package.json pins @native-sdk/core ${pin}, expected ${expectedVersion}`);
-    errors++;
+for (const directory of ['examples', 'tests']) {
+  for (const entry of readdirSync(join(repoRoot, directory), { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const examplePath = join(repoRoot, directory, entry.name, 'package.json');
+    if (!existsSync(examplePath)) continue;
+    const exampleJson = JSON.parse(readFileSync(examplePath, 'utf-8'));
+    if (!exampleJson.dependencies?.['@native-sdk/core']) continue;
+    const example = `${directory}/${entry.name}`;
+    const pin = exampleJson.dependencies?.['@native-sdk/core'];
+    if (pin !== expectedVersion) {
+      console.error(`Version mismatch: ${example}/package.json pins @native-sdk/core ${pin}, expected ${expectedVersion}`);
+      errors++;
+    }
   }
 }
 
