@@ -830,6 +830,11 @@ fn tsParseQuotedManifestValue(manifest_json: []const u8, comptime key: []const u
     return suffix;
 }
 
+/// App and root fixture builds share the same scriptc optimization policy.
+pub fn scriptcOptimizationForMode(optimize: std.builtin.OptimizeMode) []const u8 {
+    return if (optimize == .Debug) "dev" else "release";
+}
+
 /// The library-profile optimization field first shipped with the Node
 /// bootstrap. scriptc installs a native binary instead, so either
 /// published entrypoint marks a compiler that accepts the field.
@@ -837,7 +842,7 @@ fn scriptcProfileOptimization(b: *std.Build, dep: *std.Build.Dependency, optimiz
     const sdk_root = tsSdkRoot(b.allocator, b.graph.io, dep);
     const release_marker = b.pathJoin(&.{ sdk_root, "packages", "core", "scripts", "scriptc-toolchain.json" });
     if (std.Io.Dir.cwd().access(b.graph.io, release_marker, .{})) |_| {
-        return if (optimize == .Debug) "dev" else "release";
+        return scriptcOptimizationForMode(optimize);
     } else |_| {}
     var dir: []const u8 = b.pathJoin(&.{ sdk_root, "packages", "core" });
     while (true) {
@@ -850,7 +855,7 @@ fn scriptcProfileOptimization(b: *std.Build, dep: *std.Build.Dependency, optimiz
                     continue;
                 };
             };
-            return if (optimize == .Debug) "dev" else "release";
+            return scriptcOptimizationForMode(optimize);
         }
         dir = std.fs.path.dirname(dir) orelse return null;
     }

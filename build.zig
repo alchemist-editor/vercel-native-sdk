@@ -4419,6 +4419,7 @@ fn tsCoreE2eArtifact(
     tooling_mod: *std.Build.Module,
 ) ?TsCoreE2eArtifacts {
     const node = b.findProgram(&.{"node"}, &.{}) catch return null;
+    const build_trace = b.option(bool, "build-trace", "Trace generated TypeScript ABI artifacts and cache reuse") orelse false;
     // Both toolchains arrive with one `npm ci` in packages/core: the
     // frontend's TypeScript compiler and the external core compiler
     // (unless NATIVE_SDK_CORE_COMPILER points at the pinned release's
@@ -4462,7 +4463,7 @@ fn tsCoreE2eArtifact(
     // compile-source directories.
     const host_src = b.addWriteFiles();
     _ = host_src.addCopyFile(b.path("tests/ts-core/fixture.ts"), "fixture.ts");
-    const host_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const host_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/fixture.ts",
         .src_dir = host_src.getDirectory(),
         .name = "host_fixture_core",
@@ -4477,7 +4478,7 @@ fn tsCoreE2eArtifact(
     const fixture_mod = host_fixture.module;
     const persist_src = b.addWriteFiles();
     _ = persist_src.addCopyFile(b.path("tests/ts-core/persist_fixture.ts"), "persist_fixture.ts");
-    const persist_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const persist_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/persist_fixture.ts",
         .src_dir = persist_src.getDirectory(),
         .name = "persist_fixture_core",
@@ -4494,7 +4495,7 @@ fn tsCoreE2eArtifact(
     persist_mod.addImport("persist_decoder", composition_decoder_mod);
     const composition_src = b.addWriteFiles();
     _ = composition_src.addCopyFile(b.path("tests/ts-core/composition_fixture.ts"), "composition_fixture.ts");
-    const composition_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const composition_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/composition_fixture.ts",
         .src_dir = composition_src.getDirectory(),
         .name = "composition_fixture_core",
@@ -4511,7 +4512,7 @@ fn tsCoreE2eArtifact(
     composition_app_mod.addImport("composition_decoder", composition_app_decoder);
     const code_src = b.addWriteFiles();
     _ = code_src.addCopyFile(b.path("tests/ts-core/code_fixture.ts"), "code_fixture.ts");
-    const code_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const code_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/code_fixture.ts",
         .src_dir = code_src.getDirectory(),
         .name = "code_fixture_core",
@@ -4528,7 +4529,7 @@ fn tsCoreE2eArtifact(
     code_app_mod.addImport("code_decoder", code_decoder);
     const chart_src = b.addWriteFiles();
     _ = chart_src.addCopyFile(b.path("tests/ts-core/chart_fixture.ts"), "chart_fixture.ts");
-    const chart_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const chart_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/chart_fixture.ts",
         .src_dir = chart_src.getDirectory(),
         .name = "chart_fixture_core",
@@ -4545,7 +4546,7 @@ fn tsCoreE2eArtifact(
     chart_app_mod.addImport("chart_decoder", chart_decoder);
     const markdown_src = b.addWriteFiles();
     _ = markdown_src.addCopyFile(b.path("tests/ts-core/markdown_fixture.ts"), "markdown_fixture.ts");
-    const markdown_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const markdown_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/markdown_fixture.ts",
         .src_dir = markdown_src.getDirectory(),
         .name = "markdown_fixture_core",
@@ -4574,7 +4575,7 @@ fn tsCoreE2eArtifact(
     }));
     const markup_src = b.addWriteFiles();
     _ = markup_src.addCopyFile(b.path("tests/ts-core/markup_fixture.ts"), "markup_fixture.ts");
-    const markup_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const markup_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/markup_fixture.ts",
         .src_dir = markup_src.getDirectory(),
         .name = "markup_core",
@@ -4582,7 +4583,7 @@ fn tsCoreE2eArtifact(
     const markup_fixture_mod = markup_fixture.module;
     const mixed_return_src = b.addWriteFiles();
     _ = mixed_return_src.addCopyFile(b.path("tests/ts-core/mixed_return_fixture.ts"), "mixed_return_fixture.ts");
-    const mixed_return_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const mixed_return_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/mixed_return_fixture.ts",
         .src_dir = mixed_return_src.getDirectory(),
         .name = "mixed_return_core",
@@ -4609,7 +4610,7 @@ fn tsCoreE2eArtifact(
     // The rewritten Kanban example's real TypeScript core and self-contained
     // shipping markup. Its battery drives native multi-file drops through
     // the generated dropMsg adapter and then moves the created cards.
-    const kanban_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const kanban_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/kanban/src/core.ts",
         .src_dir = b.path("examples/kanban/src"),
         .name = "kanban_core",
@@ -4627,7 +4628,7 @@ fn tsCoreE2eArtifact(
     kanban_mod.addImport("native_sdk", desktop_mod);
     kanban_mod.addImport("ts_kanban_core", kanban_core_mod);
 
-    const workbench_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const workbench_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/workbench/src/core.ts",
         .src_dir = b.path("examples/workbench/src"),
         .name = "workbench_core",
@@ -4646,7 +4647,7 @@ fn tsCoreE2eArtifact(
     workbench_decoder.addImport("core.zig", workbench_fixture.module);
     workbench_mod.addImport("workbench_decoder", workbench_decoder);
 
-    const feed_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const feed_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/feed/src/core.ts",
         .src_dir = b.path("examples/feed/src"),
         .name = "feed_core",
@@ -4665,7 +4666,7 @@ fn tsCoreE2eArtifact(
     feed_decoder.addImport("core.zig", feed_fixture.module);
     feed_mod.addImport("feed_decoder", feed_decoder);
 
-    const split_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const split_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/split-collapse/src/core.ts",
         .src_dir = b.path("examples/split-collapse/src"),
         .name = "split_collapse_core",
@@ -4685,7 +4686,7 @@ fn tsCoreE2eArtifact(
     split_decoder.addImport("core.zig", split_fixture.module);
     split_mod.addImport("split_decoder", split_decoder);
 
-    const canvas_layers_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const canvas_layers_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/canvas-layers/core.ts",
         .src_dir = b.path("tests/ts-core/canvas-layers"),
         .name = "canvas_layers_core",
@@ -4699,7 +4700,7 @@ fn tsCoreE2eArtifact(
     canvas_layers_decoder.addImport("core.zig", canvas_layers_fixture.module);
     canvas_layers_mod.addImport("canvas_layers_decoder", canvas_layers_decoder);
 
-    const audio_exact_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const audio_exact_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/audio-exact/core.ts",
         .src_dir = b.path("tests/ts-core/audio-exact"),
         .name = "audio_exact_core",
@@ -4708,7 +4709,7 @@ fn tsCoreE2eArtifact(
     audio_exact_mod.addImport("native_sdk", desktop_mod);
     audio_exact_mod.addImport("audio_exact_core", audio_exact_fixture.module);
 
-    const spawn_exact_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const spawn_exact_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/spawn-exact/core.ts",
         .src_dir = b.path("tests/ts-core/spawn-exact"),
         .name = "spawn_exact_core",
@@ -4717,7 +4718,7 @@ fn tsCoreE2eArtifact(
     spawn_exact_mod.addImport("native_sdk", desktop_mod);
     spawn_exact_mod.addImport("spawn_exact_core", spawn_exact_fixture.module);
 
-    const boot_images_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const boot_images_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-core/boot-images/core.ts",
         .src_dir = b.path("tests/ts-core/boot-images"),
         .name = "boot_images_core",
@@ -4726,7 +4727,7 @@ fn tsCoreE2eArtifact(
     boot_images_mod.addImport("native_sdk", desktop_mod);
     boot_images_mod.addImport("boot_images_core", boot_images_fixture.module);
 
-    const deck_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const deck_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/deck/src/core.ts",
         .src_dir = b.path("examples/deck/src"),
         .name = "deck_core",
@@ -4752,7 +4753,7 @@ fn tsCoreE2eArtifact(
     deck_mod.addImport("deck_decoder", deck_decoder);
     deck_mod.addImport("deck_manifest", b.createModule(.{ .root_source_file = b.path("examples/deck/app.zon"), .target = target, .optimize = optimize }));
 
-    const gpu_dashboard_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const gpu_dashboard_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/gpu-dashboard/src/core.ts",
         .src_dir = b.path("examples/gpu-dashboard/src"),
         .name = "gpu_dashboard_core",
@@ -4774,7 +4775,7 @@ fn tsCoreE2eArtifact(
     gpu_dashboard_decoder.addImport("core.zig", gpu_dashboard_fixture.module);
     gpu_dashboard_mod.addImport("gpu_dashboard_decoder", gpu_dashboard_decoder);
 
-    const channel_monitor_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const channel_monitor_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/channel-monitor/src/core.ts",
         .src_dir = b.path("examples/channel-monitor/src"),
         .name = "channel_monitor_core",
@@ -4794,7 +4795,7 @@ fn tsCoreE2eArtifact(
     channel_monitor_decoder.addImport("core.zig", channel_monitor_fixture.module);
     channel_monitor_mod.addImport("channel_monitor_decoder", channel_monitor_decoder);
 
-    const code_editor_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const code_editor_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/code-editor/src/core.ts",
         .src_dir = b.path("examples/code-editor/src"),
         .name = "code_editor_core",
@@ -4816,7 +4817,7 @@ fn tsCoreE2eArtifact(
     code_editor_decoder.addImport("core.zig", code_editor_fixture.module);
     code_editor_mod.addImport("code_editor_decoder", code_editor_decoder);
 
-    const markdown_viewer_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const markdown_viewer_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/markdown-viewer/src/core.ts",
         .src_dir = b.path("examples/markdown-viewer/src"),
         .name = "markdown_viewer_core",
@@ -4836,7 +4837,7 @@ fn tsCoreE2eArtifact(
     markdown_viewer_decoder.addImport("core.zig", markdown_viewer_fixture.module);
     markdown_viewer_mod.addImport("markdown_viewer_decoder", markdown_viewer_decoder);
 
-    const notes_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const notes_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/notes/src/core.ts",
         .src_dir = b.path("examples/notes/src"),
         .name = "notes_core",
@@ -4857,7 +4858,7 @@ fn tsCoreE2eArtifact(
     notes_decoder.addImport("core.zig", notes_fixture.module);
     notes_mod.addImport("notes_decoder", notes_decoder);
 
-    const effects_probe_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const effects_probe_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/effects-probe/src/core.ts",
         .src_dir = b.path("examples/effects-probe/src"),
         .name = "effects_probe_core",
@@ -4877,7 +4878,7 @@ fn tsCoreE2eArtifact(
     effects_probe_decoder.addImport("core.zig", effects_probe_fixture.module);
     effects_probe_mod.addImport("effects_probe_decoder", effects_probe_decoder);
 
-    const video_player_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const video_player_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/video-player/src/core.ts",
         .src_dir = b.path("examples/video-player/src"),
         .name = "video_player_core",
@@ -4897,7 +4898,7 @@ fn tsCoreE2eArtifact(
     video_player_decoder.addImport("core.zig", video_player_fixture.module);
     video_player_mod.addImport("video_player_decoder", video_player_decoder);
 
-    const inbox_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const inbox_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/ui-inbox/src/core.ts",
         .src_dir = b.path("examples/ui-inbox/src"),
         .name = "inbox_core",
@@ -4917,7 +4918,7 @@ fn tsCoreE2eArtifact(
     inbox_decoder.addImport("core.zig", inbox_fixture.module);
     inbox_mod.addImport("inbox_decoder", inbox_decoder);
 
-    const canvas_preview_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const canvas_preview_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/canvas-preview/src/core.ts",
         .src_dir = b.path("examples/canvas-preview/src"),
         .name = "canvas_preview_core",
@@ -4936,7 +4937,7 @@ fn tsCoreE2eArtifact(
     canvas_preview_decoder.addImport("core.zig", canvas_preview_fixture.module);
     canvas_preview_mod.addImport("canvas_preview_decoder", canvas_preview_decoder);
 
-    const habits_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const habits_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/habits/src/core.ts",
         .src_dir = b.path("examples/habits/src"),
         .name = "habits_core",
@@ -4956,7 +4957,7 @@ fn tsCoreE2eArtifact(
     // the test root stages beside a copy of the example's app.native so
     // the compiled markup engine builds the SHIPPING view over the
     // core's model.
-    const soundboard_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const soundboard_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/soundboard/src/core.ts",
         .src_dir = b.path("examples/soundboard/src"),
         .name = "soundboard_core",
@@ -4976,7 +4977,7 @@ fn tsCoreE2eArtifact(
     // The system-monitor example's core and markup, tested the same
     // way — plus the ORIGINAL Zig example's committed sampler captures,
     // staged as fixtures so both ports parse the same recorded truth.
-    const monitor_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const monitor_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/system-monitor/src/core.ts",
         .src_dir = b.path("examples/system-monitor/src"),
         .name = "system_monitor_core",
@@ -5007,7 +5008,7 @@ fn tsCoreE2eArtifact(
     // The Chatbot example's core and markup, tested the same way:
     // the chat client for an OpenAI-compatible endpoint, driven through
     // the fake fetch feed (no network) with its shipping markup.
-    const ai_chat_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const ai_chat_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/chatbot/src/core.ts",
         .src_dir = b.path("examples/chatbot/src"),
         .name = "ai_chat_core",
@@ -5028,7 +5029,7 @@ fn tsCoreE2eArtifact(
     // markup, tested as one app: a real buffered Cmd.fetch against a
     // loopback fixture, the generated typed client into the real child,
     // and record→replay with neither the service nor the network present.
-    const feed_reader_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const feed_reader_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/service-feed-reader/src/core.ts",
         .src_dir = b.path("examples/service-feed-reader/src"),
         .name = "feed_reader_core",
@@ -5039,7 +5040,7 @@ fn tsCoreE2eArtifact(
     const shell_layout_mod = module(b, target, optimize, "tests/ts-core/shell_layout_e2e_tests.zig");
     shell_layout_mod.addImport("native_sdk", desktop_mod);
     shell_layout_mod.addImport("shell_fixture_core", feed_reader_fixture.module);
-    const typography_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const typography_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "examples/typography/src/core.ts",
         .src_dir = b.path("examples/typography/src"),
         .name = "typography_core",
@@ -5104,7 +5105,7 @@ fn tsCoreE2eArtifact(
     // registry/host only from the service sidecar; plain scriptc compiles the
     // child executable; and the Zig battery drives that executable through
     // the production ServiceHost + effects/session boundary.
-    const services_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const services_fixture = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tests/ts-services/ok/src/core.ts",
         .src_dir = b.path("tests/ts-services/ok/src"),
         .name = "services_fixture_core",
@@ -5191,7 +5192,7 @@ fn tsCoreE2eArtifact(
     // its request unchanged, so tools/bench_service_host.zig measures the
     // carrier — lazy spawn, framing, pipes, worker queueing — and never a
     // workload.
-    const service_bench_core = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, .{
+    const service_bench_core = externalCoreFixtureModule(b, target, optimize, node, corewire_exe, build_trace, .{
         .entry = "tools/service-host-bench/src/core.ts",
         .src_dir = b.path("tools/service-host-bench/src"),
         .name = "service_host_bench_core",
@@ -5636,6 +5637,7 @@ fn externalCoreFixtureModule(
     optimize: std.builtin.OptimizeMode,
     node: []const u8,
     corewire_exe: *std.Build.Step.Compile,
+    build_trace: bool,
     spec: ExternalCoreFixtureSpec,
 ) ExternalCoreFixture {
     const app_build = @import("build/app.zig");
@@ -5651,7 +5653,7 @@ fn externalCoreFixtureModule(
     check.addFileArg(b.path(spec.entry));
     check.addArg("--contract");
     const contract_raw = check.addOutputFileArg("core.contract.json");
-    const contract = app_build.stabilizeGeneratedFile(b, contract_raw, "core.contract.json", false);
+    const contract = app_build.stabilizeGeneratedFile(b, contract_raw, "core.contract.json", build_trace);
     check.addArg("--contract-entry");
     check.addArg(spec.entry);
     if (spec.window_views.len > 0) check.addArg("--window-views");
@@ -5659,7 +5661,7 @@ fn externalCoreFixtureModule(
     const services_contract: ?std.Build.LazyPath = if (spec.emit_services) services: {
         check.addArg("--services-contract");
         const raw = check.addOutputFileArg("services.contract.json");
-        break :services app_build.stabilizeGeneratedFile(b, raw, "services.contract.json", false);
+        break :services app_build.stabilizeGeneratedFile(b, raw, "services.contract.json", build_trace);
     } else null;
     for (spec.service_packages) |package_entry| check.addArgs(&.{ "--service-package", package_entry });
     const services_client: ?std.Build.LazyPath = if (services_contract) |service_contract| client: {
@@ -5668,7 +5670,7 @@ fn externalCoreFixtureModule(
         service_project.addFileArg(service_contract);
         service_project.addArg("--service-client");
         const client_raw = service_project.addOutputFileArg("services.gen.ts");
-        break :client app_build.stabilizeGeneratedFile(b, client_raw, "services.gen.ts", false);
+        break :client app_build.stabilizeGeneratedFile(b, client_raw, "services.gen.ts", build_trace);
     } else null;
     if (spec.persist_capability) check.addArgs(&.{ "--capability", "persist" });
     if (spec.store_capability) check.addArgs(&.{ "--capability", "store" });
@@ -5698,6 +5700,9 @@ fn externalCoreFixtureModule(
     const facade = project.addOutputFileArg("core_facade.ts");
     project.addArg("--profile");
     const profile = project.addOutputFileArg("core_profile.json");
+    // Keep root fixture compilation on the same profile as an app build:
+    // Debug uses scriptc's incremental dev objects; release lanes stay optimized.
+    project.addArgs(&.{ "--optimization", app_build.scriptcOptimizationForMode(optimize) });
     for (spec.f64_slots) |slot| {
         project.addArg("--f64-slot");
         project.addArg(slot);
@@ -5741,6 +5746,7 @@ fn externalCoreFixtureModule(
     compile.addFileInput(b.path("packages/core/scripts/scriptc_toolchain.mjs"));
     compile.addFileInput(b.path("packages/core/scripts/scriptc-toolchain.json"));
     compile.addFileInput(b.path("packages/core/scripts/run_library_compiler.mjs"));
+    if (build_trace) compile.setEnvironmentVariable("SCRIPTC_TIMING", "1");
     compile.addArg("--stage");
     compile.addDirectoryArg(stage_dir);
     compile.addArgs(&.{ "--name", spec.name });
@@ -5770,6 +5776,10 @@ fn externalCoreFixtureModule(
         compile.addArg("--compiler-package-origin");
         compile.addFileArg(b.path("packages/core/package.json"));
     }
+
+    // Compile a complete fixture in isolation when measuring compiler phases.
+    const compile_step = b.step(b.fmt("compile-ts-core-{s}", .{spec.name}), "Compile one complete TypeScript fixture archive and its ABI sidecar");
+    compile_step.dependOn(&compile.step);
 
     // The mirror, generated from the archive's OWN co-emitted contract,
     // staged in the app lane's module shape with the archive linked
