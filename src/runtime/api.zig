@@ -441,6 +441,7 @@ pub fn App(comptime Runtime: type) type {
         automation_command_policy: ?*const fn ([]const u8, []u8) usize = null,
         automation_interaction_policy: ?*const fn ([]const u8, []u8) usize = null,
         snapshot_policy: ?*const fn ([]const u8, []u8) usize = null,
+        host_flow_policy: ?*const fn ([]const u8, []u8) usize = null,
         /// Portable command routing and status-item selection. Native retains
         /// registry bytes, exact handles and OS capability execution.
         command_policy: ?*const fn ([]const u8, []u8) usize = null,

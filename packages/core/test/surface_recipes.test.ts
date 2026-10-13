@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
-const source = ["runtime_policy.ts", "control_appearance.ts", "control_content.ts", "surface_recipes.ts"].map(name => readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8")).join("\n");
-const { nscvSurfaceRecipes: derive } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source) + "\nexport { nscvSurfaceRecipes }; ").toString("base64")}`);
+const source = ["runtime_policy.ts", "control_appearance.ts", "control_content.ts", "surface_recipes.ts", "host_flow.ts"].map(name => readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8")).join("\n");
+const { nscvSurfaceRecipes: derive, native_window_policy: windowPolicy, native_effect_policy: effectPolicy } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source) + "\nexport { nscvSurfaceRecipes }; ").toString("base64")}`);
 function packet(op: number) {
   const b = new Uint8Array(560), w = new DataView(b.buffer); b.set([31, 1, op, 0]);
   [5, 7, 120, 60].forEach((value, i) => w.setFloat32(16 + i * 4, value, true));
@@ -15,6 +15,19 @@ function packet(op: number) {
 const word = (b: Uint8Array, at: number) => new DataView(b.buffer).getUint32(at, true);
 const value = (b: Uint8Array, at: number) => new DataView(b.buffer).getFloat32(at, true);
 const commands = (b: Uint8Array) => Array.from({ length: word(b, 4) }, (_, i) => [word(b, 64 + i * 128), word(b, 68 + i * 128)]);
+test("window surface recipes and effect host flow retain separate opcode 31 routes", () => {
+  const host = new Uint8Array(64); host.set([31, 1, 9, 0, 0, 1]);
+  const expectedHost = new Uint8Array(64); expectedHost.set([1, 2, 3, 4]);
+  for (let op = 0; op < 15; op++) {
+    const input = packet(op), saved = input.slice();
+    const actual = windowPolicy(input), expected = derive(input);
+    assert.equal(actual.length, 1088); assert.deepEqual(actual, expected);
+    assert.deepEqual(effectPolicy(host), expectedHost);
+    assert.deepEqual(input, saved); assert.deepEqual(actual, expected);
+  }
+  assert.throws(() => windowPolicy(host), /surface recipe shape/);
+  assert.throws(() => effectPolicy(packet(0)), /host flow request/);
+});
 test("surface recipes retain ordered shadow fill border and optional title", () => {
   const b = packet(2), w = new DataView(b.buffer); w.setUint32(4, 1, true);
   const out = derive(b); assert.deepEqual(commands(out), [[2, 1], [0, 2], [1, 3], [3, 4]]); assert.equal(value(out, 64 + 3 * 128 + 64), 104);

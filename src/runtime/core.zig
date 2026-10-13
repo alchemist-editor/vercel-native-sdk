@@ -281,6 +281,7 @@ pub const Runtime = struct {
     automation_command_policy: ?*const fn ([]const u8, []u8) usize = null,
     automation_interaction_policy: ?*const fn ([]const u8, []u8) usize = null,
     snapshot_policy: ?*const fn ([]const u8, []u8) usize = null,
+    host_flow_policy: ?*const fn ([]const u8, []u8) usize = null,
     command_policy: ?*const fn ([]const u8, []u8) usize = null,
     text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
     render_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -1333,6 +1334,9 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const host_flow_reference = @import("flow_reference.zig");
+    pub const host_event_pump = @import("host_event_pump.zig");
+    pub const host_event_pump_reference = @import("host_event_pump_reference.zig");
     pub const journal_policy = @import("journal_policy.zig");
     pub const blob_policy = @import("blob_policy.zig");
     pub const blob_reference_store = @import("session_blobs_reference.zig");

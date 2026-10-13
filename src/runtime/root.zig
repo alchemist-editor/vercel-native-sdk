@@ -280,3 +280,6 @@ test {
     _ = @import("tests.zig");
     _ = @import("ts_canvas_hooks_tests.zig");
 }
+
+pub const host_flow_policy = @import("host_flow_policy.zig");
+pub const host_event_pump = @import("host_event_pump.zig");

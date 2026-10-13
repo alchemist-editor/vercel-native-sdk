@@ -1543,6 +1543,7 @@ pub fn build(b: *std.Build) void {
         b.step("test-ts-shell-admission", "Compare complete compiled scene hierarchy and runtime descriptor admission").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-shell-admission-tests", &.{"compiled shell admission"})).step);
         b.step("test-ts-authorization", "Compare compiled authorization and complete bridge responses against native references").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-authorization-tests", &.{"compiled authorization"})).step);
         b.step("test-ts-builtin-coordination", "Compare complete builtin bridge coordination against native references").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-builtin-coordination-tests", &.{"compiled builtin coordination"})).step);
+        b.step("test-ts-host-flow", "Compare complete host event scheduling and runtime coordination with native references").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-host-flow-tests", &.{"compiled host flow"})).step);
         b.step("test-ts-session-recording", "Compare compiled recording coordination, complete journals and failure transitions").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-session-recording-tests", &.{ "compiled session recording", "compiled input composition sealed journals" })).step);
         b.step("test-ts-replay-progress", "Compare complete replay reports, target selection, blob validation and finalization").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-replay-progress-tests", &.{"compiled replay progress"})).step);
         b.step("test-ts-session-journal", "Compare journal framing, complete readers, seals and hostile input mutations").dependOn(&b.addRunArtifact(filteredTestArtifact(b, ts_core_artifacts.surface_layout.root_module, "ts-session-journal-tests", &.{ "compiled journal", "compiled replay progress consumer" })).step);
@@ -2209,7 +2210,9 @@ pub fn build(b: *std.Build) void {
         // The runtime ordering the queue protects: the recorder seals
         // on the shutdown dispatch's exit, and the modeled host's
         // queued seam keeps the runtime suites honest about it.
-        .{ .path = "src/runtime/flow.zig", .pattern = "if (event_value == .app_shutdown) recorder.finish();" },
+        .{ .path = "src/runtime/flow.zig", .pattern = "3 => self.options.session_recorder.?.finish()," },
+        .{ .path = "packages/core/src/host_flow.ts", .pattern = "if (kind === 5) out[2] = 3;" },
+        .{ .path = "src/runtime/flow_reference.zig", .pattern = "if (event_value == .app_shutdown) recorder.finish();" },
         .{ .path = "src/platform/null_platform.zig", .pattern = "pub fn takeQueuedQuit" },
     });
     addFileContainsCheckStep(b, file_contains_checker, test_step, "test-quit-pre-run-pending", "Verify a PRE-RUN quit verb on the macOS hosts parks as a pending flag drained at top level, never the inline emit (an inline pre-run emit nests the shutdown inside the boot dispatch that requested it — the recorder seals the journal before that dispatch commits, the same bug the running-path queue fixes)", &.{

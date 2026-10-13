@@ -2,6 +2,7 @@
 //! is still executing. Own those event bytes and deliver them after the
 //! triggering dispatch commits, preserving causal journal order.
 const std = @import("std");
+const flow = @import("host_flow_policy.zig");
 const platform = @import("../platform/root.zig");
 
 pub const HostEventPump = struct {
@@ -9,6 +10,7 @@ pub const HostEventPump = struct {
     const Pending = struct { event: platform.Event, arena: std.heap.ArenaAllocator, bytes: usize };
     const max_bytes = 4 * 1024 * 1024;
     allocator: std.mem.Allocator,
+    policy: flow.Policy = null,
     active: bool = false,
     pending: std.ArrayList(Pending) = .empty,
     head: usize = 0,
@@ -30,10 +32,11 @@ pub const HostEventPump = struct {
         self.head += 1;
         self.count -= 1;
         self.bytes -= value.bytes;
-        if (self.count == 0) {
+        const storage_action: u8 = if (self.policy) |policy| flow.plan(policy, .take, .{ .count = self.count, .head = self.head })[0] else if (self.count == 0) 1 else if (self.head >= capacity and self.head >= self.count) 2 else 0;
+        if (storage_action == 1) {
             self.pending.clearRetainingCapacity();
             self.head = 0;
-        } else if (self.head >= capacity and self.head >= self.count) {
+        } else if (storage_action == 2) {
             std.mem.copyForwards(Pending, self.pending.items[0..self.count], self.pending.items[self.head..][0..self.count]);
             self.pending.items.len = self.count;
             self.head = 0;
@@ -46,12 +49,25 @@ pub const HostEventPump = struct {
         // while its caller is suspended. Adjacent requests carry no observed
         // payload and one turn satisfies them; keep every intervening event
         // and every completed GPU frame in its original order.
-        if (event == .frame_requested and self.count != 0 and
-            self.pending.items[self.pending.items.len - 1].event == .frame_requested) return;
-        if (self.count == capacity or @sizeOf(Pending) > max_bytes - self.bytes) return error.HostEventQueueFull;
+        const adjacent = self.count != 0 and self.pending.items[self.pending.items.len - 1].event == .frame_requested;
+        var remaining: usize = undefined;
+        if (self.policy) |policy| {
+            const admission = flow.plan(policy, .enqueue, .{ .kind = flow.eventKind(event), .a = @intFromBool(adjacent), .count = self.count, .used = self.bytes, .cost = @sizeOf(Pending) });
+            switch (admission[0]) {
+                1 => return,
+                2 => return error.HostEventQueueFull,
+                3 => {},
+                else => unreachable,
+            }
+            remaining = std.mem.readInt(u32, admission[8..12], .little);
+        } else {
+            if (event == .frame_requested and adjacent) return;
+            if (self.count == capacity or @sizeOf(Pending) > max_bytes - self.bytes) return error.HostEventQueueFull;
+            remaining = max_bytes - self.bytes - @sizeOf(Pending);
+        }
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         errdefer arena.deinit();
-        var remaining = max_bytes - self.bytes - @sizeOf(Pending);
+
         const owned = try copyBorrowed(arena.allocator(), event, &remaining);
         const bytes = max_bytes - self.bytes - remaining;
         try self.pending.append(self.allocator, .{ .event = owned, .arena = arena, .bytes = bytes });
@@ -93,8 +109,27 @@ pub const HostEventPump = struct {
         };
     }
 
+    fn deliver(self: *HostEventPump, context: *anyopaque, handler: platform.EventHandler, event: platform.Event) anyerror!void {
+        if (self.policy) |policy| {
+            var handler_error: ?anyerror = null;
+            handler(context, event) catch |err| {
+                handler_error = err;
+            };
+            switch (flow.plan(policy, .error_selection, .{ .a = @intFromBool(handler_error != null), .b = @intFromBool(self.pending_error != null) })[0]) {
+                0 => {},
+                1 => return handler_error.?,
+                2 => return self.pending_error.?,
+                else => unreachable,
+            }
+        } else {
+            try handler(context, event);
+            if (self.pending_error) |err| return err;
+        }
+    }
+
     pub fn dispatch(self: *HostEventPump, context: *anyopaque, handler: platform.EventHandler, event: platform.Event) anyerror!void {
-        if (self.active) return self.enqueue(event) catch |err| {
+        const enter = if (self.policy) |policy| flow.plan(policy, .enter, .{ .a = @intFromBool(self.active) })[0] else if (self.active) @as(u8, 1) else 2;
+        if (enter == 1) return self.enqueue(event) catch |err| {
             self.pending_error = err;
             return err;
         };
@@ -104,16 +139,16 @@ pub const HostEventPump = struct {
             self.pending_error = null;
         }
         errdefer self.deinit();
-        try handler(context, event);
-        if (self.pending_error) |err| return err;
+        try self.deliver(context, handler, event);
         var delivered: usize = 0;
-        while (self.count > 0) {
-            if (delivered == capacity) return error.HostEventTurnLimit;
+        while (true) {
+            const turn: u8 = if (self.policy) |policy| flow.plan(policy, .turn, .{ .count = self.count, .delivered = delivered })[0] else if (self.count == 0) @as(u8, 0) else if (delivered == capacity) 2 else 1;
+            if (turn == 0) break;
+            if (turn == 2) return error.HostEventTurnLimit;
             delivered += 1;
             var pending = self.take();
             defer pending.arena.deinit();
-            try handler(context, pending.event);
-            if (self.pending_error) |err| return err;
+            try self.deliver(context, handler, pending.event);
         }
     }
 };
