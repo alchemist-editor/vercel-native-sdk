@@ -572,6 +572,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             widget_change_policy: ?*const fn ([]const u8, []u8) usize = null,
             widget_paint_policy: ?*const fn ([]const u8, []u8) usize = null,
             widget_presentation_policy: ?*const fn ([]const u8, []u8) usize = null,
+            terminal_paint_policy: ?*const fn ([]const u8, []u8) usize = null,
             widget_paint_walk_policy: ?*const fn ([]const u8, []u8) usize = null,
             control_geometry_policy: ?*const fn ([]const u8, []u8) usize = null,
             /// Which built-in theme pack the stock tokens resolve when
@@ -2107,6 +2108,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 tokens.widget_paint_policy = self.options.widget_paint_policy;
                 tokens.widget_presentation_policy = self.options.widget_presentation_policy;
                 tokens.widget_paint_walk_policy = self.options.widget_paint_walk_policy;
+                tokens.terminal_paint_policy = self.options.terminal_paint_policy;
                 tokens.control_geometry_policy = self.options.control_geometry_policy;
                 tokens.code_content_policy = self.options.code_content_policy;
                 tokens.paragraph_policy = self.options.paragraph_policy;
@@ -2175,6 +2177,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             tokens.widget_paint_policy = self.options.widget_paint_policy;
             tokens.widget_presentation_policy = self.options.widget_presentation_policy;
             tokens.widget_paint_walk_policy = self.options.widget_paint_walk_policy;
+            tokens.terminal_paint_policy = self.options.terminal_paint_policy;
             tokens.control_geometry_policy = self.options.control_geometry_policy;
             tokens.code_content_policy = self.options.code_content_policy;
             tokens.paragraph_policy = self.options.paragraph_policy;
@@ -2470,9 +2473,10 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 const content_height = @max(0, frame.height - inset.top - inset.bottom);
                 const metrics = canvas.terminalCellMetrics(tokens);
                 if (metrics.width <= 0 or metrics.height <= 0) continue;
-                const proposed = canvas.clampTerminalGrid(
+                const proposed = canvas.terminal_grid.clampGridWithPolicy(
                     @intFromFloat(@max(2, @floor(content_width / metrics.width))),
                     @intFromFloat(@max(2, @floor(content_height / metrics.height))),
+                    tokens.terminal_paint_policy,
                 );
                 const state = self.terminal_sessions.reconcile(
                     pty,

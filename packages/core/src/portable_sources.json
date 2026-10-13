@@ -40,6 +40,7 @@
   "src/render_animation_lifecycle.ts",
   "src/motion_sampling.ts",
   "src/vector_raster.ts",
+  "src/terminal_paint.ts",
   "src/control_appearance.ts",
   "src/component_construction.ts",
   "src/widget_motion.ts",

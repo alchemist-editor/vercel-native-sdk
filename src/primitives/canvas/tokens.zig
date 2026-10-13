@@ -1933,6 +1933,7 @@ pub const DesignTokens = struct {
     /// Portable retained damage geometry; native supplies font measurements.
     widget_paint_policy: ?*const fn ([]const u8, []u8) usize = null,
     widget_presentation_policy: ?*const fn ([]const u8, []u8) usize = null,
+    terminal_paint_policy: ?*const fn ([]const u8, []u8) usize = null,
     widget_paint_walk_policy: ?*const fn ([]const u8, []u8) usize = null,
     control_geometry_policy: ?*const fn ([]const u8, []u8) usize = null,
     code_content_policy: ?*const fn ([]const u8, []u8) usize = null,

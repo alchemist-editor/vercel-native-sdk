@@ -500,6 +500,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 if (options.widget_paint_walk_policy != null) @panic("TsUiApp owns widget_paint_walk_policy - remove custom paint traversal wiring");
                 stamped.widget_presentation_policy = core.nativeWindowPolicy;
                 stamped.widget_paint_walk_policy = core.nativeWindowPolicy;
+                if (options.terminal_paint_policy != null) @panic("TsUiApp owns terminal_paint_policy - remove custom terminal painter wiring");
+                stamped.terminal_paint_policy = core.nativeWindowPolicy;
                 if (options.control_geometry_policy != null) @panic("TsUiApp owns control_geometry_policy - remove custom geometry wiring");
                 stamped.control_geometry_policy = core.nativeWindowPolicy;
             }

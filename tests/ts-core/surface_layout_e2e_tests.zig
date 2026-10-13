@@ -48,6 +48,7 @@ pub fn expectComplete(expected: anytype, actual: @TypeOf(expected)) anyerror!voi
 }
 
 test {
+    _ = @import("terminal_paint_e2e_tests.zig");
     _ = @import("markup_development_e2e_tests.zig");
     _ = @import("host_flow_e2e_tests.zig");
     _ = @import("host_input_regions_e2e_tests.zig");

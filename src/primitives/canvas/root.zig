@@ -517,6 +517,8 @@ pub const max_text_span_lines_per_paragraph = text_spans.max_text_span_lines_per
 // painter (real text runs, geometric box drawing, selection, cursor,
 // scrollback indicator) — lives in `terminal_grid.zig`; the box-drawing
 // geometry in `terminal_box.zig`.
+pub const TerminalPaintPolicy = @import("terminal_paint_policy.zig");
+pub const TerminalGridReference = @import("terminal_grid_reference.zig");
 pub const terminal_grid = @import("terminal_grid.zig");
 pub const terminal_box = @import("terminal_box.zig");
 pub const TerminalGrid = terminal_grid.TerminalGrid;
