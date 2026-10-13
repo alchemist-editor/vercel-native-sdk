@@ -26,6 +26,7 @@ const runtime_clock = @import("clock.zig");
 const runtime_effects = @import("effects.zig");
 const journal = @import("session_journal.zig");
 const session_blobs = @import("session_blobs.zig");
+const recording = @import("recording_policy.zig");
 
 /// Keep ordinary query pages self-contained while spilling pages large
 /// enough to dominate the journal. The relational page's own hard ceiling
@@ -43,6 +44,8 @@ pub const RecorderSink = struct {
 
 pub const SessionRecorder = struct {
     sink: RecorderSink,
+    /// Compiled coordination is independent of replay callbacks. Bind before begin.
+    recording_policy: recording.Policy = null,
     /// Where large effect payloads go out of line (`blobs/` beside the
     /// journal, content-addressed — see session_blobs.zig). Bound by
     /// the owner alongside the sink; null means no blob storage, and
@@ -91,7 +94,10 @@ pub const SessionRecorder = struct {
     /// Write the preamble and session header. Must run before the first
     /// dispatched event.
     pub fn begin(self: *SessionRecorder, header: Header) void {
-        if (self.began or self.failed) return;
+        if (self.recordingPlan(.begin, .{})) |decision| {
+            if (decision.action == .skip) return;
+            std.debug.assert(decision.action == .proceed);
+        } else if (self.began or self.failed) return;
         self.began = true;
         self.window_chrome_source = header.window_chrome_source;
         // SessionRecorder deliberately has no ambient-I/O handle. Derive a
@@ -155,6 +161,27 @@ pub const SessionRecorder = struct {
     /// suppressed placeholder: the outermost action owns the window and
     /// the journal keeps exactly one record.
     pub fn stageEvent(self: *SessionRecorder, event: platform.Event) void {
+        if (self.recordingPlan(.stage, .{ .category = @intFromBool(event == .widget_accessibility_action or event == .widget_context_menu_action) })) |decision| {
+            switch (decision.action) {
+                .skip => return,
+                .depth_budget => return self.fail("dispatch nesting exceeded max_session_event_depth - this is a runtime bug, not a session shape"),
+                .suppressed => {
+                    self.staged_suppressed[self.depth] = true;
+                    self.staged_lens[self.depth] = 0;
+                },
+                .proceed => {
+                    const encoded = journal.encodeEvent(event, &self.staged[self.depth]) catch
+                        return self.fail("a platform event exceeded max_session_event_bytes");
+                    self.staged_lens[self.depth] = encoded.len;
+                    self.staged_suppressed[self.depth] = false;
+                    self.staged_chrome_counts[self.depth] = 0;
+                },
+                else => @panic("invalid compiled event staging action"),
+            }
+            self.depth = decision.depth;
+            self.suppress_owner_depth = decision.owner;
+            return;
+        }
         if (!self.began or self.failed or self.finished) return;
         if (self.depth >= journal.max_session_event_depth) {
             return self.fail("dispatch nesting exceeded max_session_event_depth - this is a runtime bug, not a session shape");
@@ -178,12 +205,20 @@ pub const SessionRecorder = struct {
     /// Append the innermost staged event record. Call exactly once per
     /// successful `stageEvent`, on dispatch exit.
     pub fn commitEvent(self: *SessionRecorder) void {
-        if (!self.began or self.failed or self.finished) return;
-        if (self.depth == 0) return;
-        self.depth -= 1;
-        if (self.staged_suppressed[self.depth]) return;
-        if (self.suppress_owner_depth) |owner_depth| {
-            if (owner_depth == self.depth) self.suppress_owner_depth = null;
+        if (self.recordingPlan(.commit, .{})) |decision| {
+            if (decision.action == .skip) return;
+            self.depth = decision.depth;
+            self.suppress_owner_depth = decision.owner;
+            if (decision.action == .suppressed) return;
+            if (decision.action != .proceed) @panic("invalid compiled event commit action");
+        } else {
+            if (!self.began or self.failed or self.finished) return;
+            if (self.depth == 0) return;
+            self.depth -= 1;
+            if (self.staged_suppressed[self.depth]) return;
+            if (self.suppress_owner_depth) |owner_depth| {
+                if (owner_depth == self.depth) self.suppress_owner_depth = null;
+            }
         }
         // Facts belong to the event that queried them. A nested event
         // commits its own facts first; suppressed accessibility children
@@ -191,15 +226,28 @@ pub const SessionRecorder = struct {
         for (self.staged_chrome[self.depth][0..self.staged_chrome_counts[self.depth]]) |record| {
             const payload = journal.encodeWindowChrome(record, &self.small_buffer) catch return self.fail("window chrome record over budget");
             self.writeRecord(.window_chrome, payload);
-            if (!self.failed) self.window_chrome_count += 1;
+            self.window_chrome_count = self.nextCount(self.window_chrome_count);
         }
         self.writeRecord(.event, self.staged[self.depth][0..self.staged_lens[self.depth]]);
-        if (!self.failed) self.event_count += 1;
+        self.event_count = self.nextCount(self.event_count);
     }
 
     /// Stage the complete OS result beside its consuming event, rather
     /// than publishing it ahead of an unrelated nested dispatch.
     pub fn recordWindowChrome(self: *SessionRecorder, record: journal.WindowChromeRecord) void {
+        if (self.recordingPlan(.chrome, .{})) |decision| {
+            switch (decision.action) {
+                .skip => return,
+                .unavailable_chrome => return self.fail("a chrome-less session queried native window chrome"),
+                .unowned_chrome => return self.fail("window chrome queried outside a recorded event"),
+                .chrome_budget => return self.fail("window chrome queries exceeded their per-event budget"),
+                .proceed => {},
+                else => @panic("invalid compiled chrome staging action"),
+            }
+            self.staged_chrome[decision.depth][self.staged_chrome_counts[decision.depth]] = record;
+            self.staged_chrome_counts[decision.depth] = decision.chrome_count;
+            return;
+        }
         if (!self.began or self.failed or self.finished) return;
         if (self.window_chrome_source == .unavailable) return self.fail("a chrome-less session queried native window chrome");
         if (self.depth == 0) return self.fail("window chrome queried outside a recorded event");
@@ -213,12 +261,14 @@ pub const SessionRecorder = struct {
     /// True when dispatch just returned to the top level and the frame
     /// index moved — the once-per-published-frame checkpoint gate.
     pub fn wantsCheckpoint(self: *const SessionRecorder, frame_index: u64) bool {
+        if (self.recordingPlan(.checkpoint_gate, .{ .a = frame_index, .b = self.last_checkpoint_frame })) |decision|
+            return decision.action == .proceed;
         return self.began and !self.failed and !self.finished and
             self.depth == 0 and frame_index != self.last_checkpoint_frame;
     }
 
     pub fn recordCheckpoint(self: *SessionRecorder, frame_index: u64, fingerprint: u64) void {
-        if (!self.began or self.failed or self.finished) return;
+        if (!self.active(.checkpoint)) return;
         self.last_checkpoint_frame = frame_index;
         const payload = journal.encodeCheckpoint(.{
             .event_ordinal = self.event_count,
@@ -226,7 +276,7 @@ pub const SessionRecorder = struct {
             .fingerprint = fingerprint,
         }, &self.small_buffer) catch return self.fail("checkpoint record over budget");
         self.writeRecord(.checkpoint, payload);
-        if (!self.failed) self.checkpoint_count += 1;
+        self.checkpoint_count = self.nextCount(self.checkpoint_count);
     }
 
     /// Mark the session with a pixel checkpoint (an automation
@@ -234,7 +284,7 @@ pub const SessionRecorder = struct {
     /// at the same scale through the deterministic reference renderer
     /// and compares hashes.
     pub fn recordScreenshot(self: *SessionRecorder, view_label: []const u8, scale: f32, png_hash: u64, png_len: u64) void {
-        if (!self.began or self.failed or self.finished) return;
+        if (!self.active(.screenshot)) return;
         const payload = journal.encodeScreenshot(.{
             .event_ordinal = self.event_count,
             .view_label = view_label,
@@ -243,7 +293,7 @@ pub const SessionRecorder = struct {
             .png_len = png_len,
         }, &self.small_buffer) catch return self.fail("screenshot record over budget");
         self.writeRecord(.screenshot, payload);
-        if (!self.failed) self.screenshot_count += 1;
+        self.screenshot_count = self.nextCount(self.screenshot_count);
     }
 
     /// Record one drained effect result (the `Effects.bindJournal`
@@ -253,13 +303,17 @@ pub const SessionRecorder = struct {
     /// record keeps only the address and length, so records stay small
     /// and identical payloads share one blob.
     pub fn recordEffect(self: *SessionRecorder, record: runtime_effects.EffectResultRecord) void {
-        if (!self.began or self.failed or self.finished) return;
+        const decision = self.recordingPlan(.effect, .{ .category = @intFromEnum(record.kind), .file_chunk = record.file_event == .chunk, .credential_get = record.credentials_operation == .get, .credential_ok = record.credentials_outcome == .ok, .b = record.payload.len, .limit_a = max_inline_db_page_bytes });
+        if (decision) |value| {
+            if (value.action == .skip) return;
+            if (value.action != .proceed) @panic("invalid compiled effect recording action");
+        } else if (!self.began or self.failed or self.finished) return;
         var journaled = record;
-        if (record.kind == .credentials) {
+        if (if (decision) |value| value.treatment == .redact or value.treatment == .placeholder else record.kind == .credentials) {
             // Error bytes duplicate the closed outcome and successful get
             // bytes are secrets. Neither belongs in a shareable artifact.
             journaled.payload = "";
-            if (record.credentials_operation == .get and record.credentials_outcome == .ok) {
+            if (if (decision) |value| value.treatment == .placeholder else record.credentials_operation == .get and record.credentials_outcome == .ok) {
                 var hasher = std.crypto.hash.sha2.Sha256.init(.{});
                 hasher.update(&self.credentials_salt);
                 var ordinal: [8]u8 = undefined;
@@ -271,7 +325,7 @@ pub const SessionRecorder = struct {
                 journaled.credentials_secret_len = record.payload.len;
             }
         }
-        if (record.kind == .file and record.file_event == .chunk and record.payload.len > 0) {
+        if (if (decision) |value| value.treatment == .file else record.kind == .file and record.file_event == .chunk and record.payload.len > 0) {
             const blob_sink = self.blob_sink orelse {
                 return self.fail("a streamed file chunk needs the session blob store, and none is bound - wire SessionRecorder.blob_sink");
             };
@@ -281,7 +335,7 @@ pub const SessionRecorder = struct {
             journaled.file_blob_len = record.payload.len;
             journaled.payload = "";
         }
-        if (record.kind == .image and record.payload.len > 0) {
+        if (if (decision) |value| value.treatment == .image else record.kind == .image and record.payload.len > 0) {
             const blob_sink = self.blob_sink orelse {
                 return self.fail("an image effect result needs the session blob store, and none is bound - wire SessionRecorder.blob_sink (the app runner creates blobs/ beside the journal)");
             };
@@ -297,7 +351,7 @@ pub const SessionRecorder = struct {
         // content-addressed store, address into the record — stream
         // payloads stay out of the journal and identical batches
         // (prompts, repeated screens) share one blob.
-        if (record.kind == .pty and record.payload.len > 0) {
+        if (if (decision) |value| value.treatment == .pty else record.kind == .pty and record.payload.len > 0) {
             const blob_sink = self.blob_sink orelse {
                 return self.fail("a pty output result needs the session blob store, and none is bound - wire SessionRecorder.blob_sink (the app runner creates blobs/ beside the journal)");
             };
@@ -309,7 +363,7 @@ pub const SessionRecorder = struct {
             journaled.pty_blob_len = record.payload.len;
             journaled.payload = "";
         }
-        if (record.kind == .persist and record.payload.len > 0) {
+        if (if (decision) |value| value.treatment == .persist else record.kind == .persist and record.payload.len > 0) {
             const blob_sink = self.blob_sink orelse {
                 return self.fail("a model restore needs the session blob store, and none is bound - wire SessionRecorder.blob_sink (the app runner creates blobs/ beside the journal)");
             };
@@ -321,7 +375,7 @@ pub const SessionRecorder = struct {
             journaled.persist_blob_len = record.payload.len;
             journaled.payload = "";
         }
-        if (record.kind == .db and record.payload.len > max_inline_db_page_bytes) {
+        if (if (decision) |value| value.treatment == .db else record.kind == .db and record.payload.len > max_inline_db_page_bytes) {
             const blob_sink = self.blob_sink orelse {
                 return self.fail("a large relational page needs the session blob store, and none is bound - wire SessionRecorder.blob_sink (the app runner creates blobs/ beside the journal)");
             };
@@ -337,7 +391,7 @@ pub const SessionRecorder = struct {
             return self.fail("an effect result exceeded max_session_record_bytes");
         };
         self.writeRecord(.effect, payload);
-        if (!self.failed) self.effect_count += 1;
+        self.effect_count = self.nextCount(self.effect_count);
     }
 
     /// The type-erased binding `Effects.bindJournal` takes.
@@ -354,7 +408,7 @@ pub const SessionRecorder = struct {
     /// seals nothing: without the end record, replay refuses the file
     /// as truncated rather than silently replaying a prefix.
     pub fn finish(self: *SessionRecorder) void {
-        if (!self.began or self.failed or self.finished) return;
+        if (!self.active(.finish)) return;
         self.finished = true;
         const payload = journal.encodeEnd(.{
             .event_count = self.event_count,
@@ -367,33 +421,76 @@ pub const SessionRecorder = struct {
     }
 
     fn writeRecord(self: *SessionRecorder, kind: journal.RecordKind, payload: []const u8) void {
-        if (self.failed) return;
-        if (payload.len > journal.max_session_record_bytes) {
-            return self.fail("a record exceeded max_session_record_bytes");
-        }
-        const total = self.bytes_written + 5 + payload.len;
-        if (total > journal.max_session_journal_bytes) {
-            return self.fail("the journal exceeded max_session_journal_bytes - recording stopped");
+        var total: u64 = undefined;
+        if (self.recordingPlan(.record, .{ .a = self.bytes_written, .b = payload.len, .limit_a = journal.max_session_record_bytes, .limit_b = journal.max_session_journal_bytes })) |decision| {
+            switch (decision.action) {
+                .skip => return,
+                .record_budget => return self.fail("a record exceeded max_session_record_bytes"),
+                .journal_budget => return self.fail("the journal exceeded max_session_journal_bytes - recording stopped"),
+                .proceed => total = decision.value,
+                else => @panic("invalid compiled record write action"),
+            }
+        } else {
+            if (self.failed) return;
+            if (payload.len > journal.max_session_record_bytes) return self.fail("a record exceeded max_session_record_bytes");
+            total = self.bytes_written + 5 + payload.len;
+            if (total > journal.max_session_journal_bytes) return self.fail("the journal exceeded max_session_journal_bytes - recording stopped");
         }
         var record_header: [5]u8 = undefined;
         record_header[0] = @intFromEnum(kind);
         std.mem.writeInt(u32, record_header[1..5], @intCast(payload.len), .little);
         self.write(&record_header);
         self.write(payload);
-        if (!self.failed) self.bytes_written = total;
+        if (self.writable()) self.bytes_written = total;
     }
 
     fn write(self: *SessionRecorder, bytes: []const u8) void {
-        if (self.failed) return;
+        if (!self.writable()) return;
         self.sink.write_fn(self.sink.context, bytes) catch |err| {
             self.fail(@errorName(err));
         };
     }
 
+    fn recordingPlan(self: *const SessionRecorder, stage: recording.Stage, extra: recording.Facts) ?recording.Plan {
+        if (self.recording_policy == null) return null;
+        var facts = extra;
+        facts.began = self.began;
+        facts.finished = self.finished;
+        facts.failed = self.failed;
+        facts.depth = self.depth;
+        facts.owner = self.suppress_owner_depth;
+        facts.suppressed = self.depth > 0 and self.staged_suppressed[self.depth - 1];
+        facts.chrome_unavailable = self.window_chrome_source == .unavailable;
+        if (self.depth > 0) facts.chrome_count = self.staged_chrome_counts[self.suppress_owner_depth orelse (self.depth - 1)];
+        return recording.plan(self.recording_policy, stage, facts);
+    }
+
+    fn writable(self: *const SessionRecorder) bool {
+        if (self.recordingPlan(.write, .{})) |decision| return decision.action == .proceed;
+        return !self.failed;
+    }
+
+    fn active(self: *const SessionRecorder, stage: recording.Stage) bool {
+        if (self.recordingPlan(stage, .{})) |decision| return decision.action == .proceed;
+        return self.began and !self.failed and !self.finished;
+    }
+
+    fn nextCount(self: *const SessionRecorder, count: u64) u64 {
+        if (self.recordingPlan(.count, .{ .a = count })) |decision| {
+            if (decision.action == .skip) return count;
+            if (decision.action != .proceed) @panic("invalid compiled recording count action");
+            return decision.value;
+        }
+        return if (self.failed) count else count + 1;
+    }
+
     /// Flip into the failed state, loudly, once. Recording failures
     /// degrade — the app keeps running; only the journal dies.
     fn fail(self: *SessionRecorder, reason: []const u8) void {
-        if (self.failed) return;
+        if (self.recordingPlan(.fail, .{})) |decision| {
+            if (decision.action == .skip) return;
+            if (decision.action != .proceed) @panic("invalid compiled recording failure action");
+        } else if (self.failed) return;
         self.failed = true;
         // No stderr on freestanding targets (the docs' wasm preview
         // host): analyzing the print would drag `std.Io.Threaded` in.

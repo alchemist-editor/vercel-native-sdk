@@ -502,6 +502,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             /// Portable dispatch/drain scheduling. Native owns messages,
             /// queue boundaries, errors and capability execution; plans copy.
             replay_policy: ?*const fn ([]const u8, []u8) usize = null,
+            recording_policy: ?*const fn ([]const u8, []u8) usize = null,
             app_dispatch_policy: dispatch_policy.Policy = null,
             /// Portable context-menu and scroll coordination; native owns pins and latches.
             component_policy: component_policy.Policy = null,
@@ -1598,6 +1599,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .stop_fn = stopFn,
                 .replay_fn = replayFn,
                 .replay_policy = self.options.replay_policy,
+                .recording_policy = self.options.recording_policy,
             };
         }
 
@@ -1671,6 +1673,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .replay_window_result_fn = effectsRestoreWindowResult,
             });
             if (runtime.options.session_recorder) |recorder| {
+                if (self.options.recording_policy) |policy| recorder.recording_policy = policy;
                 self.effects.bindJournal(recorder.effectJournal());
             }
             // The terminal-session seams (no-ops on stub builds): the

@@ -60,6 +60,7 @@ test {
     _ = @import("authorization_e2e_tests.zig");
     _ = @import("builtin_coordination_e2e_tests.zig");
     _ = @import("automation_commands_e2e_tests.zig");
+    _ = @import("session_recording_e2e_tests.zig");
     _ = @import("automation_interactions_e2e_tests.zig");
     _ = @import("input_composition_e2e_tests.zig");
     _ = @import("semantic_tree_e2e_tests.zig");

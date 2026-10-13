@@ -311,6 +311,7 @@ test "compiled input composition sealed journals replay complete keyboard payloa
     defer std.testing.allocator.free(recorders);
     for (recorders, 0..) |*recorder, i| {
         recorder.* = sdk.runtime.SessionRecorder.init(journals[i].sink());
+        if (i == 1) recorder.recording_policy = @import("session_recording_e2e_tests.zig").observed;
         recorder.begin(.{ .platform_name = "null", .app_name = "input-composition" });
         const h = if (i == 0) pair.left else pair.right;
         h.runtime.options.session_recorder = recorder;

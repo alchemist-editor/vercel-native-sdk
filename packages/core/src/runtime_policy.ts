@@ -607,7 +607,8 @@ function dbPolicyLookup(request: Uint8Array, positions: DataView, keyStart: numb
  * neither mutates its borrowed input nor resets the dispatch frame.
  */
 export function native_effect_policy(request: Uint8Array): Uint8Array {
-  if (request.length < 2 || request[0]! > 23) throw new Error("invalid effect policy request");
+  if (request.length < 2 || request[0]! > 24) throw new Error("invalid effect policy request");
+  if (request[0] === 24) return sessionRecordingPolicy(request);
   if (request[0] === 22) return componentCoordinationPolicy(request);
   if (request[0] === 23) return scrollReachPolicy(request);
   if (request[0] === 21) return replayCoordinationPolicy(request);
@@ -3092,4 +3093,85 @@ function scrollReachPolicy(request: Uint8Array): Uint8Array {
   if (remaining > Math.fround(viewport * 1.5)) result[1] = 1;
   else if (!(remaining > Math.fround(viewport * 1.0)) && request[horizontal ? 4 : 3] === 0) result[1] = 2;
   return result;
+}
+
+/** Portable recording coordination. Native owns event/record encoding, staged
+ * bytes, hashing, sinks and blobs. Every identity, budget and counter remains
+ * an exact pair of u32 words; no u64 crosses a JavaScript number boundary.
+ * The response is copied before any encoding, sink or reentrant capability.
+ */
+function sessionRecordingPolicy(request: Uint8Array): Uint8Array {
+  if (request.length !== 64 || request[0] !== 24 || request[1]! > 12)
+    throw new Error("invalid recording policy request");
+  for (const at of [2, 3, 4, 7, 9, 10, 11, 12])
+    if (request[at]! > 1) throw new Error("invalid recording flag");
+  for (const at of [13, 14, 15, 28, 29, 30, 31])
+    if (request[at] !== 0) throw new Error("invalid recording reserved byte");
+  const data = new DataView(request.buffer, request.byteOffset, request.byteLength);
+  const stage = request[1]!, depth = request[5]!, owner = request[6]!;
+  const maxDepth = data.getUint32(20, true), maxChrome = data.getUint32(24, true);
+  if (maxDepth === 0 || maxDepth > 254 || depth > maxDepth || owner !== 255 && owner >= depth)
+    throw new Error("invalid recording stack");
+  if (stage === 1 && request[8]! > 1 || stage === 7 && (request[8]! < 1 || request[8]! > 20))
+    throw new Error("invalid recording category");
+  const result = new Uint8Array(32), out = new DataView(result.buffer);
+  result[1] = depth; result[2] = owner;
+  const began = request[2] === 1, finished = request[3] === 1, failed = request[4] === 1;
+  // begin intentionally ignores finished; write/count/fail intentionally ignore
+  // both began and finished. The end record is written after finished is set.
+  if (stage === 0 ? began || failed : stage >= 9 ? failed : !began || failed || finished)
+    return result;
+  result[0] = 1;
+  if (stage === 1) {
+    if (depth === maxDepth) { result[0] = 2; return result; }
+    result[1] = depth + 1;
+    if (owner !== 255) result[0] = 8;
+    else if (request[8] === 1) result[2] = depth;
+  } else if (stage === 2) {
+    if (depth === 0) { result[0] = 0; return result; }
+    result[1] = depth - 1;
+    if (request[7] === 1) result[0] = 8;
+    else if (owner === depth - 1) result[2] = 255;
+  } else if (stage === 3) {
+    if (request[12] === 1) result[0] = 3;
+    else if (depth === 0) result[0] = 4;
+    else if (data.getUint32(16, true) === maxChrome) result[0] = 5;
+    else {
+      result[1] = owner === 255 ? depth - 1 : owner;
+      out.setUint32(16, data.getUint32(16, true) + 1, true);
+    }
+  } else if (stage === 4) {
+    if (depth !== 0 || recordingWordsEqual(data, 32, 40)) result[0] = 0;
+  } else if (stage === 7) {
+    const kind = request[8]!, nonempty = !recordingWordsZero(data, 40);
+    result[3] = kind === 18 ? request[10] === 1 && request[11] === 1 ? 7 : 6
+      : kind === 4 && request[9] === 1 && nonempty ? 2
+      : kind === 11 && nonempty ? 3 : kind === 15 && nonempty ? 1
+      : kind === 16 && nonempty ? 4
+      : kind === 17 && recordingWordsGreater(data, 40, 48) ? 5 : 0;
+  } else if (stage === 9) {
+    if (recordingWordsGreater(data, 40, 48)) { result[0] = 6; return result; }
+    const low = data.getUint32(32, true) + data.getUint32(40, true) + 5;
+    const high = data.getUint32(36, true) + data.getUint32(44, true) + Math.floor(low / 4294967296);
+    if (high > 4294967295) { result[0] = 7; return result; }
+    out.setUint32(8, low % 4294967296, true); out.setUint32(12, high, true);
+    const limitLow = data.getUint32(56, true), limitHigh = data.getUint32(60, true);
+    if (high > limitHigh || high === limitHigh && low % 4294967296 > limitLow) result[0] = 7;
+  } else if (stage === 12) {
+    const low = data.getUint32(32, true) + 1;
+    const high = data.getUint32(36, true) + (low === 4294967296 ? 1 : 0);
+    if (high > 4294967295) throw new Error("recording counter overflow");
+    out.setUint32(8, low % 4294967296, true); out.setUint32(12, high, true);
+  }
+  return result;
+}
+function recordingWordsZero(data: DataView, at: number): boolean {
+  return data.getUint32(at, true) === 0 && data.getUint32(at + 4, true) === 0;
+}
+function recordingWordsEqual(data: DataView, a: number, b: number): boolean {
+  return data.getUint32(a, true) === data.getUint32(b, true) && data.getUint32(a + 4, true) === data.getUint32(b + 4, true);
+}
+function recordingWordsGreater(data: DataView, a: number, b: number): boolean {
+  const highA = data.getUint32(a + 4, true), highB = data.getUint32(b + 4, true);
+  return highA > highB || highA === highB && data.getUint32(a, true) > data.getUint32(b, true);
 }
