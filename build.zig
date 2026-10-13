@@ -1610,6 +1610,22 @@ pub fn build(b: *std.Build) void {
         profile_step.dependOn(&profile_cli_tests.step);
         test_step.dependOn(&profile_cli_tests.step);
         const core_policy_step = b.step("test-corewire-policy", "Test compiled core contract policy and both projection adapters");
+        const corewire_reference_mod = module(b, b.graph.host, optimize, "tools/corewire/main_reference.zig");
+        @import("build/corewire.zig").linkProfile(corewire_reference_mod, ts_core_artifacts.profile_archive);
+        const corewire_reference = b.addExecutable(.{ .name = "corewire-reference", .root_module = corewire_reference_mod });
+        const filesystem_tests = b.addSystemCommand(&.{b.findProgram(&.{"node"}, &.{}) catch unreachable});
+        filesystem_tests.addFileArg(b.path("tools/corewire/filesystem.test.ts"));
+        filesystem_tests.addArtifactArg(ts_core_artifacts.corewire);
+        filesystem_tests.addArtifactArg(corewire_reference);
+        for ([_][]const u8{ "filesystem_coordination.ts", "invocation_cases.ts", "invocation_fixture.ts", "core_cases.ts", "service_cases.ts" }) |source| {
+            filesystem_tests.addFileInput(b.path(b.fmt("tools/corewire/{s}", .{source})));
+        }
+        filesystem_tests.has_side_effects = true;
+        filesystem_tests.setCwd(b.path("."));
+        const filesystem_step = b.step("test-corewire-filesystem", "Compare complete compiled filesystem coordination with the independent native reference");
+        filesystem_step.dependOn(&filesystem_tests.step);
+        core_policy_step.dependOn(&filesystem_tests.step);
+        test_step.dependOn(&filesystem_tests.step);
         for ([_][]const u8{ "contract_intake.zig", "sidecar.zig", "emit.zig", "emit_facade.zig", "invocation_tests.zig" }) |source| {
             const policy_mod = module(b, b.graph.host, optimize, b.fmt("tools/corewire/{s}", .{source}));
             @import("build/corewire.zig").linkProfile(policy_mod, ts_core_artifacts.profile_archive);

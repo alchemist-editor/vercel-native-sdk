@@ -14,6 +14,8 @@ import { projectEffective } from "./lossless_projection.ts";
 import type { ProfileInput } from "./profile_emission.ts";
 import { coreIntake, serviceIntake } from "./contract_intake.ts";
 export { emitProfile } from "./profile_emission.ts";
+import { filesystemPolicy as coordinateFilesystem } from "./filesystem_coordination.ts";
+export function filesystemPolicy(input: string): string { return coordinateFilesystem(input); }
 export function generateMirror(input: string): string { return JSON.stringify(emitMirror(JSON.parse(input) as EmissionInput)); }
 export function generateFacade(input: string): string { return JSON.stringify(emitFacade(JSON.parse(input) as EmissionInput)); }
 export function corePolicy(input: string, phase: string): string { return evaluateCorePolicy(input, phase); }
