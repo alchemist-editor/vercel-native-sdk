@@ -64,6 +64,7 @@ test {
     _ = @import("replay_progress_e2e_tests.zig");
     _ = @import("session_journal_e2e_tests.zig");
     _ = @import("snapshot_coordination_e2e_tests.zig");
+    _ = @import("snapshot_serialization_e2e_tests.zig");
     _ = @import("blob_coordination_e2e_tests.zig");
     _ = @import("automation_interactions_e2e_tests.zig");
     _ = @import("input_composition_e2e_tests.zig");

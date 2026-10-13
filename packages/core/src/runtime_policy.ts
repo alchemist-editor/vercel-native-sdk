@@ -607,7 +607,8 @@ function dbPolicyLookup(request: Uint8Array, positions: DataView, keyStart: numb
  * neither mutates its borrowed input nor resets the dispatch frame.
  */
 export function native_effect_policy(request: Uint8Array): Uint8Array {
-  if (request.length < 2 || request[0]! > 28) throw new Error("invalid effect policy request");
+  if (request[0] === 29) return snapshotSerializationPolicy(request);
+  if (request.length < 2 || request[0]! > 29) throw new Error("invalid effect policy request");
   if (request[0] === 28) return sessionBlobPolicy(request);
   if (request[0] === 27) return snapshotCoordinationPolicy(request);
   if (request[0] === 26) return sessionJournalPolicy(request);
@@ -3502,4 +3503,424 @@ export function sessionBlobPolicy(request: Uint8Array): Uint8Array {
   result[0] = action;
   if (!textMode) return result;
   const complete = new Uint8Array(32 + text.length);complete.set(result);complete.set(text, 32);new DataView(complete.buffer).setUint32(4, text.length, true);return complete;
+}
+
+/** Complete automation text traversal and formatting. Programs reference
+ * borrowed native slots; numeric spelling and writer I/O are explicit native
+ * capabilities. Programs and escaped-byte chunks are bounded independently of
+ * input label length and snapshot node count. */
+class NscSnapshotTextProgram implements nscContracts.Acyclic {
+  flags: Uint8Array;
+  bytes: number[] = [];
+  constructor(flags: Uint8Array) { this.flags = flags; }
+  flag(slot: number): boolean { return this.flags[8 + slot] === 1; }
+  text(value: string): void {
+    if (value.length === 0) return;
+    this.bytes.push(0); this.word(value.length);
+    for (let i = 0; i < value.length; i++) this.bytes.push(value.charCodeAt(i));
+  }
+  word(value: number): void { this.bytes.push(value & 255); this.bytes.push((value >>> 8) & 255); }
+  slot(index: number, format: number): void { this.bytes.push(1); this.word(index); this.bytes.push(format); }
+  children(collection: number): void { this.bytes.push(2); this.bytes.push(collection); }
+  quoted(index: number): void { this.text("\""); this.slot(index, 4); this.text("\""); }
+  result(): Uint8Array {
+    if (this.bytes.length > 16384) throw new Error("snapshot program budget exceeded");
+    const out = new Uint8Array(this.bytes.length);
+    for (let i = 0; i < this.bytes.length; i++) out[i] = this.bytes[i]!;
+    return out;
+  }
+}
+
+export function snapshotSerializationPolicy(request: Uint8Array): Uint8Array {
+  if (request.length < 8 || request[0] !== 29 || request[1] !== 1 || request[3]! > 2)
+    throw new Error("invalid snapshot serialization request");
+  for (let i = 4; i < 8; i++) if (request[i] !== 0) throw new Error("invalid snapshot serialization reserved byte");
+  const mode = request[2]!, variant = request[3]!;
+  if (mode === 20 || mode === 21) {
+    if (request.length > 264 || variant !== 0) throw new Error("invalid snapshot byte chunk");
+    const bytes: number[] = [], hex = "0123456789abcdef";
+    for (let i = 8; i < request.length; i++) {
+      const byte = request[i]!;
+      if (mode === 21) { bytes.push(hex.charCodeAt(byte >>> 4)); bytes.push(hex.charCodeAt(byte & 15)); }
+      else if (byte === 34 || byte === 92) { bytes.push(92); bytes.push(byte); }
+      else if (byte === 10 || byte === 13 || byte === 9) { bytes.push(92); bytes.push(byte === 10 ? 110 : byte === 13 ? 114 : 116); }
+      else if (byte < 32 || byte === 127) {
+        bytes.push(92); bytes.push(117); bytes.push(48); bytes.push(48); bytes.push(hex.charCodeAt(byte >>> 4)); bytes.push(hex.charCodeAt(byte & 15));
+      } else bytes.push(byte);
+    }
+    const out = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) out[i] = bytes[i]!;
+    return out;
+  }
+  if (request.length !== 264 || mode > 19) throw new Error("invalid snapshot record");
+  for (let i = 8; i < 264; i++) if (request[i]! > 1) throw new Error("invalid snapshot fact");
+  const p = new NscSnapshotTextProgram(request);
+  if (mode === 0) {
+    if (variant === 0) {
+      p.text("ready=true protocol=0x"); p.slot(0, 3);
+      const names = [" frame=", " commands=", " runtime_uptime_ns=", " dispatch_errors=", " dropped_trace_records=", " publisher_pid="];
+      for (let i = 0; i < names.length; i++) { p.text(names[i]!); p.slot(i + 1, 1); }
+      p.text(" markup_watch="); p.text(p.flag(7) ? "armed\n" : "off\n");
+      if (p.flag(8)) { p.text("frame_profile"); p.children(0); p.text("\n"); }
+    } else if (variant === 1) { p.text("a11y root=@w1 nodes="); p.slot(9, 1); p.text("\n"); }
+    p.children(1);
+    if (variant !== 2) { p.children(2); p.children(3); }
+    if (variant === 0) {
+      p.children(4); p.children(5); p.children(6);
+      if (p.flag(10)) p.children(7);
+      if (p.flag(11)) p.children(8);
+      p.children(9);
+      if (p.flag(12)) p.children(10);
+    }
+  } else if (mode === 1) {
+    const names = ["_p50_us=", "_p90_us=", "_max_us=", "_n="];
+    for (let i = 0; i < names.length; i++) { p.text(" "); p.slot(0, 0); p.text(names[i]!); p.slot(i + 1, 1); }
+  } else if (mode === 2) {
+    p.text(variant === 1 ? "@w" : "window @w"); p.slot(0, 1);
+    p.text(variant === 1 ? " role=window name=\"" : " \""); p.slot(1, 0); p.text("\"");
+    if (variant !== 2) { p.text(" bounds=("); p.slot(2,1); p.text(","); p.slot(3,1); p.text(" "); p.slot(4,1); p.text("x"); p.slot(5,1); p.text(")"); }
+    if (variant !== 1) { p.text(" focused="); p.text(p.flag(6) ? "true" : "false"); }
+    if (variant === 0) { p.text(" frame="); p.slot(7,1); p.text(" commands="); p.slot(8,1); }
+    p.text("\n");
+  } else if (mode === 3) {
+    if (variant === 1) {
+      p.text("@w"); p.slot(0,1); p.text("/"); p.slot(1,0); p.text(" role="); p.slot(p.flag(3) ? 3 : 2,0);
+      p.text(" name=\""); p.slot(p.flag(4) ? 4 : p.flag(5) ? 5 : 1,0); p.text("\" bounds=(");
+      p.slot(6,1); p.text(","); p.slot(7,1); p.text(" "); p.slot(8,1); p.text("x"); p.slot(9,1); p.text(")\n");
+    } else {
+    p.text("  view @w");
+    p.slot(0, 1);
+    p.text("/");
+    p.slot(1, 0);
+    p.text(" kind=");
+    p.slot(2, 0);
+    p.text(" role=\"");
+    p.slot(3, 0);
+    p.text("\" accessibility_label=\"");
+    p.slot(4, 0);
+    p.text("\" text=\"");
+    p.slot(5, 0);
+    p.text("\" bounds=(");
+    p.slot(6, 1);
+    p.text(",");
+    p.slot(7, 1);
+    p.text(" ");
+    p.slot(8, 1);
+    p.text("x");
+    p.slot(9, 1);
+    p.text(") layer=");
+    p.slot(10, 1);
+    p.text(" visible=");
+    p.text(p.flag(11) ? "true" : "false");
+    p.text(" enabled=");
+    p.text(p.flag(12) ? "true" : "false");
+    p.text(" focused=");
+    p.text(p.flag(13) ? "true" : "false");
+    p.text(" open=");
+    p.text(p.flag(14) ? "true" : "false");
+    if (p.flag(250)) {
+    p.text(" gpu_size=");
+    p.slot(15, 1);
+    p.text("x");
+    p.slot(16, 1);
+    p.text(" gpu_scale=");
+    p.slot(17, 1);
+    p.text(" gpu_backend=");
+    p.slot(18, 0);
+    p.text(" gpu_pixel_format=");
+    p.slot(19, 0);
+    p.text(" gpu_present_mode=");
+    p.slot(20, 0);
+    p.text(" gpu_alpha_mode=");
+    p.slot(21, 0);
+    p.text(" gpu_color_space=");
+    p.slot(22, 0);
+    p.text(" gpu_vsync=");
+    p.text(p.flag(23) ? "true" : "false");
+    p.text(" gpu_status=");
+    p.slot(24, 0);
+    p.text(" gpu_present_path=");
+    p.slot(25, 0);
+    p.text(" gpu_frame=");
+    p.slot(26, 1);
+    p.text(" gpu_timestamp_ns=");
+    p.slot(27, 1);
+    p.text(" gpu_frame_interval_ns=");
+    p.slot(28, 1);
+    p.text(" gpu_input_count=");
+    p.slot(29, 1);
+    p.text(" gpu_input_timestamp_ns=");
+    p.slot(30, 1);
+    p.text(" gpu_input_latency_ns=");
+    p.slot(31, 1);
+    p.text(" gpu_input_latency_budget_ns=");
+    p.slot(32, 1);
+    p.text(" gpu_input_latency_budget_exceeded=");
+    p.slot(33, 1);
+    p.text(" gpu_input_latency_budget_ok=");
+    p.text(p.flag(34) ? "true" : "false");
+    p.text(" gpu_first_frame_latency_ns=");
+    p.slot(35, 1);
+    p.text(" gpu_first_frame_latency_budget_ns=");
+    p.slot(36, 1);
+    p.text(" gpu_first_frame_latency_budget_exceeded=");
+    p.slot(37, 1);
+    p.text(" gpu_first_frame_latency_budget_ok=");
+    p.text(p.flag(38) ? "true" : "false");
+    p.text(" gpu_nonblank=");
+    p.text(p.flag(39) ? "true" : "false");
+    p.text(" gpu_occluded=");
+    p.text(p.flag(40) ? "true" : "false");
+    p.text(" gpu_sample=0x");
+    p.slot(41, 2);
+    p.text(" present_fallback=");
+    p.slot(42, 0);
+    p.text(" present_fallback_needed=");
+    p.slot(43, 1);
+    p.text(" present_fallback_limit=");
+    p.slot(44, 1);
+    p.text(" present_fallback_command=\"");
+    p.slot(45, 0);
+    p.text("\" present_fallback_frames=");
+    p.slot(46, 1);
+    p.text(" present_mode=");
+    p.slot(47, 0);
+    p.text(" present_patch_bytes=");
+    p.slot(48, 1);
+    p.text(" present_patch_upserts=");
+    p.slot(49, 1);
+    p.text(" present_patch_evicts=");
+    p.slot(50, 1);
+    p.text(" present_retained_commands=");
+    p.slot(51, 1);
+    p.text(" canvas_revision=");
+    p.slot(52, 1);
+    p.text(" canvas_commands=");
+    p.slot(53, 1);
+    p.text(" canvas_frame_requires_render=");
+    p.text(p.flag(54) ? "true" : "false");
+    p.text(" canvas_frame_full_repaint=");
+    p.text(p.flag(55) ? "true" : "false");
+    p.text(" canvas_frame_batches=");
+    p.slot(56, 1);
+    p.text(" canvas_frame_encoder_commands=");
+    p.slot(57, 1);
+    p.text(" canvas_frame_encoder_cache_actions=");
+    p.slot(58, 1);
+    p.text(" canvas_frame_encoder_pipeline_binds=");
+    p.slot(59, 1);
+    p.text(" canvas_frame_encoder_draws=");
+    p.slot(60, 1);
+    p.text(" canvas_frame_pipelines=");
+    p.slot(61, 1);
+    p.text(" canvas_frame_pipeline_uploads=");
+    p.slot(62, 1);
+    p.text(" canvas_frame_pipeline_retains=");
+    p.slot(63, 1);
+    p.text(" canvas_frame_pipeline_evicts=");
+    p.slot(64, 1);
+    p.text(" canvas_frame_path_geometries=");
+    p.slot(65, 1);
+    p.text(" canvas_frame_path_vertices=");
+    p.slot(66, 1);
+    p.text(" canvas_frame_path_indices=");
+    p.slot(67, 1);
+    p.text(" canvas_frame_path_uploads=");
+    p.slot(68, 1);
+    p.text(" canvas_frame_path_retains=");
+    p.slot(69, 1);
+    p.text(" canvas_frame_path_evicts=");
+    p.slot(70, 1);
+    p.text(" canvas_frame_images=");
+    p.slot(71, 1);
+    p.text(" canvas_frame_image_uploads=");
+    p.slot(72, 1);
+    p.text(" canvas_frame_image_retains=");
+    p.slot(73, 1);
+    p.text(" canvas_frame_image_evicts=");
+    p.slot(74, 1);
+    p.text(" canvas_frame_layers=");
+    p.slot(75, 1);
+    p.text(" canvas_frame_opacity_layers=");
+    p.slot(76, 1);
+    p.text(" canvas_frame_clip_layers=");
+    p.slot(77, 1);
+    p.text(" canvas_frame_transform_layers=");
+    p.slot(78, 1);
+    p.text(" canvas_frame_layer_uploads=");
+    p.slot(79, 1);
+    p.text(" canvas_frame_layer_retains=");
+    p.slot(80, 1);
+    p.text(" canvas_frame_layer_evicts=");
+    p.slot(81, 1);
+    p.text(" canvas_frame_resources=");
+    p.slot(82, 1);
+    p.text(" canvas_frame_uploads=");
+    p.slot(83, 1);
+    p.text(" canvas_frame_retains=");
+    p.slot(84, 1);
+    p.text(" canvas_frame_evicts=");
+    p.slot(85, 1);
+    p.text(" canvas_frame_effects=");
+    p.slot(86, 1);
+    p.text(" canvas_frame_shadows=");
+    p.slot(87, 1);
+    p.text(" canvas_frame_blurs=");
+    p.slot(88, 1);
+    p.text(" canvas_frame_effect_uploads=");
+    p.slot(89, 1);
+    p.text(" canvas_frame_effect_retains=");
+    p.slot(90, 1);
+    p.text(" canvas_frame_effect_evicts=");
+    p.slot(91, 1);
+    p.text(" canvas_frame_glyphs=");
+    p.slot(92, 1);
+    p.text(" canvas_frame_glyph_uploads=");
+    p.slot(93, 1);
+    p.text(" canvas_frame_glyph_retains=");
+    p.slot(94, 1);
+    p.text(" canvas_frame_glyph_evicts=");
+    p.slot(95, 1);
+    p.text(" canvas_frame_text_layouts=");
+    p.slot(96, 1);
+    p.text(" canvas_frame_text_lines=");
+    p.slot(97, 1);
+    p.text(" canvas_frame_text_uploads=");
+    p.slot(98, 1);
+    p.text(" canvas_frame_text_retains=");
+    p.slot(99, 1);
+    p.text(" canvas_frame_text_evicts=");
+    p.slot(100, 1);
+    p.text(" canvas_frame_gpu_packet_commands=");
+    p.slot(101, 1);
+    p.text(" canvas_frame_gpu_packet_cache_actions=");
+    p.slot(102, 1);
+    p.text(" canvas_frame_gpu_packet_cached_resources=");
+    p.slot(103, 1);
+    p.text(" canvas_frame_gpu_packet_unsupported=");
+    p.slot(104, 1);
+    p.text(" canvas_frame_gpu_packet_representable=");
+    p.text(p.flag(105) ? "true" : "false");
+    p.text(" canvas_frame_changes=");
+    p.slot(106, 1);
+    p.text(" canvas_frame_budget_exceeded=");
+    p.slot(107, 1);
+    p.text(" canvas_frame_budget_ok=");
+    p.text(p.flag(108) ? "true" : "false");
+    p.text(" widget_nodes=");
+    p.slot(109, 1);
+    p.text("/");
+    p.slot(110, 1);
+    p.text(" widget_semantics=");
+    p.slot(111, 1);
+    p.text("/");
+    p.slot(112, 1);
+    p.text(" context_menu_items=");
+    p.slot(113, 1);
+    p.text("/");
+    p.slot(114, 1);
+    p.text(" text_layout_plans=");
+    p.slot(115, 1);
+    p.text("/");
+    p.slot(116, 1);
+    p.text(" text_layout_lines=");
+    p.slot(117, 1);
+    p.text("/");
+    p.slot(118, 1);
+    if (p.flag(252)) {
+    p.text(" canvas_frame_dirty=(");
+    p.slot(119, 1);
+    p.text(",");
+    p.slot(120, 1);
+    p.text(" ");
+    p.slot(121, 1);
+    p.text("x");
+    p.slot(122, 1);
+    p.text(")");
+    } else p.text(" canvas_frame_dirty=null");
+    p.text(" canvas_frame_profile_work_units=");
+    p.slot(123, 1);
+    p.text(" canvas_frame_profile_risk=");
+    p.slot(124, 0);
+    p.text(" canvas_frame_profile_surface_area=");
+    p.slot(125, 1);
+    p.text(" canvas_frame_profile_dirty_area=");
+    p.slot(126, 1);
+    p.text(" canvas_frame_profile_dirty_ratio=");
+    p.slot(127, 1);
+    p.text(" widget_revision=");
+    p.slot(128, 1);
+    p.text(" widget_nodes=");
+    p.slot(129, 1);
+    p.text(" widget_semantics=");
+    p.slot(130, 1);
+    p.text(" widget_cursor=");
+    p.slot(131, 0);
+    }
+    if (p.flag(251)) {
+    p.text(" url=\"");
+    p.slot(132, 0);
+    p.text("\"");
+    }
+    p.text("\n");
+    }
+  } else if (mode === 4) {
+    p.text(variant === 0 ? "    widget @w" : "@w"); p.slot(0,1); p.text("/"); p.slot(1,0); p.text("#"); p.slot(2,1);
+    p.text(" role="); p.slot(3,0); p.text(" name=\""); p.slot(4,0); p.text("\" bounds=("); p.slot(5,1); p.text(","); p.slot(6,1); p.text(" "); p.slot(7,1); p.text("x"); p.slot(8,1); p.text(")");
+    if (variant === 0) { p.text(" focused="); p.text(p.flag(9) ? "true" : "false"); p.text(" enabled="); p.text(p.flag(10) ? "true" : "false"); }
+    if (p.flag(11)) { p.text(" parent=#"); p.slot(11,1); }
+    if (p.flag(12)) { p.text(" value="); p.slot(12,1); }
+    if (p.flag(13)) { p.text(" text=\""); p.slot(13,0); p.text("\""); }
+    if (variant === 0 && p.flag(14)) { p.text(" placeholder=\""); p.slot(14,0); p.text("\""); }
+    const grid = ["row_index", "column_index", "row_count", "column_count"];
+    let wrote = false;
+    for (let i = 0; i < 4; i++) if (p.flag(15+i)) { p.text(wrote ? "," : " grid=["); p.text(grid[i]!); p.text("="); p.slot(15+i,1); wrote = true; }
+    if (wrote) p.text("]");
+    if (p.flag(19)) { p.text(" list=[index="); p.slot(20,1); p.text(",count="); p.slot(21,1); p.text("]"); }
+    if (p.flag(22)) { p.text(" scroll=[offset="); p.slot(23,1); p.text(",viewport="); p.slot(24,1); p.text(",content="); p.slot(25,1); p.text("]"); }
+    if (p.flag(26)) { const names=["start", "end", "first", "last", "rendered"]; p.text(" virtual=["); for (let i=0;i<5;i++) { if(i>0)p.text(",");p.text(names[i]!);p.text("=");p.slot(27+i,1); }p.text("]"); }
+    const states=["focused", "disabled", "hovered", "pressed", "selected", "expanded", "collapsed", "required", "read_only", "invalid"];
+    wrote=false;
+    for(let i=0;i<states.length;i++) if(p.flag(32+i)) {p.text(wrote ? "," : " state=[");p.text(states[i]!);wrote=true;} if(wrote)p.text("]");
+    const actions=["focus", "press", "toggle", "increment", "decrement", "set_text", "set_selection", "select", "drag", "drop_files", "dismiss"];
+    wrote=false;
+    for(let i=0;i<actions.length;i++) if(p.flag(42+i)) {p.text(wrote ? "," : " actions=[");p.text(actions[i]!);wrote=true;} if(wrote)p.text("]");
+    if(p.flag(53)){p.text(" selection=");p.slot(54,1);p.text("..");p.slot(55,1);}
+    if(p.flag(56)){p.text(" composition=");p.slot(57,1);p.text("..");p.slot(58,1);}
+    if(p.flag(59)){p.text(" context_menu=[");p.children(11);p.text("]");}
+    p.text("\n");
+  } else if (mode === 5) {
+    if(p.flag(0))p.text(",");
+    if(p.flag(1))p.text("separator");else{p.text("\"");p.slot(2,0);p.text("\"");if(!p.flag(3))p.text("(disabled)");}
+  } else if (mode === 6) {
+    p.text("command id=");p.quoted(0);p.text(" title=");p.quoted(1);p.text(" enabled=");p.text(p.flag(2)?"true":"false");p.text(" checked=");p.text(p.flag(3)?"true":"false");p.text("\n");
+  } else if (mode === 7) {
+    p.text("app-menu title=");p.quoted(0);p.text(" items=");p.slot(1,1);p.text("\n");p.children(12);
+  } else if (mode === 8) {
+    if(p.flag(0))p.text("  app-menu-item separator\n");else{
+      p.text("  app-menu-item label=");p.quoted(1);p.text(" command=");p.quoted(2);p.text(" enabled=");p.text(p.flag(3)?"true":"false");p.text(" checked=");p.text(p.flag(4)?"true":"false");p.text(" key=");p.quoted(5);
+      const names=["primary", "command", "control", "option", "shift"];p.text(" modifiers=(");for(let i=0;i<5;i++){if(i>0)p.text(",");p.text(names[i]!);p.text("=");p.text(p.flag(6+i)?"true":"false");}p.text(")\n");
+    }
+  } else if (mode === 9) {
+    p.text("tray #");p.slot(0,1);p.text(" title=\"");p.slot(1,0);p.text("\" visible=");p.text(p.flag(2)?"true":"false");p.text(" items=");p.slot(3,1);p.text("\n");p.children(13);
+  } else if (mode === 10) {
+    if(p.flag(0))p.text("  tray-item separator\n");else{
+      p.text("  tray-item #");p.slot(1,1);
+      if(p.flag(2)){p.text(" role=segmented options=");p.slot(3,1);p.text("\n");p.children(14);}
+      else if(p.flag(4)){p.text(" role=metric primary=");p.quoted(5);p.text(" secondary=");p.quoted(6);p.text(" accessibility=");p.quoted(7);p.text("\n");}
+      else if(p.flag(8)){p.text(" role=chart caption=");p.quoted(9);p.text(" summary=");p.quoted(10);p.text(" accessibility=");p.quoted(11);p.text(" domain=(");p.slot(12,1);p.text(",");p.slot(13,1);p.text(") values=");p.children(15);p.text("\n");}
+      else{p.text(" label=\"");p.slot(14,0);p.text("\" command=\"");p.slot(15,0);p.text("\" enabled=");p.text(p.flag(16)?"true":"false");p.text(" detail=\"");p.slot(17,0);p.text("\" role=");p.slot(18,0);p.text(" key=\"");p.slot(19,0);p.text("\" modifiers=(");const names=["primary", "command", "control", "option", "shift"];for(let i=0;i<5;i++){if(i>0)p.text(",");p.text(names[i]!);p.text("=");p.text(p.flag(20+i)?"true":"false");}p.text(")\n");}
+    }
+  } else if (mode === 11) {
+    p.text("    tray-segment #");p.slot(0,1);p.text(" label=");p.quoted(1);p.text(" command=");p.quoted(2);p.text(" selected=");p.text(p.flag(3)?"true":"false");p.text(" enabled=");p.text(p.flag(4)?"true":"false");p.text("\n");
+  } else if (mode === 12) { if(p.flag(0))p.text(",");p.slot(1,1);
+  } else if (mode === 13) {
+    p.text("audio key=");p.slot(0,1);p.text(" state=");p.text(p.flag(1)?"buffering":p.flag(2)?"playing":"paused");p.text(" source=");p.slot(3,0);p.text(" position_ms=");p.slot(4,1);p.text(" duration_ms=");p.slot(5,1);p.text(" spectrum_events=");p.slot(6,1);if(p.flag(6)){p.text(" spectrum_bands=");p.slot(7,5);}p.text("\n");
+  } else if (mode === 14) {
+    p.text("video key=");p.slot(0,1);p.text(" surface=");p.slot(1,1);p.text(" state=");p.text(p.flag(2)?"buffering":p.flag(3)?"playing":"paused");p.text(" source=");p.slot(4,0);p.text(" position_ms=");p.slot(5,1);p.text(" duration_ms=");p.slot(6,1);p.text(" dimensions=");p.slot(7,1);p.text("x");p.slot(8,1);p.text(" loop=");p.text(p.flag(9)?"true":"false");p.text(" muted=");p.text(p.flag(10)?"true":"false");p.text("\n");
+  } else if (mode === 15) {
+    p.text("  error event=");p.slot(0,0);p.text(" name=");p.slot(1,0);if(p.flag(2)){p.text(" detail=\"");p.slot(2,0);p.text("\"");}p.text(" timestamp_ns=");p.slot(3,1);p.text("\n");
+  } else if (mode === 16) { p.text("  source kind=");p.slot(0,0);p.text(" bytes=");p.slot(1,1);p.text("\n");
+  } else throw new Error("unknown snapshot serialization record");
+  return p.result();
 }

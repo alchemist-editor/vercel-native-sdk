@@ -52,9 +52,7 @@ pub const Server = struct {
         try writePath(self.io, self.path("accessibility.txt", &path_buffer), a11y_writer.written());
         var windows_writer = try std.Io.Writer.Allocating.initCapacity(std.heap.page_allocator, windows_initial_capacity);
         defer windows_writer.deinit();
-        for (input_value.windows) |window| {
-            try windows_writer.writer.print("window @w{d} \"{s}\" focused={any}\n", .{ window.id, window.title, window.focused });
-        }
+        try snapshot.writeWindowsText(input_value, &windows_writer.writer);
         try writePath(self.io, self.path("windows.txt", &path_buffer), windows_writer.written());
     }
 

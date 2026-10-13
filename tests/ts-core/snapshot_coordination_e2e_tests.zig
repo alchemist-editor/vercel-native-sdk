@@ -135,7 +135,10 @@ test "compiled snapshot runtime projection preserves complete snapshots menus me
         }
         rt.started_timestamp_ns = 0;
     }
-    try exact(left.runtime.automationSnapshot("fallback"), right.runtime.automationSnapshot("fallback"));
+    var fallback = right.runtime.automationSnapshot("fallback");
+    try std.testing.expect(fallback.serialization_policy == observed);
+    fallback.serialization_policy = null;
+    try exact(left.runtime.automationSnapshot("fallback"), fallback);
     for (lanes, 0..) |rt, i| {
         if (i == 0) left.null_platform.gpu_surfaces = true else right.null_platform.gpu_surfaces = true;
         var owned_app = app;
@@ -176,7 +179,9 @@ test "compiled snapshot runtime projection preserves complete snapshots menus me
         rt.status_items[1].items[2] = .{ .label = "Last", .command = "last" };
     }
     const expected = left.runtime.automationSnapshot("snapshot");
-    const actual = right.runtime.automationSnapshot("snapshot");
+    var actual = right.runtime.automationSnapshot("snapshot");
+    try std.testing.expect(actual.serialization_policy == observed);
+    actual.serialization_policy = null;
     try exact(expected, actual);
     core.rt.frameReset();
     try exact(expected, actual);
@@ -189,5 +194,7 @@ test "compiled snapshot runtime projection preserves complete snapshots menus me
         rt.video_active = false;
         rt.frame_profile.enabled = false;
     }
-    try exact(left.runtime.automationSnapshot("fallback"), right.runtime.automationSnapshot("fallback"));
+    var final_fallback = right.runtime.automationSnapshot("fallback");
+    final_fallback.serialization_policy = null;
+    try exact(left.runtime.automationSnapshot("fallback"), final_fallback);
 }

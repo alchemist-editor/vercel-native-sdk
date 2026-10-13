@@ -26,6 +26,7 @@ pub fn RuntimeAutomationSnapshot(comptime Runtime: type) type {
             if (count == 0) {
                 self.automation_windows[0] = .{ .id = 1, .title = title, .bounds = geometry.RectF.fromSize(self.surface.size), .focused = true };
                 return .{
+                    .serialization_policy = self.snapshot_policy,
                     .windows = self.automation_windows[0..1],
                     .views = &.{},
                     .widgets = &.{},
@@ -62,6 +63,7 @@ pub fn RuntimeAutomationSnapshot(comptime Runtime: type) type {
                 appendAutomationWidgets(self, window.info.id, &widget_count, &menu_item_count);
             }
             return .{
+                .serialization_policy = self.snapshot_policy,
                 .windows = self.automation_windows[0..count],
                 .views = self.automation_views[0..view_count],
                 .widgets = self.automation_widgets[0..widget_count],
