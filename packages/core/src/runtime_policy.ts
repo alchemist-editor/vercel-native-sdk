@@ -607,7 +607,8 @@ function dbPolicyLookup(request: Uint8Array, positions: DataView, keyStart: numb
  * neither mutates its borrowed input nor resets the dispatch frame.
  */
 export function native_effect_policy(request: Uint8Array): Uint8Array {
-  if (request.length < 2 || request[0]! > 24) throw new Error("invalid effect policy request");
+  if (request.length < 2 || request[0]! > 25) throw new Error("invalid effect policy request");
+  if (request[0] === 25) return replayProgressPolicy(request);
   if (request[0] === 24) return sessionRecordingPolicy(request);
   if (request[0] === 22) return componentCoordinationPolicy(request);
   if (request[0] === 23) return scrollReachPolicy(request);
@@ -3174,4 +3175,64 @@ function recordingWordsEqual(data: DataView, a: number, b: number): boolean {
 function recordingWordsGreater(data: DataView, a: number, b: number): boolean {
   const highA = data.getUint32(a + 4, true), highB = data.getUint32(b + 4, true);
   return highA > highB || highA === highB && data.getUint32(a, true) > data.getUint32(b, true);
+}
+
+/** Operation 25: replay progress, bounded mismatch retention, blob length
+ * validation and first-match target selection. Native owns every capability
+ * and applies these copied plans before reading, rendering or dispatching.
+ * IDs, hashes and counters remain u32 word pairs; labels remain raw bytes.
+ */
+function replayProgressPolicy(request: Uint8Array): Uint8Array {
+  if (request.length < 96 || request[1]! > 6) throw new Error("invalid replay progress request");
+  const stage = request[1]!, code = request[2]!, count = request[3]!;
+  if (code > (stage === 2 ? 1 : stage === 4 ? 2 : 0) || count > (stage === 5 ? 16 : stage === 6 ? 32 : 0) || request.length !== 96 + count * 80)
+    throw new Error("invalid replay progress facts");
+  for (let at = 4; at < 8; at++) if (request[at] !== 0) throw new Error("invalid replay progress reserved byte");
+  const data = new DataView(request.buffer, request.byteOffset, request.byteLength);
+  const result = new Uint8Array(32), out = new DataView(result.buffer);
+  result[2] = 255; out.setUint32(4, 4294967295, true);
+  const reservedStart = stage === 6 ? 16 : stage === 5 ? 16 : 40;
+  const reservedEnd = stage === 6 ? 32 : 96;
+  for (let at = reservedStart; at < reservedEnd; at++) if (request[at] !== 0) throw new Error("invalid replay progress reserved byte");
+  const labelLength = data.getUint32(8, true), labelHigh = data.getUint32(12, true);
+  if (stage === 6 && labelHigh === 0 && labelLength < 64)
+    for (let at = 32 + labelLength; at < 96; at++) if (request[at] !== 0) throw new Error("invalid replay label padding");
+  for (let i = 0; i < count; i++) {
+    const at = 96 + i * 80, length = request[at + 2]!;
+    if (request[at]! > 1 || request[at + 1]! > 18 || length > 64 || stage === 5 && (request[at + 1] !== 0 || length !== 0))
+      throw new Error("invalid replay target slot");
+    for (let byte = at + 3; byte < at + 8; byte++) if (request[byte] !== 0) throw new Error("invalid replay slot reserved byte");
+    for (let byte = at + 16 + length; byte < at + 80; byte++) if (request[byte] !== 0) throw new Error("invalid replay slot padding");
+  }
+  if (stage === 0 || stage === 1) {
+    replayIncrement(data, 8, out, 8);
+    if (stage === 1) {
+      result.set(request.subarray(16, 24), 16);
+      if (!recordingWordsEqual(data, 24, 32)) {
+        result[1] = 1;
+        if (data.getUint32(20, true) === 0 && data.getUint32(16, true) < 16) result[2] = data.getUint32(16, true);
+        replayIncrement(data, 16, out, 16);
+      }
+    }
+  } else if (stage === 2) result[0] = code === 0 ? 1 : recordingWordsGreater(data, 8, 16) ? 2 : 0;
+  else if (stage === 3) result[0] = recordingWordsEqual(data, 8, 16) ? 0 : 3;
+  else if (stage === 4) result[0] = code === 2 ? 4 : 0;
+  else {
+    for (let i = 0; i < count; i++) {
+      const at = 96 + i * 80;
+      if (request[at] !== 1) continue;
+      let matches = stage === 5 ? recordingWordsEqual(data, 8, at + 8)
+        : request[at + 1] === 17 && labelHigh === 0 && labelLength === request[at + 2];
+      if (stage === 6 && matches) for (let byte = 0; byte < labelLength; byte++)
+        if (request[32 + byte] !== request[at + 16 + byte]) matches = false;
+      if (matches) { out.setUint32(4, i, true); break; }
+    }
+  }
+  return result;
+}
+function replayIncrement(data: DataView, at: number, out: DataView, dest: number): void {
+  const low = data.getUint32(at, true) + 1;
+  const high = data.getUint32(at + 4, true) + (low === 4294967296 ? 1 : 0);
+  if (high > 4294967295) throw new Error("replay counter overflow");
+  out.setUint32(dest, low % 4294967296, true); out.setUint32(dest + 4, high, true);
 }

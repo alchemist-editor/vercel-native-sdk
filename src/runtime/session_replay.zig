@@ -35,6 +35,7 @@ const journal = @import("session_journal.zig");
 const platform = @import("../platform/root.zig");
 const runtime_effects = @import("effects.zig");
 const replay_policy = @import("replay_policy.zig");
+const replay_progress = @import("replay_progress_policy.zig");
 const replay_reference = @import("replay_policy_reference.zig");
 const session_blobs = @import("session_blobs.zig");
 
@@ -113,11 +114,11 @@ pub const ReplayReport = struct {
         return self.mismatch_count == 0;
     }
 
-    fn recordMismatch(self: *ReplayReport, mismatch: ReplayMismatch) void {
-        if (self.mismatch_count < max_replay_mismatches) {
-            self.mismatches[self.mismatch_count] = mismatch;
-        }
-        self.mismatch_count += 1;
+    fn compare(self: *ReplayReport, policy: replay_progress.Policy, verified: *u64, mismatch: ReplayMismatch) void {
+        const decision = replay_progress.plan(policy, .compare, .{ .a = verified.*, .b = self.mismatch_count, .c = mismatch.expected, .d = mismatch.actual });
+        verified.* = decision.counter;
+        self.mismatch_count = decision.mismatch_count;
+        if (decision.mismatch_slot) |slot| self.mismatches[slot] = mismatch;
     }
 };
 
@@ -203,22 +204,24 @@ pub fn replaySession(
                     // Do not flip runtime state here: dispatch must observe the
                     // open -> closed edge and deliver the app's close Msg.
                     var windows: [platform.max_windows]platform.WindowInfo = undefined;
-                    for (runtime.listWindows(&windows)) |window| {
-                        if (window.id != event.window_frame_changed.id or !window.open) continue;
+                    const listed = runtime.listWindows(&windows);
+                    var slots: [platform.max_windows]replay_progress.Slot = undefined;
+                    for (listed, 0..) |window, i| slots[i] = .{ .open = window.open, .id = window.id };
+                    if (replay_progress.plan(app.replay_policy, .window, .{ .a = event.window_frame_changed.id, .slots = slots[0..listed.len] }).index) |index| {
+                        const window = listed[index];
                         runtime.options.platform.services.closeWindow(window.id) catch |err| switch (err) {
                             // An adopted startup window may have no native owner
                             // in a headless replay host.
                             error.WindowNotFound => {},
                             else => return err,
                         };
-                        break;
                     }
                 }
                 try runtime.dispatchPlatformEvent(app, event);
                 if (replay_policy.coordinate(app.replay_policy, .chrome_consumed, @intFromBool(runtime.replay_window_chrome_failed), runtime.replay_window_chrome_index != runtime.replay_window_chrome_count, false) == .chrome_divergence) return error.ReplayChromeDivergence;
                 runtime.replay_window_chrome_count = 0;
                 runtime.replay_window_chrome_index = 0;
-                report.events_replayed += 1;
+                report.events_replayed = replay_progress.plan(app.replay_policy, .count, .{ .a = report.events_replayed }).counter;
             },
             .effect => |effect_record| {
                 var effect = effect_record;
@@ -391,7 +394,7 @@ pub fn replaySession(
                     return error.ReplayDamagedRecord;
                 }
                 if (admission.regenerates) {
-                    report.effects_skipped += 1;
+                    report.effects_skipped = replay_progress.plan(app.replay_policy, .count, .{ .a = report.effects_skipped }).counter;
                     continue;
                 }
                 // Resolve out-of-line payloads: an image record's
@@ -404,7 +407,7 @@ pub fn replaySession(
                 var blob_scratch: ?[]u8 = null;
                 defer if (blob_scratch) |scratch| std.heap.page_allocator.free(scratch);
                 if (admission.blob == .pty) {
-                    const bytes = resolveBlob(effect.pty_blob_hash, effect.pty_blob_len, runtime_effects.max_effect_pty_chunk_bytes, options.blobs, &blob_scratch) catch |err| {
+                    const bytes = resolveBlob(app.replay_policy, effect.pty_blob_hash, effect.pty_blob_len, runtime_effects.max_effect_pty_chunk_bytes, options.blobs, &blob_scratch) catch |err| {
                         std.debug.print(
                             "replay refused after event {d}: pty record for key {d} references blob {s} ({d} bytes) that could not be resolved ({s}) - replay needs the journal's blobs/ directory beside it\n",
                             .{ report.events_replayed, effect.key, session_blobs.hexName(effect.pty_blob_hash), effect.pty_blob_len, @errorName(err) },
@@ -414,7 +417,7 @@ pub fn replaySession(
                     effect.payload = bytes;
                 }
                 if (admission.blob == .file) {
-                    const bytes = resolveBlob(effect.file_blob_hash, effect.file_blob_len, runtime_effects.effect_file_stream_chunk_bytes, options.blobs, &blob_scratch) catch |err| {
+                    const bytes = resolveBlob(app.replay_policy, effect.file_blob_hash, effect.file_blob_len, runtime_effects.effect_file_stream_chunk_bytes, options.blobs, &blob_scratch) catch |err| {
                         std.debug.print(
                             "replay refused after event {d}: file stream for key {d} references blob {s} ({d} bytes) that could not be resolved ({s})\n",
                             .{ report.events_replayed, effect.key, session_blobs.hexName(effect.file_blob_hash), effect.file_blob_len, @errorName(err) },
@@ -424,7 +427,7 @@ pub fn replaySession(
                     effect.payload = bytes;
                 }
                 if (admission.blob == .image) {
-                    const bytes = resolveBlob(effect.image_blob_hash, effect.image_blob_len, runtime_effects.max_effect_image_bytes, options.blobs, &blob_scratch) catch |err| {
+                    const bytes = resolveBlob(app.replay_policy, effect.image_blob_hash, effect.image_blob_len, runtime_effects.max_effect_image_bytes, options.blobs, &blob_scratch) catch |err| {
                         std.debug.print(
                             "replay refused after event {d}: image record for id {d} references blob {s} ({d} bytes) that could not be resolved ({s}) - replay needs the journal's blobs/ directory beside it\n",
                             .{ report.events_replayed, effect.key, session_blobs.hexName(effect.image_blob_hash), effect.image_blob_len, @errorName(err) },
@@ -434,7 +437,7 @@ pub fn replaySession(
                     effect.payload = bytes;
                 }
                 if (admission.blob == .persist) {
-                    const bytes = resolveBlob(effect.persist_blob_hash, effect.persist_blob_len, runtime_effects.max_effect_persist_snapshot_bytes, options.blobs, &blob_scratch) catch |err| {
+                    const bytes = resolveBlob(app.replay_policy, effect.persist_blob_hash, effect.persist_blob_len, runtime_effects.max_effect_persist_snapshot_bytes, options.blobs, &blob_scratch) catch |err| {
                         std.debug.print(
                             "replay refused after event {d}: model restore references blob {s} ({d} bytes) that could not be resolved ({s}) - replay needs the journal's blobs/ directory beside it\n",
                             .{ report.events_replayed, session_blobs.hexName(effect.persist_blob_hash), effect.persist_blob_len, @errorName(err) },
@@ -444,7 +447,7 @@ pub fn replaySession(
                     effect.payload = bytes;
                 }
                 if (admission.blob == .db) {
-                    const bytes = resolveBlob(effect.db_blob_hash, effect.db_blob_len, runtime_effects.max_effect_db_page_bytes, options.blobs, &blob_scratch) catch |err| {
+                    const bytes = resolveBlob(app.replay_policy, effect.db_blob_hash, effect.db_blob_len, runtime_effects.max_effect_db_page_bytes, options.blobs, &blob_scratch) catch |err| {
                         std.debug.print(
                             "replay refused after event {d}: relational page for key {d} references blob {s} ({d} bytes) that could not be resolved ({s}) - replay needs the journal's blobs/ directory beside it\n",
                             .{ report.events_replayed, effect.key, session_blobs.hexName(effect.db_blob_hash), effect.db_blob_len, @errorName(err) },
@@ -496,34 +499,28 @@ pub fn replaySession(
                     };
                     break :feed;
                 }
-                report.effects_fed += 1;
+                report.effects_fed = replay_progress.plan(app.replay_policy, .count, .{ .a = report.effects_fed }).counter;
             },
             .checkpoint => |checkpoint| {
                 if (replay_policy.coordinate(app.replay_policy, .verify, @intFromBool(options.verify), false, false) != .verify) continue;
                 const actual = runtime.sessionStateFingerprint();
-                report.checkpoints_verified += 1;
-                if (actual != checkpoint.fingerprint) {
-                    report.recordMismatch(.{
-                        .kind = .fingerprint,
-                        .event_ordinal = checkpoint.event_ordinal,
-                        .frame_index = checkpoint.frame_index,
-                        .expected = checkpoint.fingerprint,
-                        .actual = actual,
-                    });
-                }
+                report.compare(app.replay_policy, &report.checkpoints_verified, .{
+                    .kind = .fingerprint,
+                    .event_ordinal = checkpoint.event_ordinal,
+                    .frame_index = checkpoint.frame_index,
+                    .expected = checkpoint.fingerprint,
+                    .actual = actual,
+                });
             },
             .screenshot => |mark| {
                 if (replay_policy.coordinate(app.replay_policy, .verify, @intFromBool(options.verify), false, false) != .verify) continue;
-                report.screenshots_verified += 1;
-                const actual = renderScreenshotHash(runtime, mark.view_label, mark.scale) catch 0;
-                if (actual != mark.png_hash) {
-                    report.recordMismatch(.{
-                        .kind = .screenshot,
-                        .event_ordinal = mark.event_ordinal,
-                        .expected = mark.png_hash,
-                        .actual = actual,
-                    });
-                }
+                const actual = renderScreenshotHash(runtime, app.replay_policy, mark.view_label, mark.scale) catch 0;
+                report.compare(app.replay_policy, &report.screenshots_verified, .{
+                    .kind = .screenshot,
+                    .event_ordinal = mark.event_ordinal,
+                    .expected = mark.png_hash,
+                    .actual = actual,
+                });
             },
             .end => {
                 if (replay_policy.coordinate(app.replay_policy, .end, @intFromBool(runtime.replay_window_chrome_count != 0), false, false) == .chrome_divergence) return error.ReplayChromeDivergence;
@@ -538,15 +535,14 @@ pub fn replaySession(
     // a load the recording never journaled. Apps without a replay hook
     // have no armed channel to check and answer ReplayUnsupported,
     // which is fine: nothing was fed and nothing could have latched.
-    app.replayControl(.finish) catch |err| switch (err) {
-        error.ReplayUnsupported => {},
-        else => {
+    app.replayControl(.finish) catch |err| {
+        if (replay_progress.plan(app.replay_policy, .finish, .{ .code = if (err == error.ReplayUnsupported) 1 else 2 }).action == .divergence) {
             std.debug.print(
                 "replay diverged at the journal's end: {s} - the replayed updates issued different effects than the recording (nondeterminism outside the effect boundary?)\n",
                 .{@errorName(err)},
             );
             return error.ReplayEffectDivergence;
-        },
+        }
     };
     return report;
 }
@@ -556,21 +552,27 @@ pub fn replaySession(
 /// record: present, exact length, and hashing to its address — the
 /// same hostile-input honesty the journal reader keeps.
 fn resolveBlob(
+    policy: replay_progress.Policy,
     blob_hash: [runtime_effects.effect_image_blob_hash_len]u8,
     blob_len_field: u64,
     max_bytes: usize,
     blobs: ?session_blobs.SessionBlobSource,
     scratch_out: *?[]u8,
 ) anyerror![]const u8 {
-    const blob_source = blobs orelse return error.BlobMissing;
-    if (blob_len_field > max_bytes) return error.BlobOverBudget;
+    switch (replay_progress.plan(policy, .blob_admission, .{ .code = @intFromBool(blobs != null), .a = blob_len_field, .b = max_bytes }).action) {
+        .missing => return error.BlobMissing,
+        .over_budget => return error.BlobOverBudget,
+        .proceed => {},
+        else => @panic("invalid replay blob admission"),
+    }
+    const blob_source = blobs.?;
     const blob_len: usize = @intCast(blob_len_field);
     // One spare byte proves the stored blob is not LONGER than the
     // record claims (the source reads at most the buffer).
     const scratch = try std.heap.page_allocator.alloc(u8, blob_len + 1);
     scratch_out.* = scratch;
     const bytes = try blob_source.read_fn(blob_source.context, blob_hash, scratch);
-    if (bytes.len != blob_len) return error.BlobCorrupt;
+    if (replay_progress.plan(policy, .blob_result, .{ .a = bytes.len, .b = blob_len_field }).action == .corrupt) return error.BlobCorrupt;
     return bytes;
 }
 
@@ -633,15 +635,11 @@ test "only admission-tagged file results regenerate" {
 /// Re-render a journaled screenshot mark through the same deterministic
 /// reference renderer the automation `screenshot` verb used at record
 /// time, and hash the PNG.
-fn renderScreenshotHash(runtime: *core.Runtime, view_label: []const u8, scale: f32) anyerror!u64 {
-    const window_id = blk: {
-        for (runtime.views[0..runtime.view_count]) |*view| {
-            if (view.open and view.kind == .gpu_surface and std.mem.eql(u8, view.label, view_label)) {
-                break :blk view.window_id;
-            }
-        }
-        return error.ViewNotFound;
-    };
+fn renderScreenshotHash(runtime: *core.Runtime, policy: replay_progress.Policy, view_label: []const u8, scale: f32) anyerror!u64 {
+    var slots: [platform.max_views]replay_progress.Slot = undefined;
+    for (runtime.views[0..runtime.view_count], 0..) |view, i| slots[i] = .{ .open = view.open, .kind = view.kind, .id = view.window_id, .label = view.label };
+    const index = replay_progress.plan(policy, .view, .{ .label = view_label, .slots = slots[0..runtime.view_count] }).index orelse return error.ViewNotFound;
+    const window_id = runtime.views[index].window_id;
     const allocator = std.heap.page_allocator;
     const pixel_size = try runtime.canvasScreenshotPixelSize(window_id, view_label, scale);
     const pixels = try allocator.alloc(u8, pixel_size.byte_len);
