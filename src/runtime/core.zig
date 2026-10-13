@@ -280,6 +280,7 @@ pub const Runtime = struct {
     builtin_coordination_policy: ?*const fn ([]const u8, []u8) usize = null,
     automation_command_policy: ?*const fn ([]const u8, []u8) usize = null,
     automation_interaction_policy: ?*const fn ([]const u8, []u8) usize = null,
+    snapshot_policy: ?*const fn ([]const u8, []u8) usize = null,
     command_policy: ?*const fn ([]const u8, []u8) usize = null,
     text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
     render_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -1333,6 +1334,8 @@ const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
     pub const journal_policy = @import("journal_policy.zig");
+    pub const snapshot_policy = @import("snapshot_policy.zig");
+    pub const frame_profile = runtime_frame_profile;
     pub const replay_progress_policy = @import("replay_progress_policy.zig");
     pub const recording_policy = @import("recording_policy.zig");
     pub const syncHostInputDrivers = runtime_canvas_widget_scroll_drivers.RuntimeCanvasWidgetScrollDrivers(Runtime).syncCanvasWidgetScrollDriversForView;

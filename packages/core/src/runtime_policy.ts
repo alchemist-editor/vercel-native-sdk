@@ -607,7 +607,8 @@ function dbPolicyLookup(request: Uint8Array, positions: DataView, keyStart: numb
  * neither mutates its borrowed input nor resets the dispatch frame.
  */
 export function native_effect_policy(request: Uint8Array): Uint8Array {
-  if (request.length < 2 || request[0]! > 26) throw new Error("invalid effect policy request");
+  if (request.length < 2 || request[0]! > 27) throw new Error("invalid effect policy request");
+  if (request[0] === 27) return snapshotCoordinationPolicy(request);
   if (request[0] === 26) return sessionJournalPolicy(request);
   if (request[0] === 25) return replayProgressPolicy(request);
   if (request[0] === 24) return sessionRecordingPolicy(request);
@@ -3298,5 +3299,104 @@ function sessionJournalPolicy(request: Uint8Array): Uint8Array {
     result.set(new Uint8Array([78, 83, 68, 75, 83, 74, 78, 76]), 64);
     result.set(request.subarray(24, 32), 72);
   }
+  return result;
+}
+
+/** Snapshot projections and profile statistics over copied facts. The host
+ * retains borrowed labels, bounded storage, clocks and process/GPU queries.
+ * Unsigned identities and counters travel as two exact 32-bit words.
+ */
+export function snapshotCoordinationPolicy(request: Uint8Array): Uint8Array {
+  if (request.length < 104 || request[0] !== 27 || request[1] !== 1 || request[2]! > 10 || request[3] !== 0)
+    throw new Error("invalid snapshot coordination request");
+  const mode = request[2]!, data = new DataView(request.buffer, request.byteOffset, request.byteLength);
+  const flags = data.getUint32(4, true);
+  const sampleCount = mode === 7 ? data.getUint32(8, true) : mode === 9 ? 12 : 0;
+  if (sampleCount > 128 || request.length !== 104 + sampleCount * 4) throw new Error("invalid snapshot sample extent");
+  const allowed = mode === 2 ? 1531 : mode === 1 ? 3 : mode === 5 ? 7 : mode === 0 || mode === 3 || mode === 6 ? 1 : 0;
+  if ((flags & ~allowed) !== 0) throw new Error("invalid snapshot coordination flags");
+  const result = new Uint8Array(104), out = new DataView(result.buffer);
+  const at = (i: number): number => 8 + i * 8;
+  const zero = (i: number): boolean => data.getUint32(at(i), true) === 0 && data.getUint32(at(i) + 4, true) === 0;
+  const equal = (i: number, j: number): boolean => data.getUint32(at(i), true) === data.getUint32(at(j), true) && data.getUint32(at(i) + 4, true) === data.getUint32(at(j) + 4, true);
+  const greater = (i: number, j: number): boolean => data.getUint32(at(i) + 4, true) > data.getUint32(at(j) + 4, true) ||
+    data.getUint32(at(i) + 4, true) === data.getUint32(at(j) + 4, true) && data.getUint32(at(i), true) > data.getUint32(at(j), true);
+  const copy = (i: number, j: number): void => { result.set(request.subarray(at(i), at(i) + 8), at(j)); };
+  const small = (i: number, value: number): void => { out.setUint32(at(i), value, true); };
+  const difference = (i: number, j: number, dest: number): void => {
+    const low = data.getUint32(at(i), true) - data.getUint32(at(j), true);
+    out.setUint32(at(dest), low, true);
+    out.setUint32(at(dest) + 4, data.getUint32(at(i) + 4, true) - data.getUint32(at(j) + 4, true) - (low < 0 ? 1 : 0), true);
+  };
+  if (mode === 0) {
+    // Active admission and aggregate-capacity projection (windows and menus).
+    if (flags === 1) copy(greater(0, 1) ? 1 : 0, 0);
+    if (zero(0) || zero(1) || flags === 0) result[0] = 1;
+  } else if (mode === 1) {
+    result[0] = flags === 3 && equal(0, 1) ? 1 : 0;
+  } else if (mode === 2) {
+    const has = (bit: number): boolean => (flags & bit) !== 0;
+    const role = data.getUint32(56, true);
+    if (data.getUint32(60, true) !== 0 || role > 26) throw new Error("invalid snapshot widget role");
+    const selectable = role === 12 || role === 15 || role === 16 || role === 17 || role === 18 || role === 20;
+    const selected = has(1) || has(2) && !(data.getFloat32(72, true) < 0.5) && selectable;
+    let state = selected ? 1 : 0;
+    if (has(8) || has(16) && has(32) && equal(0, 1)) state |= 2;
+    if (!has(64)) state |= 4;
+    if (has(128) || !zero(0) && equal(0, 2)) state |= 8;
+    if (has(256) || !zero(0) && equal(0, 3)) state |= 16;
+    if (has(1024) && greater(5, 4)) { state |= 32; copy(4, 0); }
+    result[0] = state;
+    const f = Math.fround;
+    out.setFloat32(72, f(data.getFloat32(76, true) + data.getFloat32(92, true)), true);
+    out.setFloat32(76, f(data.getFloat32(80, true) + data.getFloat32(96, true)), true);
+    result.set(request.subarray(84, 92), 80);
+  } else if (mode === 3) {
+    if (flags === 1) {
+      if (greater(0, 1)) throw new Error("invalid snapshot virtual range");
+      result[0] = 1;
+      for (let i = 0; i < 4; i++) small(i, data.getUint32(at(i) + 4, true) !== 0 ? 4294967295 : data.getUint32(at(i), true));
+      difference(1, 0, 4);
+      if (out.getUint32(at(4) + 4, true) !== 0) { small(4, 4294967295); out.setUint32(at(4) + 4, 0, true); }
+    }
+  } else if (mode === 4 || mode === 10) {
+    if ((mode === 10 || !zero(0)) && !greater(0, 1)) difference(1, 0, 0);
+  } else if (mode === 5) {
+    result[0] = flags;
+  } else if (mode === 6) {
+    if (data.getUint32(20, true) !== 0 || data.getUint32(28, true) !== 0 || data.getUint32(16, true) > 128 || data.getUint32(24, true) >= 128)
+      throw new Error("invalid frame profile ring");
+    copy(1, 0); copy(2, 1); copy(3, 2);
+    if (flags === 1) {
+      result[0] = 1;
+      const high = data.getUint32(12, true), low = data.getUint32(8, true);
+      const ns = low + high * 4294967296;
+      small(3, high > 999 || ns >= 4294967295000 ? 4294967295 : Math.floor(ns / 1000));
+      small(0, Math.min(data.getUint32(16, true) + 1, 128));
+      small(1, (data.getUint32(24, true) + 1) % 128);
+      const nextLow = data.getUint32(32, true) + 1;
+      small(2, nextLow); out.setUint32(28, data.getUint32(36, true) + (nextLow === 4294967296 ? 1 : 0), true);
+    }
+  } else if (mode === 7) {
+    const length = data.getUint32(8, true);
+    if (data.getUint32(12, true) !== 0 || length > 128) throw new Error("invalid frame profile window");
+    copy(0, 0); copy(1, 1);
+    const sorted: number[] = [];
+    for (let i = 0; i < length; i++) {
+      const sample = data.getUint32(104 + i * 4, true);
+      let pos = sorted.length;
+      sorted.push(sample);
+      while (pos > 0 && sorted[pos - 1]! > sample) { sorted[pos] = sorted[pos - 1]!; pos--; }
+      sorted[pos] = sample;
+    }
+    if (length > 0) {
+      small(2, sorted[Math.max(Math.floor((length * 50 + 99) / 100), 1) - 1]!);
+      small(3, sorted[Math.max(Math.floor((length * 90 + 99) / 100), 1) - 1]!);
+      small(4, sorted[length - 1]!);
+    }
+  } else if (mode === 9) {
+    for (let i = 0; i < 12; i++) if (data.getUint32(104 + i * 4, true) !== 0) result[0] = 1;
+  }
+  // Reset (mode 8) returns zero metadata, leaving enable state and samples owned by the host.
   return result;
 }

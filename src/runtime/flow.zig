@@ -248,6 +248,8 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.builtin_coordination_policy = app.builtin_coordination_policy;
                     self.automation_command_policy = app.automation_command_policy;
                     self.automation_interaction_policy = app.automation_interaction_policy;
+                    self.snapshot_policy = app.snapshot_policy;
+                    self.frame_profile.policy = app.snapshot_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
