@@ -33,6 +33,7 @@
   "src/authorization.ts",
   "src/builtin_coordination.ts",
   "src/automation_commands.ts",
+  "src/automation_interactions.ts",
   "src/render_animation_lifecycle.ts",
   "src/motion_sampling.ts",
   "src/vector_raster.ts",

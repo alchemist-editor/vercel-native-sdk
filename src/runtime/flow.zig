@@ -247,6 +247,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.authorization_policy = app.authorization_policy;
                     self.builtin_coordination_policy = app.builtin_coordination_policy;
                     self.automation_command_policy = app.automation_command_policy;
+                    self.automation_interaction_policy = app.automation_interaction_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
