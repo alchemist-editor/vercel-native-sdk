@@ -6,8 +6,15 @@ const journal = sdk.runtime.session_journal;
 const exact = @import("surface_layout_e2e_tests.zig").expectComplete;
 var stages: [13]usize = @splat(0);
 pub fn observed(input: []const u8, output: []u8) usize {
-    std.debug.assert(input.len == 64 and input[0] == 24 and input[1] < stages.len);
-    stages[input[1]] += 1;
+    if (input.len == 0) @panic("empty recording test policy request");
+    switch (input[0]) {
+        24 => {
+            if (input.len != 64 or input[1] >= stages.len or output.len != 32) @panic("invalid recording test policy request");
+            stages[input[1]] += 1;
+        },
+        26 => if (input.len != 160 or input[1] > 4 or output.len != 80) @panic("invalid journal test policy request"),
+        else => @panic("unexpected recording test policy opcode"),
+    }
     return core.nativeEffectPolicy(input, output);
 }
 const Sink = struct {

@@ -607,7 +607,8 @@ function dbPolicyLookup(request: Uint8Array, positions: DataView, keyStart: numb
  * neither mutates its borrowed input nor resets the dispatch frame.
  */
 export function native_effect_policy(request: Uint8Array): Uint8Array {
-  if (request.length < 2 || request[0]! > 25) throw new Error("invalid effect policy request");
+  if (request.length < 2 || request[0]! > 26) throw new Error("invalid effect policy request");
+  if (request[0] === 26) return sessionJournalPolicy(request);
   if (request[0] === 25) return replayProgressPolicy(request);
   if (request[0] === 24) return sessionRecordingPolicy(request);
   if (request[0] === 22) return componentCoordinationPolicy(request);
@@ -3235,4 +3236,67 @@ function replayIncrement(data: DataView, at: number, out: DataView, dest: number
   const high = data.getUint32(at + 4, true) + (low === 4294967296 ? 1 : 0);
   if (high > 4294967295) throw new Error("replay counter overflow");
   out.setUint32(dest, low % 4294967296, true); out.setUint32(dest + 4, high, true);
+}
+
+/** Operation 26 owns journal preambles, frame headers, reader admission,
+ * sequencing, exact counters and end seals. Payload bytes never leave native
+ * storage; complete copied facts retain refusal order and decode-failure state.
+ */
+function sessionJournalPolicy(request: Uint8Array): Uint8Array {
+  if (request.length !== 160 || request[1]! > 4 || request[2]! > 3 || request[3]! > 7)
+    throw new Error("invalid journal policy request");
+  for (let at = 4; at < 8; at++) if (request[at] !== 0) throw new Error("invalid journal reserved byte");
+  for (let at = 136; at < 160; at++) if (request[at] !== 0) throw new Error("invalid journal reserved byte");
+  const stage = request[1]!, data = new DataView(request.buffer, request.byteOffset, request.byteLength);
+  const result = new Uint8Array(80), out = new DataView(result.buffer);
+  result.set(request.subarray(16, 24), 8); result.set(request.subarray(32, 72), 16);
+  if (stage === 0) {
+    let magic = true;
+    const expected = [78, 83, 68, 75, 83, 74, 78, 76];
+    for (let i = 0; i < 8; i++) if (request[112 + i] !== expected[i]) magic = false;
+    if (data.getUint32(12, true) === 0 && data.getUint32(8, true) < 16 || !magic) result[0] = 1;
+    else if (!recordingWordsEqual(data, 24, 120)) result[0] = 2;
+    else out.setUint32(8, 16, true);
+  } else if (stage === 1) {
+    // The format's u32 payload is bounded below 2^32 before addition.
+    const length = data.getUint32(8, true), limit = data.getUint32(128, true);
+    if (data.getUint32(132, true) !== 0 || limit > 4294967290) throw new Error("invalid journal record limit");
+    if (data.getUint32(12, true) !== 0 || length > limit ||
+        data.getUint32(20, true) === 0 && data.getUint32(16, true) < 5 + length) result[0] = 5;
+    else { result[56] = request[3]!; out.setUint32(57, length, true); }
+  } else if (stage === 2) {
+    if ((request[2]! & 2) !== 0) {
+      result[0] = recordingWordsEqual(data, 8, 16) ? 8 : 4;
+      return result;
+    }
+    if (recordingWordsGreater(data, 16, 8)) throw new Error("invalid journal reader position");
+    const low = data.getUint32(8, true) - data.getUint32(16, true);
+    const high = data.getUint32(12, true) - data.getUint32(20, true) - (low < 0 ? 1 : 0);
+    const remaining = low < 0 ? low + 4294967296 : low;
+    if (high === 0 && remaining < 5) result[0] = 3;
+    else {
+      const kind = request[112]!, length = data.getUint32(113, true);
+      if (kind < 1 || kind > 7) result[0] = 4;
+      else if (data.getUint32(132, true) === 0 && length > data.getUint32(128, true)) result[0] = 5;
+      else if (high === 0 && remaining - 5 < length) result[0] = 3;
+      else {
+        result[1] = kind; out.setUint32(4, length, true);
+        const nextLow = data.getUint32(16, true) + 5 + length;
+        out.setUint32(8, nextLow % 4294967296, true);
+        out.setUint32(12, data.getUint32(20, true) + (nextLow >= 4294967296 ? 1 : 0), true);
+        if ((request[2]! & 1) === 0 && kind !== 1) result[0] = 6;
+        else if ((request[2]! & 1) !== 0 && kind === 1) result[0] = 4;
+        else if (kind >= 2 && kind <= 5 || kind === 7) {
+          const index = kind === 7 ? 4 : kind - 2;
+          replayIncrement(data, 32 + index * 8, out, 16 + index * 8);
+        }
+      }
+    }
+  } else if (stage === 3) {
+    for (let i = 0; i < 5; i++) if (!recordingWordsEqual(data, 32 + i * 8, 72 + i * 8)) result[0] = 7;
+  } else {
+    result.set(new Uint8Array([78, 83, 68, 75, 83, 74, 78, 76]), 64);
+    result.set(request.subarray(24, 32), 72);
+  }
+  return result;
 }

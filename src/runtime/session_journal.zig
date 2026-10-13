@@ -73,6 +73,7 @@ const platform = @import("../platform/root.zig");
 const automation_protocol = @import("../automation/protocol.zig");
 const layout_fingerprint = @import("../automation/layout_fingerprint.zig");
 const runtime_effects = @import("effects.zig");
+const journal_policy = @import("journal_policy.zig");
 
 pub const EffectResultRecord = runtime_effects.EffectResultRecord;
 
@@ -1381,12 +1382,34 @@ pub fn decodeEnd(bytes: []const u8) JournalError!End {
 
 /// Frame one record (kind + u32 length prefix + payload) into `buffer`.
 pub fn frameRecord(kind: RecordKind, payload: []const u8, buffer: []u8) JournalError![]const u8 {
-    if (payload.len > max_session_record_bytes) return error.JournalRecordOverBudget;
-    if (buffer.len < 5 + payload.len) return error.JournalRecordOverBudget;
-    buffer[0] = @intFromEnum(kind);
-    std.mem.writeInt(u32, buffer[1..5], @intCast(payload.len), .little);
+    return frameRecordWithPolicy(null, kind, payload, buffer);
+}
+
+pub fn frameRecordWithPolicy(policy: journal_policy.Policy, kind: RecordKind, payload: []const u8, buffer: []u8) JournalError![]const u8 {
+    const frame = try frameHeader(policy, kind, payload.len, buffer.len);
+    @memcpy(buffer[0..5], &frame);
     @memcpy(buffer[5 .. 5 + payload.len], payload);
     return buffer[0 .. 5 + payload.len];
+}
+
+/// A copied frame header; the caller still owns the payload and sink writes.
+pub fn frameHeader(policy: journal_policy.Policy, kind: RecordKind, length: usize, capacity: usize) JournalError![5]u8 {
+    const decision = journal_policy.plan(policy, .frame, .{ .kind = @intFromEnum(kind), .a = length, .b = capacity, .limit = max_session_record_bytes });
+    try checkPlan(decision);
+    return decision.frame;
+}
+
+fn checkPlan(decision: journal_policy.Plan) JournalError!void {
+    switch (decision.action) {
+        .proceed, .done => {},
+        .bad_magic => return error.JournalBadMagic,
+        .format_mismatch => return error.JournalFormatMismatch,
+        .truncated => return error.JournalTruncated,
+        .corrupt => return error.JournalCorrupt,
+        .over_budget => return error.JournalRecordOverBudget,
+        .missing_header => return error.JournalMissingHeader,
+        .count_mismatch => return error.JournalCountMismatch,
+    }
 }
 
 /// The journal preamble (magic + format fingerprint). The fingerprint
@@ -1395,9 +1418,15 @@ pub fn frameRecord(kind: RecordKind, payload: []const u8, buffer: []u8) JournalE
 /// anyway, and the full width keeps the refuse-on-mismatch tripwire's
 /// collision odds at 2^-64 instead of 2^-32 for free.
 pub fn writePreamble(buffer: []u8) []const u8 {
-    @memcpy(buffer[0..magic.len], magic);
-    std.mem.writeInt(u64, buffer[magic.len..][0..8], format_fingerprint, .little);
-    return buffer[0 .. magic.len + 8];
+    return writePreambleWithPolicy(null, buffer);
+}
+
+pub fn writePreambleWithPolicy(policy: journal_policy.Policy, buffer: []u8) []const u8 {
+    std.debug.assert(buffer.len >= preamble_len);
+    const decision = journal_policy.plan(policy, .preamble, .{ .fingerprint = format_fingerprint });
+    if (decision.action != .proceed) @panic("invalid compiled journal preamble");
+    @memcpy(buffer[0..preamble_len], &decision.preamble);
+    return buffer[0..preamble_len];
 }
 
 pub const preamble_len: usize = magic.len + 8;
@@ -1410,6 +1439,7 @@ pub const preamble_len: usize = magic.len + 8;
 pub const Reader = struct {
     bytes: []const u8,
     pos: usize,
+    policy: journal_policy.Policy = null,
     storage: EventDecodeStorage = .{},
     header: ?Header = null,
     end: ?End = null,
@@ -1420,68 +1450,70 @@ pub const Reader = struct {
     window_chrome_count: u64 = 0,
 
     pub fn init(bytes: []const u8) JournalError!Reader {
-        if (bytes.len < preamble_len) return error.JournalBadMagic;
-        if (!std.mem.eql(u8, bytes[0..magic.len], magic)) return error.JournalBadMagic;
-        const recorded = std.mem.readInt(u64, bytes[magic.len..][0..8], .little);
-        if (recorded != format_fingerprint) return error.JournalFormatMismatch;
-        return .{ .bytes = bytes, .pos = preamble_len };
+        return initWithPolicy(bytes, null);
+    }
+
+    pub fn initWithPolicy(bytes: []const u8, policy: journal_policy.Policy) JournalError!Reader {
+        const decision = journal_policy.plan(policy, .init, .{ .a = bytes.len, .fingerprint = format_fingerprint, .sample = bytes[0..@min(bytes.len, preamble_len)] });
+        try checkPlan(decision);
+        return .{ .bytes = bytes, .pos = @intCast(decision.pos), .policy = policy };
+    }
+
+    fn counts(self: *const Reader) [5]u64 {
+        return .{ self.event_count, self.effect_count, self.checkpoint_count, self.screenshot_count, self.window_chrome_count };
     }
 
     /// The next record, or null after the end record. Records after the
     /// end record, a missing end record, and count mismatches are all
     /// refused.
     pub fn next(self: *Reader) JournalError!?Record {
-        if (self.end != null) {
-            if (self.pos != self.bytes.len) return error.JournalCorrupt;
-            return null;
-        }
-        if (self.pos == self.bytes.len) return error.JournalTruncated;
-        if (self.bytes.len - self.pos < 5) return error.JournalTruncated;
-        const kind = std.enums.fromInt(RecordKind, self.bytes[self.pos]) orelse return error.JournalCorrupt;
-        const len = std.mem.readInt(u32, self.bytes[self.pos + 1 ..][0..4], .little);
-        if (len > max_session_record_bytes) return error.JournalRecordOverBudget;
-        if (self.bytes.len - self.pos - 5 < len) return error.JournalTruncated;
-        const payload = self.bytes[self.pos + 5 .. self.pos + 5 + len];
-        self.pos += 5 + len;
+        const old_pos = self.pos;
+        const decision = journal_policy.plan(self.policy, .next, .{
+            .a = self.bytes.len,
+            .b = self.pos,
+            .header = self.header != null,
+            .ended = self.end != null,
+            .counts = self.counts(),
+            .sample = self.bytes[self.pos..][0..@min(self.bytes.len - self.pos, 5)],
+            .limit = max_session_record_bytes,
+        });
+        // The admitted frame advances position and counters before payload
+        // decoding. Even failed decodes retain those mutations.
+        self.pos = @intCast(decision.pos);
+        self.event_count = decision.counts[0];
+        self.effect_count = decision.counts[1];
+        self.checkpoint_count = decision.counts[2];
+        self.screenshot_count = decision.counts[3];
+        self.window_chrome_count = decision.counts[4];
+        try checkPlan(decision);
+        if (decision.action == .done) return null;
+        const kind = std.enums.fromInt(RecordKind, decision.kind) orelse @panic("invalid compiled journal record kind");
+        const payload = self.bytes[old_pos + 5 .. self.pos];
 
-        if (self.header == null and kind != .header) return error.JournalMissingHeader;
         switch (kind) {
             .header => {
-                if (self.header != null) return error.JournalCorrupt;
                 const header = try decodeHeader(payload);
                 self.header = header;
                 return .{ .header = header };
             },
             .event => {
-                self.event_count += 1;
                 return .{ .event = try decodeEvent(payload, &self.storage) };
             },
             .effect => {
-                self.effect_count += 1;
                 return .{ .effect = try decodeEffect(payload) };
             },
             .checkpoint => {
-                self.checkpoint_count += 1;
                 return .{ .checkpoint = try decodeCheckpoint(payload) };
             },
             .screenshot => {
-                self.screenshot_count += 1;
                 return .{ .screenshot = try decodeScreenshot(payload) };
             },
             .window_chrome => {
-                self.window_chrome_count += 1;
                 return .{ .window_chrome = try decodeWindowChrome(payload) };
             },
             .end => {
                 const end = try decodeEnd(payload);
-                if (end.event_count != self.event_count or
-                    end.effect_count != self.effect_count or
-                    end.checkpoint_count != self.checkpoint_count or
-                    end.screenshot_count != self.screenshot_count or
-                    end.window_chrome_count != self.window_chrome_count)
-                {
-                    return error.JournalCountMismatch;
-                }
+                try checkPlan(journal_policy.plan(self.policy, .seal, .{ .counts = self.counts(), .sealed = .{ end.event_count, end.effect_count, end.checkpoint_count, end.screenshot_count, end.window_chrome_count } }));
                 self.end = end;
                 return .{ .end = end };
             },
@@ -2208,4 +2240,13 @@ test "window chrome codec preserves every OS field and refuses damaged payloads"
     buffer[40] = 1;
     buffer[41] = 2;
     try testing.expectError(error.JournalCorrupt, decodeWindowChrome(bytes));
+}
+
+comptime {
+    if (!std.mem.eql(u8, magic, "NSDKSJNL") or preamble_len != 16 or max_session_record_bytes != 1114112 or
+        @typeInfo(RecordKind).@"enum".fields.len != 7 or @intFromEnum(RecordKind.header) != 1 or
+        @intFromEnum(RecordKind.event) != 2 or @intFromEnum(RecordKind.effect) != 3 or
+        @intFromEnum(RecordKind.checkpoint) != 4 or @intFromEnum(RecordKind.screenshot) != 5 or
+        @intFromEnum(RecordKind.end) != 6 or @intFromEnum(RecordKind.window_chrome) != 7)
+        @compileError("update the portable journal framing schema with the journal format");
 }

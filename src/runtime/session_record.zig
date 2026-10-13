@@ -115,7 +115,7 @@ pub const SessionRecorder = struct {
         salt_hasher.final(&salt_digest);
         @memcpy(&self.credentials_salt, salt_digest[0..self.credentials_salt.len]);
         var preamble_buffer: [journal.preamble_len]u8 = undefined;
-        self.write(journal.writePreamble(&preamble_buffer));
+        self.write(journal.writePreambleWithPolicy(self.recording_policy, &preamble_buffer));
         const payload = journal.encodeHeader(header, &self.small_buffer) catch {
             return self.fail("session header does not fit its record budget");
         };
@@ -436,9 +436,7 @@ pub const SessionRecorder = struct {
             total = self.bytes_written + 5 + payload.len;
             if (total > journal.max_session_journal_bytes) return self.fail("the journal exceeded max_session_journal_bytes - recording stopped");
         }
-        var record_header: [5]u8 = undefined;
-        record_header[0] = @intFromEnum(kind);
-        std.mem.writeInt(u32, record_header[1..5], @intCast(payload.len), .little);
+        const record_header = journal.frameHeader(self.recording_policy, kind, payload.len, 5 + payload.len) catch @panic("admitted journal frame exceeded its budget");
         self.write(&record_header);
         self.write(payload);
         if (self.writable()) self.bytes_written = total;

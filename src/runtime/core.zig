@@ -1332,6 +1332,7 @@ const testingBuiltinBridgeErrorCode = builtinBridgeErrorCode;
 const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
+    pub const journal_policy = @import("journal_policy.zig");
     pub const replay_progress_policy = @import("replay_progress_policy.zig");
     pub const recording_policy = @import("recording_policy.zig");
     pub const syncHostInputDrivers = runtime_canvas_widget_scroll_drivers.RuntimeCanvasWidgetScrollDrivers(Runtime).syncCanvasWidgetScrollDriversForView;

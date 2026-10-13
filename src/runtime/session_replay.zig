@@ -147,7 +147,7 @@ pub fn replaySession(
     journal_bytes: []const u8,
     options: ReplayOptions,
 ) anyerror!ReplayReport {
-    var reader = try journal.Reader.init(journal_bytes);
+    var reader = try journal.Reader.initWithPolicy(journal_bytes, app.replay_policy);
     var report: ReplayReport = .{};
     var armed = false;
     runtime.replay_window_chrome_active = true;
