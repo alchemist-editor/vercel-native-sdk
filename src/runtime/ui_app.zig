@@ -525,6 +525,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             bridge_descriptor_policy: ?*const fn ([]const u8, []u8) usize = null,
             authorization_policy: ?*const fn ([]const u8, []u8) usize = null,
             builtin_coordination_policy: ?*const fn ([]const u8, []u8) usize = null,
+            automation_command_policy: ?*const fn ([]const u8, []u8) usize = null,
             /// Installed by TsUiApp for compiled command and status policy.
             command_policy: ?*const fn ([]const u8, []u8) usize = null,
             text_cache_policy: ?*const fn ([]const u8, []u8) usize = null,
@@ -1584,6 +1585,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .bridge_descriptor_policy = self.options.bridge_descriptor_policy,
                 .authorization_policy = self.options.authorization_policy,
                 .builtin_coordination_policy = self.options.builtin_coordination_policy,
+                .automation_command_policy = self.options.automation_command_policy,
                 .command_policy = self.options.command_policy,
                 .text_cache_policy = self.options.text_cache_policy,
                 .render_cache_policy = self.options.render_cache_policy,

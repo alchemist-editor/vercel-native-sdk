@@ -540,6 +540,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 stamped.authorization_policy = core.nativeWindowPolicy;
                 if (options.builtin_coordination_policy != null) @panic("TsUiApp owns builtin_coordination_policy - remove custom builtin coordination wiring");
                 stamped.builtin_coordination_policy = core.nativeWindowPolicy;
+                if (options.automation_command_policy != null) @panic("TsUiApp owns automation_command_policy - remove custom automation command wiring");
+                stamped.automation_command_policy = core.nativeWindowPolicy;
                 if (options.command_policy != null) @panic("TsUiApp owns command_policy - remove custom command wiring");
                 stamped.command_policy = core.nativeWindowPolicy;
                 if (options.text_cache_policy != null) @panic("TsUiApp owns text_cache_policy - remove custom text cache wiring");

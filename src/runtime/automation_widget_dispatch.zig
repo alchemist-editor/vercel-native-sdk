@@ -17,9 +17,9 @@ const AutomationProvenanceTarget = automation_commands.AutomationProvenanceTarge
 const AutomationWidgetWheel = automation_commands.AutomationWidgetWheel;
 const AutomationWidgetKey = automation_commands.AutomationWidgetKey;
 const AutomationWidgetPointerDrag = automation_commands.AutomationWidgetPointerDrag;
-const parseAutomationTextSelection = automation_commands.parseAutomationTextSelection;
-const parseAutomationDragDelta = automation_commands.parseAutomationDragDelta;
-const parseAutomationDropPaths = automation_commands.parseAutomationDropPaths;
+const parseAutomationTextSelection = @import("automation_command_policy.zig").parseAutomationTextSelection;
+const parseAutomationDragDelta = @import("automation_command_policy.zig").parseAutomationDragDelta;
+const parseAutomationDropPaths = @import("automation_command_policy.zig").parseAutomationDropPaths;
 const automationInputTimestampNs = runtime_clock.automationInputTimestampNs;
 const canvasWidgetInteractionTargetExists = canvas_widget_runtime.canvasWidgetInteractionTargetExists;
 const canvasWidgetSelectableTargetExists = canvas_widget_runtime.canvasWidgetSelectableTargetExists;
@@ -39,7 +39,7 @@ pub fn RuntimeAutomationWidgetDispatch(comptime Runtime: type) type {
                 .id = action.id,
                 .action = canvasWidgetActionKindFromAutomation(action.action),
                 .text = action.value,
-                .selection = if (action.action == .set_selection) try parseAutomationTextSelection(action.value) else null,
+                .selection = if (action.action == .set_selection) try parseAutomationTextSelection(self.automation_command_policy, action.value) else null,
             });
         }
 
@@ -734,7 +734,7 @@ pub fn RuntimeAutomationWidgetDispatch(comptime Runtime: type) type {
 
         pub fn dispatchAutomationCanvasWidgetDrag(self: *Runtime, app: runtime_api.App(Runtime), view_index: usize, id: canvas.ObjectId, value: []const u8) anyerror!void {
             if (view_index >= self.view_count) return error.ViewNotFound;
-            const delta = try parseAutomationDragDelta(value);
+            const delta = try parseAutomationDragDelta(self.automation_command_policy, value);
             const layout = self.views[view_index].widgetLayoutTree();
             if (!canvasWidgetInteractionTargetExists(layout, id)) return error.InvalidCommand;
             const node = layout.findById(id) orelse return error.InvalidCommand;
@@ -797,7 +797,7 @@ pub fn RuntimeAutomationWidgetDispatch(comptime Runtime: type) type {
             const layout = self.views[view_index].widgetLayoutTree();
             if (!canvasWidgetInteractionTargetExists(layout, id)) return error.InvalidCommand;
             var paths_buffer: [platform.max_drop_paths][]const u8 = undefined;
-            const paths = try parseAutomationDropPaths(value, paths_buffer[0..]);
+            const paths = try parseAutomationDropPaths(self.automation_command_policy, value, paths_buffer[0..]);
             const node = layout.findById(id) orelse return error.InvalidCommand;
             const bounds = node.frame.normalized();
             if (bounds.isEmpty()) return error.InvalidCommand;

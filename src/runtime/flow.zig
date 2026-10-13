@@ -10,7 +10,7 @@ const runtime_api = @import("api.zig");
 const runtime_async_bridge = @import("async_bridge.zig");
 const runtime_automation_snapshot = @import("automation_snapshot.zig");
 const runtime_automation_widget_dispatch = @import("automation_widget_dispatch.zig");
-const automation_commands = @import("automation_commands.zig");
+const automation_commands = @import("automation_command_policy.zig");
 const launch_timing = @import("launch_timing.zig");
 const runtime_clock = @import("clock.zig");
 const runtime_state = @import("state.zig");
@@ -246,6 +246,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.bridge_descriptor_policy = app.bridge_descriptor_policy;
                     self.authorization_policy = app.authorization_policy;
                     self.builtin_coordination_policy = app.builtin_coordination_policy;
+                    self.automation_command_policy = app.automation_command_policy;
                     self.command_policy = app.command_policy;
                     self.text_cache_policy = app.text_cache_policy;
                     self.render_cache_policy = app.render_cache_policy;
@@ -1002,7 +1003,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     try handleBridgeMessage(self, app, .{ .bytes = command.value, .origin = "zero://inline", .window_id = 1, .webview_label = "main" });
                 },
                 .resize => {
-                    const parsed = try parseAutomationResizeCommand(command.value);
+                    const parsed = try parseAutomationResizeCommand(self.automation_command_policy, command.value);
                     try dispatchPlatformEvent(self, app, .{ .surface_resized = .{
                         .id = 1,
                         .size = geometry.SizeF.init(parsed.width, parsed.height),
@@ -1015,7 +1016,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     };
                 },
                 .native_command => {
-                    const parsed = try parseAutomationNativeCommand(command.value);
+                    const parsed = try parseAutomationNativeCommand(self.automation_command_policy, command.value);
                     try dispatchPlatformEvent(self, app, .{ .native_command = .{
                         .name = parsed.name,
                         .window_id = 1,
@@ -1023,41 +1024,41 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     } });
                 },
                 .widget_action => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetAction(self, app, try parseAutomationWidgetAction(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetAction(self, app, try parseAutomationWidgetAction(self.automation_command_policy, command.value));
                 },
                 .widget_click => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetClick(self, app, try parseAutomationWidgetTarget(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetClick(self, app, try parseAutomationWidgetTarget(self.automation_command_policy, command.value));
                 },
                 .widget_hold => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetHold(self, app, try parseAutomationWidgetTarget(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetHold(self, app, try parseAutomationWidgetTarget(self.automation_command_policy, command.value));
                 },
                 .widget_context_press => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetContextPress(self, app, try parseAutomationWidgetTarget(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetContextPress(self, app, try parseAutomationWidgetTarget(self.automation_command_policy, command.value));
                 },
                 .widget_context_menu => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetContextMenuItem(self, app, try parseAutomationWidgetContextMenuItem(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetContextMenuItem(self, app, try parseAutomationWidgetContextMenuItem(self.automation_command_policy, command.value));
                 },
                 .widget_drag => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetPointerDrag(self, app, try parseAutomationWidgetPointerDrag(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetPointerDrag(self, app, try parseAutomationWidgetPointerDrag(self.automation_command_policy, command.value));
                 },
                 .widget_wheel => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetWheel(self, app, try parseAutomationWidgetWheel(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetWheel(self, app, try parseAutomationWidgetWheel(self.automation_command_policy, command.value));
                 },
                 .widget_key => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetKeyInput(self, app, try parseAutomationWidgetKey(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetKeyInput(self, app, try parseAutomationWidgetKey(self.automation_command_policy, command.value));
                 },
                 .widget_pinch => {
-                    try AutomationWidgetMethods().dispatchAutomationWidgetPinch(self, app, try parseAutomationWidgetPinch(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationWidgetPinch(self, app, try parseAutomationWidgetPinch(self.automation_command_policy, command.value));
                 },
                 .menu_command => {
                     try dispatchPlatformEvent(self, app, .{ .menu_command = .{
-                        .name = try parseAutomationCommandName(command.value),
+                        .name = try parseAutomationCommandName(self.automation_command_policy, command.value),
                         .window_id = 1,
                     } });
                 },
                 .shortcut => {
                     try dispatchPlatformEvent(self, app, .{ .shortcut = .{
-                        .id = try parseAutomationCommandName(command.value),
+                        .id = try parseAutomationCommandName(self.automation_command_policy, command.value),
                         .key = "",
                         .window_id = 1,
                     } });
@@ -1069,7 +1070,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     // UiApp's window fallback are all the real path. A
                     // stale or unknown item id is loud driver misuse,
                     // like widget-click on an unmounted widget.
-                    const target = try parseAutomationTrayTarget(command.value);
+                    const target = try parseAutomationTrayTarget(self.automation_command_policy, command.value);
                     if (!SystemServiceMethods().statusItemMenuItemActionable(self, target.status_item_id, target.item_id)) return error.InvalidCommand;
                     try dispatchPlatformEvent(self, app, .{ .tray_action = .{
                         .status_item_id = target.status_item_id,
@@ -1077,7 +1078,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     } });
                 },
                 .focus_view => {
-                    try WindowViewMethods().focusView(self, 1, try parseAutomationViewLabel(command.value));
+                    try WindowViewMethods().focusView(self, 1, try parseAutomationViewLabel(self.automation_command_policy, command.value));
                 },
                 .focus_next_view => {
                     _ = try WindowViewMethods().focusNextView(self, 1);
@@ -1104,7 +1105,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
                     self.invalidateFor(.command, null);
                 },
                 .provenance => {
-                    try AutomationWidgetMethods().dispatchAutomationProvenance(self, app, try parseAutomationProvenanceTarget(command.value));
+                    try AutomationWidgetMethods().dispatchAutomationProvenance(self, app, try parseAutomationProvenanceTarget(self.automation_command_policy, command.value));
                 },
                 .wait => {},
             }
@@ -1118,7 +1119,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
         /// artifacts across captures.
         pub fn publishAutomationScreenshot(self: *Runtime, value: []const u8) anyerror!void {
             const server = self.options.automation orelse return;
-            const parsed = try parseAutomationScreenshotCommand(value);
+            const parsed = try parseAutomationScreenshotCommand(self.automation_command_policy, value);
             // Screenshots address a gpu_surface view by label across ALL
             // open windows, like the widget verbs — a secondary window's
             // canvas captures the same way the main one does.
