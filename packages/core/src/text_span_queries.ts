@@ -5,7 +5,7 @@ function nscvTextSpanQueries(request: Uint8Array): Uint8Array {
 }
 
 // One copied continuation keeps helpers receiver-bound rather than captured.
-class NscTextSpanQueryContext {
+class NscTextSpanQueryContext implements nscContracts.Acyclic {
   readonly request: Uint8Array;
   readonly out: Uint8Array;
   readonly w: DataView;
@@ -309,7 +309,7 @@ class NscTextSpanQueryContext {
 
 // Round an exact unsigned 64-bit identity/index to f32 without an intervening
 // lossy f64 conversion. Halfway values follow ties-to-even as native does.
-function nscvSpanLineFloat(low: number, high: number): number {
+function nscvSpanLineFloat(low: number, high: number): nscContracts.NoThrow<number> {
   if (high === 0) return Math.fround(low);
   let exponent = 32, power = 1;
   while (power * 2 <= high) { power *= 2; exponent++; }

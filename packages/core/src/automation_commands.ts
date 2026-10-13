@@ -4,7 +4,7 @@
  */
 type NscAutomationSpan = { automation_first_byte: number; automation_last_byte: number };
 type NscAutomationField = { automation_first_byte: number; automation_last_byte: number; kind: number; rule: number; initial: number };
-class NscAutomationGrammar {
+class NscAutomationGrammar implements nscContracts.Acyclic {
   bytes: Uint8Array;
   at: number = 0;
   fields: NscAutomationField[] = [];
@@ -68,7 +68,7 @@ class NscAutomationGrammar {
     this.modifiers = modifiers; this.string({ automation_first_byte, automation_last_byte: span.automation_last_byte });
   }
 }
-const NSC_AUTOMATION_ACTIONS: readonly string[] = ["focus", "press", "toggle", "increment", "decrement", "set_text", "set_selection", "set_composition", "commit_composition", "cancel_composition", "select", "drag", "drop_files", "dismiss"];
+const NSC_AUTOMATION_ACTIONS: nscContracts.Immutable<string[]> = ["focus", "press", "toggle", "increment", "decrement", "set_text", "set_selection", "set_composition", "commit_composition", "cancel_composition", "select", "drag", "drop_files", "dismiss"];
 function nscAutomationAction(grammar: NscAutomationGrammar, span: NscAutomationSpan): number {
   for (let i = 0; i < NSC_AUTOMATION_ACTIONS.length; i++) {
     const name = NSC_AUTOMATION_ACTIONS[i]!;

@@ -110,3 +110,12 @@ export function compilerSurfacePath(origin, options = {}) {
   if (config) return path.join(config.root, "api", "node_modules", "@scriptc", "compiler", "surface-manifest.json");
   return path.join(path.dirname(coreManifestPath(origin)), "node_modules", "@scriptc", "compiler", "surface-manifest.json");
 }
+
+// Preserve the package import's provenance inside isolated compilation trees.
+// Only declarations from the checked, exact release enter the source graph.
+export function stageContractTypes(destination, origin, options = {}) {
+  const config = installedRelease(origin, options);
+  if (!config?.release.packages.types) return;
+  fs.cpSync(path.join(config.root, "api", "node_modules", "@scriptc", "types"),
+    path.join(destination, "node_modules", "@scriptc", "types"), { recursive: true });
+}

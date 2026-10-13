@@ -28,6 +28,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { compileViewBundle } from "../src/view_frontend.ts";
+import { stageContractTypes } from "./scriptc_toolchain.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -123,6 +124,8 @@ function dedupeAliases(text, dropNames) {
 
 const args = parseArgs(process.argv);
 fs.rmSync(args.out, { recursive: true, force: true });
+// Keep @scriptc/types imports intact: local aliases lose compiler provenance.
+stageContractTypes(args.out, import.meta.url);
 fs.mkdirSync(path.join(args.out, "sdk"), { recursive: true });
 
 // Author sources, at their entry-relative (src-relative) paths.

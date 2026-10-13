@@ -1,6 +1,6 @@
 // Scalar text decisions over copied font facts. Font table lookup and OS
 // measurement are explicit capabilities; no host pointer crosses this seam.
-function nscvScalarTextSequence(byte: number): number { return (byte & 128) === 0 ? 1 : (byte & 224) === 192 ? 2 : (byte & 240) === 224 ? 3 : (byte & 248) === 240 ? 4 : 1; }
+function nscvScalarTextSequence(byte: number): nscContracts.NoThrow<nscContracts.Int32> { return (byte & 128) === 0 ? 1 : (byte & 224) === 192 ? 2 : (byte & 240) === 224 ? 3 : (byte & 248) === 240 ? 4 : 1; }
 // The reserved mono estimator has no font capability. Keep every f32 add,
 // including the distinction between a cluster's -0 and a run's initial +0.
 function nscvScalarTextMonoWidth(text: Uint8Array, first: number, last: number, size: number, cluster: boolean): number {
@@ -20,7 +20,7 @@ function nscvScalarTextCodepoint(text: Uint8Array, first: number, last: number):
   if (cp < (length === 2 ? 128 : length === 3 ? 2048 : 65536) || cp > 1114111 || cp >= 55296 && cp <= 57343) return -1;
   return cp;
 }
-function nscvScalarTextWide(cp: number): boolean {
+function nscvScalarTextWide(cp: number): nscContracts.NoThrow<boolean> {
   return cp >= 0x1100 && cp <= 0x115f || cp >= 0x2e80 && cp <= 0x303e || cp >= 0x3041 && cp <= 0x33ff ||
     cp >= 0x3400 && cp <= 0x4dbf || cp >= 0x4e00 && cp <= 0x9fff || cp >= 0xa000 && cp <= 0xa4cf ||
     cp >= 0xa960 && cp <= 0xa97f || cp >= 0xac00 && cp <= 0xd7a3 || cp >= 0xf900 && cp <= 0xfaff ||

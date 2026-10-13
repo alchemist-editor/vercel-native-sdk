@@ -4,7 +4,7 @@
 type NscBuiltinFamily = { prefix: string; permission: number; denial: string; unknown: string };
 type NscBuiltinVerb = { name: string; family: number; operation: number };
 type NscBuiltinError = { name: string; code: number; message: string };
-const NSC_BUILTIN_FAMILIES: readonly NscBuiltinFamily[] = [
+const NSC_BUILTIN_FAMILIES: nscContracts.Immutable<NscBuiltinFamily[]> = [
   {"prefix": "native-sdk.command.", "permission": 1, "denial": "Command API is not permitted", "unknown": "Unknown command command"},
   {"prefix": "native-sdk.window.", "permission": 2, "denial": "Window API is not permitted", "unknown": "Unknown window command"},
   {"prefix": "native-sdk.view.", "permission": 3, "denial": "View API is not permitted", "unknown": "Unknown view command"},
@@ -15,7 +15,7 @@ const NSC_BUILTIN_FAMILIES: readonly NscBuiltinFamily[] = [
   {"prefix": "native-sdk.clipboard.", "permission": 0, "denial": "Clipboard API is not permitted", "unknown": "Unknown clipboard command"},
   {"prefix": "native-sdk.credentials.", "permission": 0, "denial": "Credentials API is not permitted", "unknown": "Unknown credentials command"},
 ];
-const NSC_BUILTIN_VERBS: readonly NscBuiltinVerb[] = [
+const NSC_BUILTIN_VERBS: nscContracts.Immutable<NscBuiltinVerb[]> = [
   {"name": "native-sdk.command.invoke", "family": 1, "operation": 1},
   {"name": "native-sdk.command.list", "family": 1, "operation": 2},
   {"name": "native-sdk.platform.supports", "family": 5, "operation": 3},
@@ -55,7 +55,7 @@ const NSC_BUILTIN_VERBS: readonly NscBuiltinVerb[] = [
   {"name": "native-sdk.clipboard.read", "family": 8, "operation": 37},
   {"name": "native-sdk.clipboard.write", "family": 8, "operation": 38},
 ];
-const NSC_BUILTIN_ERRORS: readonly NscBuiltinError[] = [
+const NSC_BUILTIN_ERRORS: nscContracts.Immutable<NscBuiltinError[]> = [
   {"name": "UnsupportedService", "code": 0, "message": "Native service is not available on this platform"},
   {"name": "UnsupportedWindowTransparency", "code": 0, "message": "This backend cannot make window content transparent"},
   {"name": "WindowNotFound", "code": 0, "message": "Window was not found"},

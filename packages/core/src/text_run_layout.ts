@@ -1,11 +1,11 @@
 // Scalar helpers need no continuation receiver or captured state.
-function nscvTextRunAdd(a: number, b: number): number { return Math.fround(a + b); }
-function nscvTextRunSubtract(a: number, b: number): number { return Math.fround(a - b); }
-function nscvTextRunMultiply(a: number, b: number): number { return Math.fround(a * b); }
-function nscvTextRunDivide(a: number, b: number): number { return Math.fround(a / b); }
+function nscvTextRunAdd(a: number, b: number): nscContracts.NoThrow<number> { return Math.fround(a + b); }
+function nscvTextRunSubtract(a: number, b: number): nscContracts.NoThrow<number> { return Math.fround(a - b); }
+function nscvTextRunMultiply(a: number, b: number): nscContracts.NoThrow<number> { return Math.fround(a * b); }
+function nscvTextRunDivide(a: number, b: number): nscContracts.NoThrow<number> { return Math.fround(a / b); }
 function nscvTextRunMin(a: number, b: number): number { return nscvShellMin(a, b); }
 function nscvTextRunMax(a: number, b: number): number { return nscvShellMax(a, b); }
-function nscvTextRunSequenceLength(byte: number): number { return (byte & 128) === 0 ? 1 : (byte & 224) === 192 ? 2 : (byte & 240) === 224 ? 3 : (byte & 248) === 240 ? 4 : 1; }
+function nscvTextRunSequenceLength(byte: number): nscContracts.NoThrow<nscContracts.Int32> { return (byte & 128) === 0 ? 1 : (byte & 224) === 192 ? 2 : (byte & 240) === 224 ? 3 : (byte & 248) === 240 ? 4 : 1; }
 
 // Ordinary text planning uses copied continuations. Fonts, widths and
 // advances are capabilities; cursor, overflow and geometry decisions are
@@ -22,7 +22,7 @@ function nscvTextRunLayoutFacts(header: Uint8Array, request: Uint8Array, factsSt
 
 // One context owns each copied continuation; methods do not allocate captured
 // helper closures when a font capability resumes the planner.
-class NscTextRunContext {
+class NscTextRunContext implements nscContracts.Acyclic {
   readonly factsStart: number;
   readonly out: Uint8Array;
   readonly w: DataView;

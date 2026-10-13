@@ -3,6 +3,9 @@
  * rendering, hit testing, and delivery of the declared message envelopes.
  */
 import { textWordSelectionAtOffset as nscvWordSelection, textLineSelectionAtOffset as nscvLineSelection, caretSelectionAt as nscvSelection, applyTextInputEvent as nscvApplyTextEdit, sanitizedSingleLineTextInputEvent as nscvSanitizeTextInput, codeIndentationInsertion as nscvIndentation, parseCodeLineNumberSpec as nscvCodeLines, textClipboardRange as nscvClipboardRange, type TextInputEvent as NscvTextInputEvent } from "@native-sdk/core/text";
+// The ordered portable bundle shares these type-only compiler contracts.
+// Wire values retain their declared widths; only proven local facts narrow.
+import type * as nscContracts from "@scriptc/types";
 
 type NscViewSpan = { text: string; textBytes?: readonly number[]; weight?: string; color?: string; scale?: number; monospace?: boolean; italic?: boolean; underline?: boolean };
 type NscContextMenuItem = { label: string; labelBytes?: readonly number[]; press?: number[]; enabled: boolean; separator: boolean };

@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { test } from "node:test";
 import { downloadVerified, extractVerified } from "../scripts/install_scriptc.mjs";
-import { hostRelease, installedRelease, nativeManifestName, nativeTargetName, releaseConfiguration, scriptcVersion } from "../scripts/scriptc_toolchain.mjs";
+import { hostRelease, installedRelease, nativeManifestName, nativeTargetName, releaseConfiguration, scriptcVersion, stageContractTypes } from "../scripts/scriptc_toolchain.mjs";
 
 test("host selection preserves desktop distributions and explicit libc", () => {
   for (const arch of ["x64", "arm64"]) {
@@ -270,9 +270,18 @@ test("completed installations reject mixed runtime ABIs and missing contract or 
     for (const file of ["release/bin/scriptc.json", "release/bin/scriptc", "api/node_modules/@scriptc/compiler/dist/index.js", "api/node_modules/@scriptc/compiler/surface-manifest.json", "api/node_modules/typescript/package.json", "api/node_modules/@scriptc/types/index.d.ts", "api/node_modules/@scriptc/threads/index.d.ts", "api/node_modules/@scriptc/threads/index.js"]) put(file);
     const pack = put("api/node_modules/@scriptc/runtime-linux-x64-gnu/runtime-pack.json", { version: "0.3.0", runtime_abi: { version: 14 } });
     assert.equal(installedRelease(origin, options)!.root, config.root);
+    const declarations = path.join(config.root, "api/node_modules/@scriptc/types/index.d.ts");
+    fs.writeFileSync(declarations, "export type Int32 = number;\n");
+    const stage = path.join(root, "isolated-stage");
+    stageContractTypes(stage, origin, options);
+    assert.equal(fs.readFileSync(path.join(stage, "node_modules/@scriptc/types/index.d.ts"), "utf8"), fs.readFileSync(declarations, "utf8"));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(stage, "node_modules/@scriptc/types/package.json"), "utf8")).version, "0.3.0");
+    assert.deepEqual(fs.readdirSync(path.join(stage, "node_modules/@scriptc")), ["types"]);
     for (const incompatible of [{ version: "0.2.10", runtime_abi: { version: 13 } }, { version: "0.3.0", runtime_abi: { version: 13 } }]) {
       fs.writeFileSync(pack, JSON.stringify(incompatible));
       assert.throws(() => installedRelease(origin, options), /incompatible runtime pack/);
+      assert.throws(() => stageContractTypes(path.join(root, "refused-stage"), origin, options), /incompatible runtime pack/);
+      assert.equal(fs.existsSync(path.join(root, "refused-stage")), false);
     }
     fs.writeFileSync(pack, JSON.stringify({ version: "0.3.0", runtime_abi: { version: 14 } }));
     for (const name of ["types/index.d.ts", "threads/index.js"]) {
