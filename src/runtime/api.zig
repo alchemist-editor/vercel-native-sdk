@@ -450,6 +450,7 @@ pub fn App(comptime Runtime: type) type {
         render_override_policy: ?*const fn ([]const u8, []u8) usize = null,
         replay_policy: ?*const fn ([]const u8, []u8) usize = null,
         recording_policy: ?*const fn ([]const u8, []u8) usize = null,
+        blob_policy: ?*const fn ([]const u8, []u8) usize = null,
         render_damage_policy: ?*const fn ([]const u8, []u8) usize = null,
         start_fn: ?StartFn = null,
         event_fn: ?EventFn = null,

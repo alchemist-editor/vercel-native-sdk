@@ -510,6 +510,8 @@ pub fn TsUiAppWithFeatures(comptime core: type, comptime features: ui_app.UiAppF
                 stamped.replay_policy = core.nativeEffectPolicy;
                 if (options.recording_policy != null) @panic("TsUiApp owns recording_policy - remove custom recording wiring");
                 stamped.recording_policy = core.nativeEffectPolicy;
+                if (options.blob_policy != null) @panic("TsUiApp owns blob_policy - remove custom blob wiring");
+                stamped.blob_policy = core.nativeEffectPolicy;
                 if (options.snapshot_policy != null) @panic("TsUiApp owns snapshot_policy - remove custom snapshot wiring");
                 stamped.snapshot_policy = core.nativeEffectPolicy;
                 if (options.component_policy != null) @panic("TsUiApp owns component_policy - remove custom component wiring");

@@ -1334,6 +1334,8 @@ const testingBuiltinBridgeErrorMessage = builtinBridgeErrorMessage;
 
 pub const testing = struct {
     pub const journal_policy = @import("journal_policy.zig");
+    pub const blob_policy = @import("blob_policy.zig");
+    pub const blob_reference_store = @import("session_blobs_reference.zig");
     pub const snapshot_policy = @import("snapshot_policy.zig");
     pub const frame_profile = runtime_frame_profile;
     pub const replay_progress_policy = @import("replay_progress_policy.zig");

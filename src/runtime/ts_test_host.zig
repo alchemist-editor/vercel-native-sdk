@@ -534,6 +534,7 @@ pub fn runWithSecurity(comptime Adapter: type, init: std.process.Init, options: 
             config = request;
             host = try Host.create(config, options, core_options, security, false);
             recorder.recording_policy = host.?.state.app().recording_policy;
+            blobs.policy = host.?.state.app().blob_policy;
             recorder.begin(.{ .platform_name = "test", .app_name = options.name, .window_width = @floatFromInt(config.width), .window_height = @floatFromInt(config.height) });
             host.?.harness.runtime.options.session_recorder = recorder;
             try host.?.harness.start(host.?.state.app());

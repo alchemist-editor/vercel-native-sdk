@@ -13,6 +13,7 @@ pub fn observed(input: []const u8, output: []u8) usize {
             stages[input[1]] += 1;
         },
         26 => if (input.len != 160 or input[1] > 4 or output.len != 80) @panic("invalid journal test policy request"),
+        28 => if (input.len < 64 or input[1] != 1 or input[2] > 12 or output.len != 1136) @panic("invalid blob test policy request"),
         else => @panic("unexpected recording test policy opcode"),
     }
     return core.nativeEffectPolicy(input, output);
@@ -42,6 +43,7 @@ const Pair = struct {
         for (self.recorders, 0..) |*recorder, i| {
             recorder.* = sdk.runtime.SessionRecorder.init(self.sinks[i].sink());
             recorder.recording_policy = if (i == 0) null else observed;
+            self.blobs[i].policy = if (i == 0) null else observed;
             recorder.blob_sink = self.blobs[i].sink();
         }
         return self;

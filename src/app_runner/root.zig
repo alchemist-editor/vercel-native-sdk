@@ -785,7 +785,7 @@ fn runNull(app: native_sdk.App, options: RunOptions, init: std.process.Init) !vo
     var buffers: StateBuffers = undefined;
     var app_info = options.appInfo(&buffers);
     const store = prepareStateStore(init.io, init.environ_map, &app_info, &buffers);
-    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy);
+    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy, app.blob_policy);
     // Heap wrapper, latch-gated free: worker threads hold this address
     // as the channel wake context and an abandoned wake call may
     // dereference it after this frame unwinds (see
@@ -858,7 +858,7 @@ fn runMacos(app: native_sdk.App, options: RunOptions, init: std.process.Init) !v
     var buffers: StateBuffers = undefined;
     var app_info = options.appInfo(&buffers);
     const store = prepareStateStore(init.io, init.environ_map, &app_info, &buffers);
-    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy);
+    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy, app.blob_policy);
     // Heap wrapper, latch-gated free: worker threads hold this address
     // as the channel wake context and an abandoned wake call may
     // dereference it after this frame unwinds (see
@@ -930,7 +930,7 @@ fn runLinux(app: native_sdk.App, options: RunOptions, init: std.process.Init) !v
     var buffers: StateBuffers = undefined;
     var app_info = options.appInfo(&buffers);
     const store = prepareStateStore(init.io, init.environ_map, &app_info, &buffers);
-    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy);
+    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy, app.blob_policy);
     // Heap wrapper, latch-gated free: worker threads hold this address
     // as the channel wake context and an abandoned wake call may
     // dereference it after this frame unwinds (see
@@ -1000,7 +1000,7 @@ fn runWindows(app: native_sdk.App, options: RunOptions, init: std.process.Init) 
     var buffers: StateBuffers = undefined;
     var app_info = options.appInfo(&buffers);
     const store = prepareStateStore(init.io, init.environ_map, &app_info, &buffers);
-    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy);
+    const session_recorder = setupSessionRecorder(init, app_info, app.recording_policy, app.blob_policy);
     // Heap wrapper, latch-gated free: worker threads hold this address
     // as the channel wake context and an abandoned wake call may
     // dereference it after this frame unwinds (see
@@ -1091,12 +1091,12 @@ const SessionRecordContext = struct {
 /// journal's directory — large effect payloads (an image load's source
 /// bytes) live there content-addressed, referenced from journal
 /// records by hash + length (see session_blobs.zig).
-fn sessionBlobStore(io: std.Io, journal_path: []const u8) ?*native_sdk.runtime.SessionBlobDirStore {
+fn sessionBlobStore(io: std.Io, journal_path: []const u8, policy: ?*const fn ([]const u8, []u8) usize) ?*native_sdk.runtime.SessionBlobDirStore {
     var dir_buffer: [1024]u8 = undefined;
     const parent = std.fs.path.dirname(journal_path) orelse ".";
     const blob_dir = std.fmt.bufPrint(&dir_buffer, "{s}/blobs", .{parent}) catch return null;
     const store = std.heap.page_allocator.create(native_sdk.runtime.SessionBlobDirStore) catch return null;
-    store.* = native_sdk.runtime.SessionBlobDirStore.init(io, blob_dir) catch {
+    store.* = native_sdk.runtime.SessionBlobDirStore.initWithPolicy(io, blob_dir, policy) catch {
         std.heap.page_allocator.destroy(store);
         return null;
     };
@@ -1107,7 +1107,7 @@ fn sessionBlobStore(io: std.Io, journal_path: []const u8) ?*native_sdk.runtime.S
 /// recorder that streams the session into it from the very first
 /// dispatched event (init determinism needs init-time effect results).
 /// Failures disable recording loudly and never block the app.
-fn setupSessionRecorder(init: std.process.Init, app_info: native_sdk.AppInfo, policy: ?*const fn ([]const u8, []u8) usize) ?*native_sdk.runtime.SessionRecorder {
+fn setupSessionRecorder(init: std.process.Init, app_info: native_sdk.AppInfo, policy: ?*const fn ([]const u8, []u8) usize, blob_policy: ?*const fn ([]const u8, []u8) usize) ?*native_sdk.runtime.SessionRecorder {
     const path = init.environ_map.get("NATIVE_SDK_SESSION_RECORD") orelse return null;
     const file = std.Io.Dir.cwd().createFile(init.io, path, .{ .truncate = true }) catch |err| {
         std.debug.print("session recording disabled: cannot create {s}: {s}\n", .{ path, @errorName(err) });
@@ -1118,7 +1118,7 @@ fn setupSessionRecorder(init: std.process.Init, app_info: native_sdk.AppInfo, po
     const recorder = std.heap.page_allocator.create(native_sdk.runtime.SessionRecorder) catch return null;
     recorder.* = native_sdk.runtime.SessionRecorder.init(context.sink());
     recorder.recording_policy = policy;
-    if (sessionBlobStore(init.io, path)) |store| recorder.blob_sink = store.sink();
+    if (sessionBlobStore(init.io, path, blob_policy)) |store| recorder.blob_sink = store.sink();
     recorder.begin(native_sdk.runtime.sessionHeaderNow(
         native_sdk.runtime.sessionPlatformName(),
         app_info.app_name,
@@ -1219,7 +1219,7 @@ fn runSessionReplay(app: native_sdk.App, options: RunOptions, init: std.process.
         !std.mem.eql(u8, value, "0")
     else
         true;
-    const blob_store = sessionBlobStore(init.io, journal_path);
+    const blob_store = sessionBlobStore(init.io, journal_path, app.blob_policy);
     const report = native_sdk.runtime.replaySession(runtime, app, journal_bytes, .{
         .verify = verify,
         .blobs = if (blob_store) |store| store.source() else null,

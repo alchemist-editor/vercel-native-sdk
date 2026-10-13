@@ -607,7 +607,8 @@ function dbPolicyLookup(request: Uint8Array, positions: DataView, keyStart: numb
  * neither mutates its borrowed input nor resets the dispatch frame.
  */
 export function native_effect_policy(request: Uint8Array): Uint8Array {
-  if (request.length < 2 || request[0]! > 27) throw new Error("invalid effect policy request");
+  if (request.length < 2 || request[0]! > 28) throw new Error("invalid effect policy request");
+  if (request[0] === 28) return sessionBlobPolicy(request);
   if (request[0] === 27) return snapshotCoordinationPolicy(request);
   if (request[0] === 26) return sessionJournalPolicy(request);
   if (request[0] === 25) return replayProgressPolicy(request);
@@ -3399,4 +3400,106 @@ export function snapshotCoordinationPolicy(request: Uint8Array): Uint8Array {
   }
   // Reset (mode 8) returns zero metadata, leaving enable state and samples owned by the host.
   return result;
+}
+
+/** Copied blob-store decisions. File I/O, hashing, entropy, allocation and
+ * borrowed payload storage remain explicit native capabilities. */
+export function sessionBlobPolicy(request: Uint8Array): Uint8Array {
+  if (request.length < 64 || request[0] !== 28 || request[1] !== 1 || request[2]! > 12 || request[3]! > 3 ||
+      (request[4] !== 0 || request[5] !== 0 || request[6] !== 0 || request[7] !== 0)) throw new Error("invalid session blob request");
+  const mode = request[2]!, flags = request[3]!, data = new DataView(request.buffer, request.byteOffset, request.byteLength);
+  const aLength = data.getUint32(56, true), bLength = data.getUint32(60, true);
+  if (aLength > 4096 || bLength > 4096 || request.length !== 64 + aLength + bLength) throw new Error("invalid session blob extent");
+  const a = request.subarray(64, 64 + aLength), b = request.subarray(64 + aLength);
+  const equal = (x: Uint8Array, y: Uint8Array): boolean => {
+    if (x.length !== y.length) return false;
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
+  };
+  const at = (i: number): number => 8 + i * 8;
+  const same = (i: number, j: number): boolean => data.getUint32(at(i), true) === data.getUint32(at(j), true) && data.getUint32(at(i) + 4, true) === data.getUint32(at(j) + 4, true);
+  const greater = (i: number, j: number): boolean => data.getUint32(at(i) + 4, true) > data.getUint32(at(j) + 4, true) ||
+    data.getUint32(at(i) + 4, true) === data.getUint32(at(j) + 4, true) && data.getUint32(at(i), true) > data.getUint32(at(j), true);
+  const zero = (i: number): boolean => data.getUint32(at(i), true) === 0 && data.getUint32(at(i) + 4, true) === 0;
+  const allowed = mode === 6 || mode === 8 ? 3 : mode === 0 || mode === 1 || mode === 5 || mode === 9 || mode === 12 ? 0 : 1;
+  if ((flags & ~allowed) !== 0) throw new Error("invalid session blob flags");
+  const textMode = mode === 11 || mode === 12;
+  let text = new Uint8Array(0), action = 0;
+  const result = new Uint8Array(32), out = new DataView(result.buffer);
+  const copy = (i: number, dest: number): void => { result.set(request.subarray(at(i), at(i) + 8), at(dest)); };
+  const increment = (i: number, dest: number, amount: number): void => {
+    const low = data.getUint32(at(i), true) + amount;
+    out.setUint32(at(dest), low, true); out.setUint32(at(dest) + 4, data.getUint32(at(i) + 4, true) + (low >= 4294967296 ? 1 : 0), true);
+  };
+  if (!textMode && mode !== 3 && mode !== 4 && mode !== 5 && mode !== 9 && (aLength !== 0 || bLength !== 0)) throw new Error("unexpected session blob bytes");
+  if (mode === 0) action = zero(0) || greater(0, 1) ? 5 : 0;
+  else if (mode === 1) action = greater(0, 1) ? 1 : 0;
+  else if (mode === 2) action = flags === 1 ? 8 : 14;
+  else if (mode === 3) {
+    if (flags === 0) action = 7;
+    else if (zero(2)) action = same(0, 1) ? 6 : 7;
+    else {
+      if (data.getUint32(28, true) !== 0 || data.getUint32(24, true) > 4096 || aLength !== data.getUint32(24, true)) throw new Error("invalid blob probe chunk");
+      increment(1, 0, aLength);
+      const nextLow = out.getUint32(8, true), nextHigh = out.getUint32(12, true);
+      const beyond = nextHigh > data.getUint32(12, true) || nextHigh === data.getUint32(12, true) && nextLow > data.getUint32(8, true);
+      if (beyond || !equal(a, b)) action = 7;
+      else if (greater(3, 2)) action = nextLow === data.getUint32(8, true) && nextHigh === data.getUint32(12, true) ? 6 : 7;
+      else action = 8;
+    }
+  } else if (mode === 4) {
+    if (flags === 1) action = !same(0, 1) ? 7 : zero(0) ? 6 : 8;
+    else {
+      if (!equal(a, b)) action = 7;
+      else {
+        increment(0, 0, aLength);
+        action = out.getUint32(8, true) === data.getUint32(16, true) && out.getUint32(12, true) === data.getUint32(20, true) ? 6 : 8;
+      }
+    }
+  } else if (mode === 5) {
+    if (aLength !== 16 || bLength !== 16 || !greater(1, 0)) throw new Error("invalid blob address probe");
+    action = equal(a, b) ? 13 : 8; copy(0, 0);
+  } else if (mode === 6) {
+    if (greater(0, 1)) action = 1;
+    else if ((flags & 1) !== 0) {
+      action = (flags & 2) !== 0 ? 9 : 10;
+      if (action === 9) increment(4, 1, 1);
+      copy(2, 0);
+    } else {
+      action = same(2, 3) ? 2 : 11;
+      if (action === 11) increment(2, 0, 1);
+    }
+  } else if (mode === 7) action = flags === 0 ? 3 : greater(0, 1) ? 1 : 0;
+  else if (mode === 8) {
+    if ((flags & 1) === 0) action = 2;
+    else if ((flags & 2) === 0) action = same(0, 1) ? 12 : 0;
+    else action = zero(2) ? 0 : 1;
+  } else if (mode === 9) {
+    if (aLength !== 16 || bLength !== 16) throw new Error("invalid blob hash extent");
+    action = equal(a, b) ? 0 : 4;
+  } else if (mode === 10) action = flags === 1 ? 0 : 2;
+  else if (mode === 11) {
+    const length = aLength + 1 + bLength + (flags === 1 ? 25 : 0);
+    if (length > 1104 || data.getUint32(20, true) === 0 && length > data.getUint32(16, true)) action = 2;
+    else {
+      text = new Uint8Array(length);text.set(a);text[aLength] = 47;text.set(b, aLength + 1);
+      if (flags === 1) {
+        const start = aLength + 1 + bLength; text[start] = 46;
+        for (let i = 0; i < 16; i++) {
+          const word = data.getUint32(i < 8 ? 12 : 8, true), nibble = (word >>> ((7 - i % 8) * 4)) & 15;
+          text[start + 1 + i] = nibble < 10 ? 48 + nibble : 87 + nibble;
+        }
+        text.set(new Uint8Array([46,112,97,114,116,105,97,108]), start + 17);
+      }
+    }
+  } else {
+    if (aLength !== 16 || bLength !== 0) throw new Error("invalid blob name hash");
+    text = new Uint8Array(32);
+    for (let i = 0; i < 16; i++) for (let j = 0; j < 2; j++) {
+      const nibble = j === 0 ? a[i]! >>> 4 : a[i]! & 15;text[i * 2 + j] = nibble < 10 ? 48 + nibble : 87 + nibble;
+    }
+  }
+  result[0] = action;
+  if (!textMode) return result;
+  const complete = new Uint8Array(32 + text.length);complete.set(result);complete.set(text, 32);new DataView(complete.buffer).setUint32(4, text.length, true);return complete;
 }

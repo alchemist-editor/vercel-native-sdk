@@ -503,6 +503,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
             /// queue boundaries, errors and capability execution; plans copy.
             replay_policy: ?*const fn ([]const u8, []u8) usize = null,
             recording_policy: ?*const fn ([]const u8, []u8) usize = null,
+            blob_policy: ?*const fn ([]const u8, []u8) usize = null,
             app_dispatch_policy: dispatch_policy.Policy = null,
             /// Portable context-menu and scroll coordination; native owns pins and latches.
             component_policy: component_policy.Policy = null,
@@ -1602,6 +1603,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .replay_fn = replayFn,
                 .replay_policy = self.options.replay_policy,
                 .recording_policy = self.options.recording_policy,
+                .blob_policy = self.options.blob_policy,
             };
         }
 
