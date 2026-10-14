@@ -676,6 +676,7 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 @property(nonatomic, assign) NSInteger pointerDragInputButton;
 @property(nonatomic, assign) BOOL scrollInputPending;
 @property(nonatomic, assign) NSPoint pendingScrollPoint;
+@property(nonatomic, assign) int pendingScrollKind;
 @property(nonatomic, assign) double pendingScrollDeltaX;
 @property(nonatomic, assign) double pendingScrollDeltaY;
 @property(nonatomic, assign) uint32_t pendingScrollModifiers;
@@ -8384,10 +8385,17 @@ static int NativeSdkRasterCacheAgeCompare(const void *a, const void *b) {
 - (void)queueScrollInputEvent:(NSEvent *)event atPoint:(NSPoint)point deltaX:(double)deltaX deltaY:(double)deltaY {
     if (!self.host || self.surfaceLabel.length == 0 || !event) return;
     if (deltaX == 0 && deltaY == 0) return;
+    const int inputKind = event.hasPreciseScrollingDeltas ? NATIVE_SDK_APPKIT_GPU_INPUT_SCROLL : NATIVE_SDK_APPKIT_GPU_INPUT_DETENTED_SCROLL;
+    const uint32_t modifiers = NativeSdkModifierFlagsForEvent(event);
+    // Preserve both source and modifier boundaries when devices alternate.
+    if (self.scrollInputPending && (self.pendingScrollKind != inputKind || self.pendingScrollModifiers != modifiers)) {
+        [self emitQueuedScrollInputEvent];
+    }
+    self.pendingScrollKind = inputKind;
     self.pendingScrollPoint = point;
     self.pendingScrollDeltaX += deltaX;
     self.pendingScrollDeltaY += deltaY;
-    self.pendingScrollModifiers = NativeSdkModifierFlagsForEvent(event);
+    self.pendingScrollModifiers = modifiers;
     self.pendingScrollTimestampNs = NativeSdkTimestampNanoseconds();
     if (self.scrollInputPending) return;
     self.scrollInputPending = YES;
@@ -8408,6 +8416,7 @@ static int NativeSdkRasterCacheAgeCompare(const void *a, const void *b) {
 
 - (void)emitQueuedScrollInputEvent {
     if (!self.scrollInputPending) return;
+    const int inputKind = self.pendingScrollKind;
     const NSPoint point = self.pendingScrollPoint;
     const double deltaX = self.pendingScrollDeltaX;
     const double deltaY = self.pendingScrollDeltaY;
@@ -8420,7 +8429,7 @@ static int NativeSdkRasterCacheAgeCompare(const void *a, const void *b) {
     self.pendingScrollTimestampNs = 0;
     if (deltaX == 0 && deltaY == 0) return;
     self.scrollInputLastEmitNs = NativeSdkTimestampNanoseconds();
-    [self emitInputEventWithKind:NATIVE_SDK_APPKIT_GPU_INPUT_SCROLL
+    [self emitInputEventWithKind:inputKind
                            point:point
                      timestampNs:timestampNs
                        modifiers:modifiers

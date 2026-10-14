@@ -15,9 +15,19 @@ static NSUInteger failures;
 @property NSUInteger offsets;
 @property double offsetY;
 @property NSUInteger focusActions;
+@property NSUInteger inputs;
+@property int inputKind;
+@property double inputX;
+@property double inputY;
+@property uint32_t inputModifiers;
 @end
 @implementation ScrollTestHost
 - (void)emitEvent:(native_sdk_appkit_event_t)event {
+    if (event.kind == NATIVE_SDK_APPKIT_EVENT_GPU_SURFACE_INPUT) {
+        self.inputs++; self.inputKind = event.input_kind;
+        self.inputX = event.delta_x; self.inputY = event.delta_y;
+        self.inputModifiers = event.shortcut_modifiers;
+    }
     if (event.kind == NATIVE_SDK_APPKIT_EVENT_WIDGET_ACCESSIBILITY_ACTION && event.widget_action == NATIVE_SDK_APPKIT_WIDGET_ACCESSIBILITY_ACTION_FOCUS) self.focusActions++;
     if (event.kind == NATIVE_SDK_APPKIT_EVENT_GPU_SURFACE_SCROLL_DRIVER) { self.offsets++; self.offsetY = event.scroll_driver_offset_y; }
 }
@@ -32,6 +42,43 @@ static NSUInteger failures;
 - (BOOL)isAvailable { return YES; }
 - (void)emitFrameEventWithFrameIndex:(NSUInteger)index sampleColor:(uint32_t)color nonblank:(BOOL)nonblank occluded:(BOOL)occluded { self.frames++; }
 @end
+
+@interface ScrollSourceEvent : NSEvent
+@property BOOL precise;
+@property NSEventModifierFlags testModifiers;
+@end
+@implementation ScrollSourceEvent
+- (BOOL)hasPreciseScrollingDeltas { return self.precise; }
+- (NSEventModifierFlags)modifierFlags { return self.testModifiers; }
+@end
+
+static void testScrollSourceCoalescing(void) {
+    ScrollTestHost *host = [ScrollTestHost new];
+    ScrollTestSurface *surface = [[ScrollTestSurface alloc] initWithFrame:NSMakeRect(0, 0, 300, 300)];
+    [surface stopDisplayTimer];
+    surface.host = host;
+    surface.surfaceLabel = @"timeline";
+    ScrollSourceEvent *smooth = [ScrollSourceEvent new];
+    smooth.precise = YES;
+    ScrollSourceEvent *wheel = [ScrollSourceEvent new];
+    wheel.precise = NO;
+    [surface queueScrollInputEvent:smooth atPoint:NSMakePoint(20, 30) deltaX:6 deltaY:-2];
+    [surface queueScrollInputEvent:smooth atPoint:NSMakePoint(20, 30) deltaX:6 deltaY:-2];
+    CHECK(host.inputs == 0, "smooth samples remain frame-coalesced");
+    [surface queueScrollInputEvent:wheel atPoint:NSMakePoint(20, 30) deltaX:0 deltaY:40];
+    CHECK(host.inputs == 1 && host.inputKind == NATIVE_SDK_APPKIT_GPU_INPUT_SCROLL, "switching to a wheel flushes the smooth batch first");
+    CHECK(host.inputX == 12 && host.inputY == -4, "both smooth axes survive coalescing");
+    wheel.testModifiers = NSEventModifierFlagShift;
+    [surface queueScrollInputEvent:wheel atPoint:NSMakePoint(20, 30) deltaX:0 deltaY:40];
+    CHECK(host.inputs == 2 && host.inputKind == NATIVE_SDK_APPKIT_GPU_INPUT_DETENTED_SCROLL && host.inputY == 40, "modifier changes flush the previous wheel batch");
+    CHECK(host.inputModifiers == 0, "the previous wheel keeps its original modifiers");
+    [surface emitQueuedScrollInputEvent];
+    CHECK(host.inputs == 3 && host.inputKind == NATIVE_SDK_APPKIT_GPU_INPUT_DETENTED_SCROLL, "wheel classification reaches the raw event");
+    CHECK(host.inputModifiers != 0 && host.inputY == 40, "the shifted wheel remains separate");
+    [surface queueScrollInputEvent:smooth atPoint:NSMakePoint(20, 30) deltaX:0.75 deltaY:-0.25];
+    [surface emitQueuedScrollInputEvent];
+    CHECK(host.inputKind == NATIVE_SDK_APPKIT_GPU_INPUT_SCROLL && host.inputX == 0.75, "fractional momentum stays smooth after a wheel event");
+}
 
 static void testAccessibilityFocusPublication(void) {
     ScrollTestHost *host = [ScrollTestHost new];
@@ -125,6 +172,7 @@ static void testTranslatedRoundedClip(void) {
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        testScrollSourceCoalescing();
         testAccessibilityFocusPublication();
         testTrackingDelivery();
         testTranslatedRoundedClip();

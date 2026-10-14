@@ -1197,6 +1197,7 @@ fn gpuSurfaceInputEventFromAppKitEvent(event: *const AppKitEvent) platform_mod.G
         .window_id = event.window_id,
         .label = event.view_label[0..event.view_label_len],
         .kind = gpuSurfaceInputKindFromInt(event.input_kind),
+        .scroll_is_detented = event.input_kind == 15,
         .timestamp_ns = event.timestamp_ns,
         .x = @floatCast(event.x),
         .y = @floatCast(event.y),
@@ -2710,6 +2711,7 @@ fn gpuSurfaceInputKindFromInt(value: c_int) platform_mod.GpuSurfaceInputKind {
         12 => .pinch_begin,
         13 => .pinch_change,
         14 => .pinch_end,
+        15 => .scroll,
         else => .pointer_move,
     };
 }
@@ -3742,4 +3744,20 @@ test "both mac hosts carry the menu-bar lifecycle and fullscreen hooks" {
     const cancel_at = std.mem.indexOf(u8, hide_body, "[self.deferredShowWindows removeObjectForKey:@(windowId)];") orelse return error.TestExpectedEqual;
     const policy_at = std.mem.indexOf(u8, hide_body, "[self.policyHiddenWindows addObject:@(windowId)];") orelse return error.TestExpectedEqual;
     try std.testing.expect(cancel_at < policy_at);
+}
+
+test "mac scroll bridge distinguishes smooth input from mechanical notches" {
+    var event = std.mem.zeroes(AppKitEvent);
+    event.view_label = "canvas";
+    event.view_label_len = 6;
+    event.delta_x = 12;
+    event.delta_y = 40;
+    for ([_]c_int{ 4, 15 }) |kind| {
+        event.input_kind = kind;
+        const input = gpuSurfaceInputEventFromAppKitEvent(&event);
+        try std.testing.expectEqual(platform_mod.GpuSurfaceInputKind.scroll, input.kind);
+        try std.testing.expectEqual(kind == 15, input.scroll_is_detented);
+        try std.testing.expectEqual(@as(f32, 12), input.delta_x);
+        try std.testing.expectEqual(@as(f32, 40), input.delta_y);
+    }
 }
