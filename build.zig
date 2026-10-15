@@ -592,6 +592,10 @@ pub fn build(b: *std.Build) void {
         .name = "bench-render",
         .root_module = bench_render_mod,
     });
+    // The harness keeps whole UiApps (and their per-view widget tables) on
+    // main's stack. With Alchemist's 2048-node desktop budgets and the wider
+    // Widget it needs more than 16 MB on v0.11.0 (the v0.10.1 line fit 8 MB).
+    bench_render_exe.stack_size = 64 * 1024 * 1024;
     const run_bench_render = b.addRunArtifact(bench_render_exe);
     run_bench_render.has_side_effects = true;
     // Repo root as cwd so the relative budgets path in the docs/gate
