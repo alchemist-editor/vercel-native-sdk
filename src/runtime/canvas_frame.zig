@@ -77,6 +77,7 @@ fn canvasGpuPacketRequestedWithPolicy(runtime: anytype, window_id: platform.Wind
 const runtime_api = @import("api.zig");
 const runtime_clock = @import("clock.zig");
 const validation = @import("validation.zig");
+const validateViewLabel = validation.validateViewLabel;
 const canvas_limits = @import("canvas_limits.zig");
 const runtime_view = @import("view.zig");
 

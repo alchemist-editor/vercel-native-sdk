@@ -525,7 +525,6 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 @property(nonatomic, assign) BOOL canUndo;
 @property(nonatomic, assign) BOOL canRedo;
 @property(nonatomic, assign) NSRect surfaceFrame;
-- (void)publishAccessibilityFocused:(BOOL)focused;
 - (BOOL)emitSetTextAccessibilityValue:(id)value;
 - (BOOL)emitSetSelectionAccessibilityValue:(id)value;
 @end
@@ -1772,13 +1771,6 @@ static const uint32_t NativeSdkWidgetPressActionFlags =
     if (!self.surfaceView || !focused || !self.accessibilityEnabled) return;
     if ((self.actionFlags & NATIVE_SDK_APPKIT_WIDGET_ACTION_FOCUS) == 0) return;
     [self.surfaceView emitWidgetAccessibilityActionWithId:self.widgetId action:NATIVE_SDK_APPKIT_WIDGET_ACCESSIBILITY_ACTION_FOCUS];
-}
-
-/* Publishing runtime state must not look like an assistive client writing
- * AXFocused. That feedback resets keyboard focus to programmatic focus and
- * makes plain list rows lose their Tab-established navigation contract. */
-- (void)publishAccessibilityFocused:(BOOL)focused {
-    [super setAccessibilityFocused:focused];
 }
 
 - (BOOL)accessibilityIsAttributeSettable:(NSAccessibilityAttributeName)attribute {
@@ -8613,7 +8605,17 @@ static double NativeSdkClampedPinchMagnification(double magnification) {
             const BOOL drifted_y = desired.scrolls_y && fabs(origin.y - desired.offset_y) > 0.5;
             if (drifted_x || drifted_y) {
                 if (NativeSdkScrollTraceEnabled()) fprintf(stderr, "[scroll] %llu drift driver=%llu native=%.1f engine=%.1f\n", NativeSdkTimestampNanoseconds() / 1000000ull, driver.driverId, origin.y, desired.offset_y);
-                [self queueScrollDriverEventWithId:driver.driverId offsetX:origin.x offsetY:origin.y];
+                // Never report inside the push: the report can rebuild the
+                // app and re-enter this sync. Deliver it once the push has
+                // settled, reading the live origin like the resize path does.
+                __weak NativeSdkMetalSurfaceView *weakSelf = self;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NativeSdkMetalSurfaceView *strongSelf = weakSelf;
+                    if (!strongSelf || driver.superview != strongSelf) return;
+                    [strongSelf queueScrollDriverEventWithId:driver.driverId
+                                                    offsetX:driver.contentView.bounds.origin.x
+                                                    offsetY:driver.contentView.bounds.origin.y];
+                });
             }
         }
         [ordered addObject:driver];

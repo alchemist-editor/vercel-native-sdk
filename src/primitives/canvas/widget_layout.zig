@@ -2815,7 +2815,7 @@ fn intrinsicOverlayChildrenSize(widget: Widget, tokens: DesignTokens, depth: usi
             @max(0, widget.frame.width - widget.layout.padding.left - widget.layout.padding.right)
         else
             size.width;
-        const child_height = if (widgetSubtreeHasTextSpans(child, depth + 1) and child_width > 0)
+        const child_height = if (widgetSubtreeHasTextSpans(child, depth + 1, tokens) and child_width > 0)
             wrappedVerticalExtentForWidth(child, child_width, tokens, depth + 1)
         else
             size.height;

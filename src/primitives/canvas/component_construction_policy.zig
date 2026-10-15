@@ -33,8 +33,8 @@ comptime {
     guardEnum(widgets.WidgetSize, .{ "default", "sm", "lg", "icon", "heading", "display" });
     guardEnum(widgets.WidgetVariant, .{ "default", "primary", "secondary", "outline", "ghost", "destructive" });
     guardEnum(widgets.WidgetCrossAlignment, .{ "stretch", "start", "center", "end" });
-    guardEnum(widgets.WidgetAnchorPlacement, .{ "below", "above" });
-    guardEnum(widgets.WidgetAnchorAlignment, .{ "start", "end", "stretch" });
+    guardEnum(widgets.WidgetAnchorPlacement, .{ "below", "above", "left", "right" });
+    guardEnum(widgets.WidgetAnchorAlignment, .{ "start", "end", "stretch", "center" });
     guardEnum(widgets.WidgetRole, .{ "none", "group", "text", "link", "image", "button", "textbox", "tooltip", "dialog", "menu", "menuitem", "list", "listitem", "row", "grid", "gridcell", "tab", "checkbox", "radio", "radiogroup", "switch_control", "slider", "progressbar", "chart", "tree", "treeitem", "separator" });
     const action_actual = @typeInfo(widgets.WidgetActions).@"struct".fields;
     if (action_actual.len != action_fields.len) @compileError("update construction action wire");

@@ -88,11 +88,11 @@ fn applyRenderState(planner: anytype, list: canvas.DisplayList, request: []const
     const clip_written = word(result, 16);
     const opacity_written = word(result, 20);
     if (count > @min(list.commands.len, planner.commands.len) or failed > 4 or clip_written > 32 or opacity_written > 32 or clip_len > clip_written or opacity_len > opacity_written or result.len != 864 + @as(usize, count) * 68) @panic("invalid compiled render state");
-    planner.state = .{ .opacity = float(result, 24), .clip = optionalRect(result, 28), .transform = affine(result, 48) };
+    planner.state = .{ .opacity = float(result, 24), .clip = optionalRenderClip(result, 28), .transform = affine(result, 48) };
     planner.bounds_value = optionalRect(result, 72);
     planner.clip_stack_len = clip_len;
     planner.opacity_stack_len = opacity_len;
-    for (0..clip_written) |i| planner.clip_stack[i] = optionalRect(result, 92 + i * 20);
+    for (0..clip_written) |i| planner.clip_stack[i] = optionalRenderClip(result, 92 + i * 20);
     for (0..opacity_written) |i| planner.opacity_stack[i] = float(result, 732 + i * 4);
     var previous: ?usize = null;
     for (0..count) |i| {
@@ -185,6 +185,11 @@ fn rect(bytes: []const u8, at: usize) geometry.RectF {
 fn putOptional(bytes: []u8, at: usize, value: ?geometry.RectF) void {
     putWord(bytes, at, @intFromBool(value != null));
     putRect(bytes, at + 4, value orelse .{});
+}
+// The compiled wire carries rectangular clips; a rounded clip never crosses it.
+fn optionalRenderClip(bytes: []const u8, at: usize) ?canvas.RenderClip {
+    const clip_rect = optionalRect(bytes, at) orelse return null;
+    return .{ .rect = clip_rect };
 }
 fn optionalRect(bytes: []const u8, at: usize) ?geometry.RectF {
     const present = word(bytes, at);
