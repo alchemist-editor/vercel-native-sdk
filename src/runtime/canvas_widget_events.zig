@@ -1394,6 +1394,12 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
                 (@as(u8, @intFromBool(view.canvas_tooltip_transit_deadline_ns != 0)) << 1);
             if (canvasTooltipReconcileNeeded(view, .frame, frame_facts, view.canvasTooltipIntentArmed())) {
                 self.invalidateFor(.state, view.frame);
+                // Retained GPU surfaces can be completely idle here.
+                // Invalidation records dirty state but does not wake the
+                // platform display link, so explicitly request the first
+                // frame; the per-frame pump takes over from there until the
+                // deadline resolves.
+                try canvas_frame_helpers.RuntimeCanvasFrames(Runtime).requestCanvasFrameForView(self, view_index);
             }
         }
 

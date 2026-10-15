@@ -1117,9 +1117,66 @@ fn widgetSubtreeHasTextSpans(widget: Widget, depth: usize, tokens: DesignTokens)
 /// paragraphs need; it recurses through the container kinds markdown
 /// content composes from and falls back to the classic intrinsic extent
 /// everywhere else.
+/// Per-pass measurement memo. Within one layout pass the widget tree is
+/// immutable, so a widget's intrinsic size, and its wrapped height at a
+/// given width, are fixed; yet every ancestor re-measures its subtree
+/// while distributing space, which made layout O(nodes x depth). A pass
+/// (`beginLayoutMemoPass`/`endLayoutMemoPass`) stamps entries with its
+/// generation; outside a pass nothing is consulted or stored. Keys hash
+/// the widget id with the fields callers vary on measurement copies
+/// (frame, children, text, spans, padding, gap, size bounds), so a
+/// modified copy of a widget never answers for the original.
+const layout_memo_slots = 4096;
+const IntrinsicMemoEntry = struct { key: u64 = 0, generation: u32 = 0, size: geometry.SizeF = .{} };
+const WrappedMemoEntry = struct { key: u64 = 0, generation: u32 = 0, extent: f32 = 0 };
+threadlocal var layout_memo_depth: u32 = 0;
+threadlocal var layout_memo_generation: u32 = 0;
+threadlocal var intrinsic_memo: [layout_memo_slots]IntrinsicMemoEntry = @splat(.{});
+threadlocal var wrapped_memo: [layout_memo_slots]WrappedMemoEntry = @splat(.{});
+
+pub fn beginLayoutMemoPass() void {
+    if (layout_memo_depth == 0) layout_memo_generation +%= 1;
+    if (layout_memo_generation == 0) layout_memo_generation = 1;
+    layout_memo_depth += 1;
+}
+
+pub fn endLayoutMemoPass() void {
+    layout_memo_depth -|= 1;
+}
+
+fn layoutMemoKey(widget: Widget, extra: u32) ?u64 {
+    if (layout_memo_depth == 0 or widget.id == 0) return null;
+    var hasher = std.hash.Wyhash.init(widget.id);
+    const fields = [_]u64{
+        @intFromPtr(widget.children.ptr), widget.children.len,
+        @intFromPtr(widget.text.ptr),     widget.text.len,
+        @intFromPtr(widget.spans.ptr),    widget.spans.len,
+        @intFromEnum(widget.kind),        extra,
+    };
+    hasher.update(std.mem.asBytes(&fields));
+    const floats = [_]f32{
+        widget.frame.x,                widget.frame.y,               widget.frame.width,            widget.frame.height,
+        widget.layout.padding.top,     widget.layout.padding.right,  widget.layout.padding.bottom,  widget.layout.padding.left,
+        widget.layout.gap,             widget.layout.min_size.width, widget.layout.min_size.height, widget.layout.max_size.width,
+        widget.layout.max_size.height,
+    };
+    hasher.update(std.mem.asBytes(&floats));
+    const key = hasher.final();
+    return if (key == 0) 1 else key;
+}
+
 fn wrappedVerticalExtentForWidth(widget: Widget, width: f32, tokens: DesignTokens, depth: usize) f32 {
     if (tokens.measurement_coordination_policy != null) return compiledWrappedExtent(widget, width, tokens, depth, false, false);
     if (tokens.intrinsic_layout_policy != null) return compiledWrappedExtentReference(widget, width, tokens, depth, false, false);
+    const key = layoutMemoKey(widget, @bitCast(width)) orelse return wrappedVerticalExtentForWidthUncached(widget, width, tokens, depth);
+    const slot = &wrapped_memo[key % layout_memo_slots];
+    if (slot.key == key and slot.generation == layout_memo_generation) return slot.extent;
+    const extent = wrappedVerticalExtentForWidthUncached(widget, width, tokens, depth);
+    slot.* = .{ .key = key, .generation = layout_memo_generation, .extent = extent };
+    return extent;
+}
+
+fn wrappedVerticalExtentForWidthUncached(widget: Widget, width: f32, tokens: DesignTokens, depth: usize) f32 {
     if (depth >= max_widget_depth) return preferredMainExtent(widget, .vertical, tokens);
     if (widget.frame.height > 0) return clampMainExtent(widget, .vertical, widget.frame.height);
     const padding = widgetLayoutPadding(widget, tokens);
@@ -2520,6 +2577,15 @@ fn intrinsicWidgetSizeDepth(widget: Widget, tokens: DesignTokens, depth: usize) 
     if (tokens.control_geometry_policy != null) {
         if (@import("widget_metric_policy.zig").intrinsic(widget, tokens)) |size| return size;
     }
+    const key = layoutMemoKey(widget, 0) orelse return intrinsicWidgetSizeDepthUncached(widget, tokens, depth);
+    const slot = &intrinsic_memo[key % layout_memo_slots];
+    if (slot.key == key and slot.generation == layout_memo_generation) return slot.size;
+    const size = intrinsicWidgetSizeDepthUncached(widget, tokens, depth);
+    slot.* = .{ .key = key, .generation = layout_memo_generation, .size = size };
+    return size;
+}
+
+fn intrinsicWidgetSizeDepthUncached(widget: Widget, tokens: DesignTokens, depth: usize) geometry.SizeF {
     // The composed-media contract (`WidgetLayoutStyle.zero_intrinsic`):
     // the container measures like the media-surface leaf regardless of
     // what chrome it composes. Declared width/height still apply — they
