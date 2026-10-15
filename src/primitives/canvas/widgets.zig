@@ -397,6 +397,8 @@ pub const WidgetCrossAlignment = enum {
 pub const WidgetAnchorPlacement = enum {
     below,
     above,
+    left,
+    right,
 };
 
 /// Horizontal alignment of an anchored floating widget against its
@@ -405,9 +407,14 @@ pub const WidgetAnchorPlacement = enum {
 /// The x position always clamps into the window.
 pub const WidgetAnchorAlignment = enum {
     start,
+    center,
     end,
     stretch,
 };
+
+/// Optional edge for a root-relative modal. `.automatic` keeps the
+/// dialog/drawer/sheet placement selected by its widget kind.
+pub const WidgetModalEdge = enum { automatic, top, right, bottom, left };
 
 /// Anchored floating placement (`WidgetLayoutStyle.anchor`): a widget
 /// carrying this is a FLOATING surface — the layout pass positions it
@@ -495,6 +502,17 @@ pub const WidgetLayoutStyle = struct {
     /// Anchored floating placement: non-null makes this widget a floating
     /// surface positioned against its parent (see `WidgetAnchor`).
     anchor: ?WidgetAnchor = null,
+    modal_edge: WidgetModalEdge = .automatic,
+    /// A centered modal (`dialog`) pinned to a FIXED distance down the
+    /// root instead of vertically centered, as a fraction of the root
+    /// height. The Spotlight shape: the surface keeps its top edge while
+    /// its content grows and shrinks below, so a palette that filters
+    /// down to two results does not crawl up the window. 0 keeps the
+    /// centered placement. Ignored by edge-pinned drawers and sheets.
+    modal_top_fraction: f32 = 0,
+    /// Fraction of the root height for top/bottom panel variants. Zero
+    /// preserves the content/explicit-height sizing contract.
+    modal_height_fraction: f32 = 0,
     min_size: geometry.SizeF = .{},
     /// Per-axis upper bound; 0 leaves the axis unbounded. An explicit
     /// author size is definite: the ui builder writes `width`/`height`
@@ -843,6 +861,7 @@ pub const WidgetSemantics = struct {
 /// table, keyed by widget id + item index).
 pub const WidgetContextMenuItem = struct {
     label: []const u8 = "",
+    checked: bool = false,
     enabled: bool = true,
     separator: bool = false,
 };
@@ -1807,7 +1826,8 @@ test "Widget keeps the reviewed retained footprint with portable component and a
     // (`text_line_height`) add an f32 each, and the optional painter and its
     // eight-float payload add 40 bytes, the optional slider source range
     // (`slider_range`) adds 32 bytes, and the flush group axis stamp
-    // (`group_vertical`) fits in padding.
+    // (`group_vertical`) fits in padding, and the dialog placement fraction
+    // (`modal_top_fraction`) adds an f32.
     if (@sizeOf(usize) == 8) {
         try std.testing.expectEqual(@as(usize, 0), @sizeOf(Widget)); // FOOTPRINT: measure after replay
     }

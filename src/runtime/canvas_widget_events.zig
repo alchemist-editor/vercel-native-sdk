@@ -836,7 +836,17 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
                 };
                 applyCanvasPointerContainment(&self.views[index], intent[3], pointer_event.pointer.pointer_id, pointer_event.pointer.point, hover_raw_hit);
             } else switch (pointer_event.pointer.phase) {
-                .hover, .move => {
+                // A pointer crossing the gap between a menu row and the
+                // menu it opened travels DIAGONALLY over the rows below
+                // it. While it stays inside the safe triangle the
+                // standing hover holds — those rows never claim it and
+                // the submenu it is heading for stays open (see the
+                // safe-triangle note in `widget_tree.zig`). Only the
+                // recorded position advances, so the next move is
+                // tested against the same apex.
+                .hover, .move => if (self.views[index].canvasWidgetMenuSafeAreaHolds(pointer_event.pointer.point)) {
+                    self.views[index].canvas_widget_hover_pointer_position = pointer_event.pointer.point;
+                } else {
                     next_hovered_id = hit_target_id;
                     next_cursor = hit_cursor;
                     // A hover-phase move earns the proof UNLESS the host
@@ -850,9 +860,11 @@ pub fn RuntimeCanvasWidgetEvents(comptime Runtime: type) type {
                         self.views[index].canvas_widget_hover_pointer_id = pointer_event.pointer.pointer_id;
                         self.views[index].canvas_widget_hover_pointer_position = pointer_event.pointer.point;
                         self.views[index].setCanvasWidgetHoverMsgChainForHit(hover_raw_hit);
+                        self.views[index].armCanvasWidgetMenuSafeArea(hover_raw_hit, pointer_event.pointer.point);
                     } else if (hover_pointer_proven) {
                         self.views[index].canvas_widget_hover_pointer_position = pointer_event.pointer.point;
                         self.views[index].setCanvasWidgetHoverMsgChainForHit(hover_raw_hit);
+                        self.views[index].armCanvasWidgetMenuSafeArea(hover_raw_hit, pointer_event.pointer.point);
                     }
                 },
                 .down => {

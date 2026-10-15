@@ -18,10 +18,10 @@ pub fn referenceRoute(widget: widgets.Widget) Route {
         .split => .split,
         .accordion => .accordion,
         .alert => .alert,
-        .stack, .bubble, .card, .resizable, .panel, .popover, .dialog, .drawer, .sheet => .stack,
+        .stack, .bubble, .card, .resizable, .panel, .popover, .tooltip, .dialog, .drawer, .sheet => .stack,
         .text => .spans,
         .data_cell => if (widget.spans.len > 0) .spans else .horizontal,
-        .icon, .image, .avatar, .badge, .button, .toggle_button, .icon_button, .select, .input, .text_field, .search_field, .combobox, .textarea, .tooltip, .menu_item, .status_bar, .segmented_control, .checkbox, .radio, .switch_control, .toggle, .slider, .progress, .separator, .skeleton, .spinner, .chart, .split_divider, .media_surface, .terminal => .leaf,
+        .icon, .image, .avatar, .badge, .button, .toggle_button, .icon_button, .select, .input, .text_field, .search_field, .combobox, .textarea, .menu_item, .status_bar, .segmented_control, .checkbox, .radio, .switch_control, .toggle, .slider, .progress, .separator, .skeleton, .spinner, .chart, .split_divider, .media_surface, .terminal => .leaf,
     };
 }
 fn word(bytes: []u8, at: usize, value: u32) void {
