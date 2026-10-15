@@ -904,7 +904,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
             });
         }
 
-        fn handleAsyncBridgeMessage(self: *Runtime, dispatcher: bridge.Dispatcher, message: platform.BridgeMessage) anyerror!bool {
+        noinline fn handleAsyncBridgeMessage(self: *Runtime, dispatcher: bridge.Dispatcher, message: platform.BridgeMessage) anyerror!bool {
             const request = bridge.parseRequest(message.bytes) catch return false;
             const handler = dispatcher.async_registry.find(request.command) orelse return false;
             if (!authorization.bridgeAllows(self.authorization_policy, dispatcher.policy, request.command, message.origin)) {
@@ -1225,7 +1225,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
             return true;
         }
 
-        fn handleBuiltinBridgeMessage(self: *Runtime, app: App, message: platform.BridgeMessage) anyerror!bool {
+        noinline fn handleBuiltinBridgeMessage(self: *Runtime, app: App, message: platform.BridgeMessage) anyerror!bool {
             if (self.builtin_coordination_policy != null) return handleCompiledBuiltinBridgeMessage(self, app, message);
             const request = bridge.parseRequest(message.bytes) catch return false;
             const is_command = std.mem.startsWith(u8, request.command, "native-sdk.command.");

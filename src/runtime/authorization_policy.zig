@@ -140,6 +140,12 @@ pub fn validateExternalUrl(policy: ?Policy, value: security.ExternalLinkPolicy, 
 /// Parsing, handler lookup/execution and response buffers remain native capabilities.
 pub fn dispatch(policy: ?Policy, value: bridge.Dispatcher, raw: []const u8, source: bridge.Source, output: []u8) []const u8 {
     const compiled = policy orelse return value.dispatch(raw, source, output);
+    return dispatchCompiled(compiled, value, raw, source, output);
+}
+
+// Out of line so the native path never reserves this result buffer: a bridge
+// message already holds megabyte buffers further up the main thread's stack.
+noinline fn dispatchCompiled(compiled: Policy, value: bridge.Dispatcher, raw: []const u8, source: bridge.Source, output: []u8) []const u8 {
     if (raw.len > bridge.max_message_bytes) return bridge.writeErrorResponse(output, "", .payload_too_large, "Bridge request is too large");
     const request = bridge.parseRequest(raw) catch return bridge.writeErrorResponse(output, "", .invalid_request, "Bridge request is malformed");
     if (!bridgeAllows(compiled, value.policy, request.command, source.origin)) return bridge.writeErrorResponse(output, request.id, .permission_denied, "Bridge command is not permitted");
