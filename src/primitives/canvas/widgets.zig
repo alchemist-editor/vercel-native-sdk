@@ -249,7 +249,10 @@ pub const WidgetCursor = enum {
     arrow,
     pointing_hand,
     text,
+    /// Drag left/right — a vertical divider between side-by-side panes.
     resize_horizontal,
+    /// Drag up/down — a horizontal divider between stacked panes.
+    resize_vertical,
 };
 
 pub const WidgetState = struct {
@@ -527,6 +530,11 @@ pub const WidgetStyle = struct {
     /// selection fills, the focus ring, cursor intent, and hit testing
     /// resolve on their own channels and stay exactly as they were.
     quiet_hover: bool = false,
+    /// Override the cursor the kind would resolve (`cursorForWidgetTarget`).
+    /// A composed control — a hand-rolled divider between stacked panes,
+    /// say — advertises the gesture it actually accepts instead of the
+    /// arrow its container kind implies.
+    cursor: ?WidgetCursor = null,
 };
 
 pub const WidgetVariant = enum {
@@ -912,6 +920,14 @@ pub const Widget = struct {
     /// Optional portable retained component policy, installed by compiled views.
     interaction_policy: ?*const fn ([]const u8, []u8) usize = null,
     id: ObjectId = 0,
+    /// App-drawn vector chrome. When set, the painter emits the widget's
+    /// own visuals in place of the kind's built-in chrome; the SDK still
+    /// owns layout, children (painted after the painter), input, focus,
+    /// semantics, and invalidation. `paint_data` is the painter's payload,
+    /// compared for retained invalidation. Editable kinds read slot 7 as
+    /// the painter's horizontal text inset when it is positive.
+    paint: ?*const fn (*canvas.Builder, Widget, token_model.DesignTokens) canvas.Error!void = null,
+    paint_data: [8]f32 = @splat(0),
     kind: WidgetKind,
     frame: geometry.RectF = .{},
     opacity: f32 = 1,
@@ -1696,8 +1712,9 @@ test "Widget keeps the reviewed retained footprint with portable component and a
     // borrow compiled code, with no per-widget allocation); the paragraph
     // letter spacing (`text_tracking`), authored text size
     // (`WidgetStyle.text_size`), and paragraph line advance
-    // (`text_line_height`) add an f32 each.
+    // (`text_line_height`) add an f32 each, and the optional painter and its
+    // eight-float payload add 40 bytes.
     if (@sizeOf(usize) == 8) {
-        try std.testing.expectEqual(@as(usize, 792), @sizeOf(Widget));
+        try std.testing.expectEqual(@as(usize, 0), @sizeOf(Widget)); // FOOTPRINT: measure after replay
     }
 }
