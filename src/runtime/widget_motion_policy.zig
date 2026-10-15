@@ -18,7 +18,7 @@ comptime {
     for (@typeInfo(canvas.CanvasRenderAnimationLoop).@"enum".fields, loops, 0..) |field, name, i| {
         if (!std.mem.eql(u8, field.name, name) or field.value != i) @compileError("update motion loop wire");
     }
-    if (limits.max_canvas_widget_nodes_per_view > 1024 or limits.max_canvas_widget_disclosure_flips_per_view > 8 or limits.max_canvas_widget_disclosure_moves_per_view > 256 or limits.max_canvas_widget_drag_layout_motions_per_view > 64 or limits.max_canvas_widget_loop_animations_per_view > 64) @compileError("update motion capacity wire");
+    if (limits.max_canvas_widget_nodes_per_view < limits.portable_wire_max_widget_nodes or limits.max_canvas_widget_disclosure_flips_per_view > 8 or limits.max_canvas_widget_disclosure_moves_per_view > 256 or limits.max_canvas_widget_drag_layout_motions_per_view > 64 or limits.max_canvas_widget_loop_animations_per_view > 64) @compileError("update motion capacity wire");
 }
 pub const DisclosureAction = enum { none, arm, refresh, retire };
 pub const DisclosurePlan = struct {

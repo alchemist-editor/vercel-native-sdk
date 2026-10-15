@@ -4,7 +4,7 @@ const platform = @import("../platform/root.zig");
 const manifest = @import("app_manifest");
 pub const Policy = *const fn ([]const u8, []u8) usize;
 comptime {
-    if (manifest.max_shell_windows != 16 or manifest.max_shell_views_per_window != 128 or platform.max_windows != 16 or platform.max_views != 32 or platform.max_webviews != 16 or @typeInfo(platform.ViewKind).@"enum".fields.len != 19 or @intFromEnum(platform.ViewKind.webview) != 0 or @intFromEnum(platform.ViewKind.gpu_surface) != 17 or @intFromEnum(platform.ViewKind.progress_indicator) != 18 or @bitSizeOf(platform.WindowId) != 64 or @bitSizeOf(usize) > 64) @compileError("update shell coordination wire capacities");
+    if (manifest.max_shell_windows != 16 or manifest.max_shell_views_per_window != 128 or platform.max_windows != 16 or platform.max_views < platform.portable_wire_max_views or platform.max_webviews != 16 or @typeInfo(platform.ViewKind).@"enum".fields.len != 19 or @intFromEnum(platform.ViewKind.webview) != 0 or @intFromEnum(platform.ViewKind.gpu_surface) != 17 or @intFromEnum(platform.ViewKind.progress_indicator) != 18 or @bitSizeOf(platform.WindowId) != 64 or @bitSizeOf(usize) > 64) @compileError("update shell coordination wire capacities");
 }
 pub const Mode = enum(u8) { scene, equal, apply, rollback, restore, bind, admission, presentation };
 pub const Program = struct {

@@ -193,6 +193,11 @@ pub const max_registered_canvas_font_bytes: usize = 24 * 1024 * 1024;
 // Native desktop targets double both for dense professional views: a
 // mixer's nine channel strips alone outgrow 1024 nodes. Wasm and test
 // builds keep 1024, as the command budget above keeps its smaller split.
+/// Widget-node capacity the portable (compiled-TypeScript) motion packets are
+/// framed for. Like `platform.portable_wire_max_views` it is a floor: the
+/// native reference paths size their tables from the per-view budget below,
+/// and the portable decoders count the nodes a packet actually carries.
+pub const portable_wire_max_widget_nodes: usize = 1024;
 pub const max_canvas_widget_nodes_per_view: usize = if (@import("builtin").target.cpu.arch.isWasm() or @import("builtin").is_test) 1024 else 2048;
 pub const max_canvas_widget_semantics_per_view: usize = max_canvas_widget_nodes_per_view;
 // Raised from 2048 with the inline-span/markdown work, then from 64 KiB for

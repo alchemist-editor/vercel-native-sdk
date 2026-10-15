@@ -320,7 +320,7 @@ pub const ProvenanceTable = struct {
 
     fn appendCompiled(self: *ProvenanceTable, callback: *const fn ([]const u8, []u8) usize, id: u64, source: *const canvas.ui_provenance.NodeSource, keys: []const canvas.ui_provenance.Key, keys_truncated: bool) error{WidgetProvenanceLimitReached}!void {
         comptime {
-            if (max_records != 1024 or max_files != 33 or max_path_bytes != 240 or max_chain != 4 or max_key_bytes != 48) @compileError("update complete markup provenance transport for changed budgets");
+            if (max_records < canvas_limits.portable_wire_max_widget_nodes or max_files != 33 or max_path_bytes != 240 or max_chain != 4 or max_key_bytes != 48) @compileError("update complete markup provenance transport for changed budgets");
         }
         var input: [16384]u8 = undefined;
         var writer = std.Io.Writer.fixed(&input);

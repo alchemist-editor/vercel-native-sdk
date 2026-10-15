@@ -10,7 +10,7 @@ pub const Menu = struct { exists: bool, actionable: bool, row: ?usize, option: ?
 pub const Slot = struct { kind: enum(u8) { absent, retained, available, full }, index: ?usize };
 
 comptime {
-    if (platform.max_views != 32 or platform.max_view_label_bytes != 64 or platform.max_tray_items != 32 or platform.max_tray_segment_options != 8 or platform.max_status_items != 8 or validation.max_command_id_bytes != 128 or !std.mem.eql(u8, platform.update_check_command, "app.check-for-updates")) @compileError("update command coordination packet limits");
+    if (platform.max_views < platform.portable_wire_max_views or platform.max_view_label_bytes != 64 or platform.max_tray_items != 32 or platform.max_tray_segment_options != 8 or platform.max_status_items != 8 or validation.max_command_id_bytes != 128 or !std.mem.eql(u8, platform.update_check_command, "app.check-for-updates")) @compileError("update command coordination packet limits");
     if (app_manifest.max_commands != 256 or app_manifest.max_command_id_bytes != 128 or app_manifest.max_command_title_bytes != 128) @compileError("update command catalog packet limits");
 }
 

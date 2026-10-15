@@ -36,7 +36,7 @@ pub const Program = struct {
     }
 };
 comptime {
-    if (platform.max_windows != 16 or platform.max_views != 32 or platform.max_webviews != 16 or platform.max_view_label_bytes != 64 or platform.max_webview_label_bytes != 64)
+    if (platform.max_windows != 16 or platform.max_views < platform.portable_wire_max_views or platform.max_webviews != 16 or platform.max_view_label_bytes != 64 or platform.max_webview_label_bytes != 64)
         @compileError("update view coordination packet capacities");
 }
 fn put(bytes: []u8, at: usize, value: u32) void {

@@ -277,6 +277,13 @@ pub const max_drop_paths_bytes: usize = 8192;
 pub const max_drop_paths: usize = max_drop_paths_bytes / 2 + 1;
 pub const max_window_event_name_bytes: usize = 64;
 pub const max_window_event_detail_bytes: usize = 8192;
+/// View capacity the portable (compiled-TypeScript) coordination policies
+/// packets are framed for. It is a floor, not a pin: the native reference
+/// paths size their tables from `max_views`, and the portable policies count
+/// the views a packet actually carries. A raw App-tier host that never
+/// installs those policies may raise `max_views` past it; a compiled
+/// TypeScript core on such a build fails only if it opens more views.
+pub const portable_wire_max_views: usize = 32;
 pub const max_views: usize = 120;
 pub const max_view_label_bytes: usize = 64;
 pub const max_view_role_bytes: usize = 64;

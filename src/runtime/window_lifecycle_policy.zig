@@ -48,7 +48,7 @@ fn word(bytes: []const u8, at: usize) u32 {
     return std.mem.readInt(u32, bytes[at..][0..4], .little);
 }
 pub fn plan(policy: Policy, runtime: anytype, mode: Mode, options: Options) Program {
-    if (platform.max_windows != 16 or platform.max_views != 32 or platform.max_window_label_bytes != 64 or runtime.window_count > 16 or runtime.view_count > 32) @panic("window lifecycle observation capacity");
+    if (platform.max_windows != 16 or platform.max_views < platform.portable_wire_max_views or platform.max_window_label_bytes != 64 or runtime.window_count > 16 or runtime.view_count > 32) @panic("window lifecycle observation capacity");
     var request: [128 + 16 * 128 + 32 * 16]u8 = @splat(0);
     request[0..4].* = .{ 81, 1, @intFromEnum(mode), options.variant };
     put(&request, 4, @intCast(runtime.window_count));

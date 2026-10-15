@@ -54,6 +54,7 @@ pub const max_drop_paths_bytes = types.max_drop_paths_bytes;
 pub const max_drop_paths = types.max_drop_paths;
 pub const max_window_event_name_bytes = types.max_window_event_name_bytes;
 pub const max_window_event_detail_bytes = types.max_window_event_detail_bytes;
+pub const portable_wire_max_views = types.portable_wire_max_views;
 pub const max_views = types.max_views;
 pub const max_view_label_bytes = types.max_view_label_bytes;
 pub const max_view_role_bytes = types.max_view_role_bytes;

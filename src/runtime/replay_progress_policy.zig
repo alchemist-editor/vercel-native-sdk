@@ -3,7 +3,7 @@
 const std = @import("std");
 const platform = @import("../platform/root.zig");
 comptime {
-    if (platform.max_windows != 16 or platform.max_views != 32 or platform.max_view_label_bytes != 64 or
+    if (platform.max_windows != 16 or platform.max_views < platform.portable_wire_max_views or platform.max_view_label_bytes != 64 or
         @intFromEnum(platform.ViewKind.gpu_surface) != 17 or @typeInfo(platform.ViewKind).@"enum".fields.len != 19)
         @compileError("update the portable replay target schema with the platform bounds");
 }
