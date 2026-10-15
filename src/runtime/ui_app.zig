@@ -1988,11 +1988,13 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
                 .bind => self.bindEffectsChannel(runtime),
                 .sync => self.syncModel(runtime, self.canvas_window_id),
                 .capture_drain => {
+                    const effects_begin = runtime.frame_profile.begin();
                     var boundary = self.effects.drainBoundary();
                     while (self.effects.takeMsgWithin(&boundary)) |msg| {
                         self.applyMsg(msg);
                         dispatched = true;
                     }
+                    runtime.frame_profile.end(.effects, effects_begin);
                 },
                 .audio => self.publishAudioState(runtime),
                 else => @panic("unexpected effect drain action"),
