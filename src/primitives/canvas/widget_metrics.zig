@@ -20,7 +20,17 @@ const Widget = widget_model.Widget;
 /// deliberate — the measured compact label size, not a rounded
 /// approximation. Packs with a large-button type rung state a positive
 /// lg step.
+///
+/// An authored `style.text_size` wins over the rung, in layout and paint
+/// alike, so a button whose label is set smaller measures to that label.
 pub fn widgetButtonTextSize(widget: Widget, tokens: DesignTokens) f32 {
+    if (widget.style.text_size) |size| {
+        if (std.math.isFinite(size) and size > 0) return size;
+    }
+    return widgetButtonRungTextSize(widget, tokens);
+}
+
+fn widgetButtonRungTextSize(widget: Widget, tokens: DesignTokens) f32 {
     if (tokens.control_geometry_policy != null) return policy.scalar(.button, widget, tokens, 0);
     return switch (widget.size) {
         .sm => @max(8, tokens.typography.button_size - tokens.metrics.button_label_sm_step),
@@ -62,6 +72,9 @@ pub fn widgetBadgeTextSize(widget: Widget, tokens: DesignTokens) f32 {
 }
 
 pub fn widgetTypographySize(widget: Widget, base: f32) f32 {
+    if (widget.style.text_size) |size| {
+        if (std.math.isFinite(size) and size > 0) return size;
+    }
     return switch (widget.size) {
         .sm => @max(8, base - 1),
         // heading/display are text-leaf typography rungs (resolved in
@@ -112,6 +125,8 @@ pub fn widgetTextSpanLayoutOptions(widget: Widget, tokens: DesignTokens, max_wid
         .size = widgetBodyTextSize(widget, tokens),
         .max_width = max_width,
         .wrap = if (widget.text_no_wrap) .none else .word,
+        .tracking = widget.text_tracking,
+        .line_height = widget.text_line_height,
         .alignment = widget.text_alignment,
         .typography = tokens.typography,
         .measure = tokens.text_measure,
@@ -206,7 +221,9 @@ pub fn widgetControlHeight(widget: Widget, tokens: DesignTokens) f32 {
 /// pixels agree.
 pub fn widgetButtonIconExtent(widget: Widget, tokens: DesignTokens) f32 {
     if (tokens.control_geometry_policy != null) return policy.scalar(.button_icon, widget, tokens, 0);
-    return widgetButtonTextSize(widget, tokens) + tokens.metrics.icon_text_step;
+    // The rung's label size, not an authored one: the glyph keeps the
+    // control's size when only its label is set smaller.
+    return widgetButtonRungTextSize(widget, tokens) + tokens.metrics.icon_text_step;
 }
 
 /// Gap between a button's inline icon and its label: ONE register
