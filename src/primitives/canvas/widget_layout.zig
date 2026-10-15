@@ -93,7 +93,7 @@ pub fn layoutWidgetDepth(
     const content = windowControlsClearedContent(frame.inset(layout_padding), widget, tokens);
     switch (route) {
         .horizontal => try layoutAxisChildren(widget.children, content, .horizontal, index, depth, output, len, widget.layout, tokens),
-        .button_group => try layoutAxisChildren(widget.children, content, .horizontal, index, depth, output, len, buttonGroupLayoutStyle(widget, tokens), tokens),
+        .button_group => try layoutAxisChildren(widget.children, content, buttonGroupAxis(widget), index, depth, output, len, buttonGroupLayoutStyle(widget, tokens), tokens),
         .tabs => try layoutTabsChildren(widget, content, index, depth, output, len, tokens),
         .vertical => try layoutAxisChildren(widget.children, content, .vertical, index, depth, output, len, widget.layout, tokens),
         .grid => try layoutGridChildren(widget.children, content, index, depth, output, len, widget.layout.gap, widget.layout.columns, tokens),
@@ -576,6 +576,14 @@ pub fn buttonGroupGap(widget: Widget, tokens: DesignTokens) f32 {
     const gap = nonNegative(widget.layout.gap);
     if (gap > 0 or tokens.controls.button_group_style != .detached) return gap;
     return nonNegative(tokens.metrics.button_group_gap);
+}
+
+/// The axis a flush group stacks on. Horizontal is the house bar; the
+/// vertical register (`WidgetLayoutStyle.vertical`) is the stepper shape
+/// — a `+` over a `-` — where the same segment stamp caps top and bottom
+/// corners instead of leading and trailing ones.
+pub fn buttonGroupAxis(widget: Widget) LayoutAxis {
+    return if (widget.layout.vertical) .vertical else .horizontal;
 }
 
 /// The group's layout style with the register's effective gap applied —
@@ -1175,7 +1183,33 @@ fn wrappedVerticalExtentForWidth(widget: Widget, width: f32, tokens: DesignToken
             const gap = if (max_height > 0) nonNegative(widget.layout.gap) else 0;
             break :blk header_height + gap + max_height;
         },
-        .row, .data_row, .breadcrumb, .button_group, .pagination, .radio_group, .tabs, .toggle_group => blk: {
+        // A vertical flush group stacks its segments, so its wrapped
+        // height is their SUM plus gaps — the horizontal registers below
+        // take the tallest child instead.
+        .button_group => if (widget.layout.vertical) blk: {
+            var flow_count: usize = 0;
+            var sum_height: f32 = 0;
+            for (widget.children) |child| {
+                if (!widgetTakesFlowSlot(child)) continue;
+                flow_count += 1;
+                sum_height += wrappedVerticalExtentForWidth(child, inner_width, tokens, depth + 1);
+            }
+            if (flow_count == 0) break :blk 0;
+            break :blk sum_height + buttonGroupGap(widget, tokens) * @as(f32, @floatFromInt(flow_count - 1));
+        } else blk: {
+            var max_height: f32 = 0;
+            for (widget.children, 0..) |child, index| {
+                if (!widgetTakesFlowSlot(child)) continue;
+                max_height = @max(max_height, wrappedVerticalExtentForWidth(
+                    child,
+                    rowChildWidth(widget, inner_width, index, tokens),
+                    tokens,
+                    depth + 1,
+                ));
+            }
+            break :blk max_height;
+        },
+        .row, .data_row, .breadcrumb, .pagination, .radio_group, .tabs, .toggle_group => blk: {
             var max_height: f32 = 0;
             for (widget.children, 0..) |child, index| {
                 if (!widgetTakesFlowSlot(child)) continue;
@@ -2529,7 +2563,8 @@ fn intrinsicWidgetSizeDepth(widget: Widget, tokens: DesignTokens, depth: usize) 
         // given. A horizontal-only viewport still reports its child's
         // height, so an inline code scroller hugs its rows instead of
         // collapsing to a zero-height clip.
-        .row, .breadcrumb, .button_group, .pagination, .radio_group, .tabs, .toggle_group => intrinsicAxisChildrenSize(widget, tokens, .horizontal, depth),
+        .button_group => intrinsicAxisChildrenSize(widget, tokens, buttonGroupAxis(widget), depth),
+        .row, .breadcrumb, .pagination, .radio_group, .tabs, .toggle_group => intrinsicAxisChildrenSize(widget, tokens, .horizontal, depth),
         .column, .menu_surface, .dropdown_menu, .input_group => intrinsicAxisChildrenSize(widget, tokens, .vertical, depth),
         .list, .data_grid, .table => if (widget.layout.virtualized)
             geometry.SizeF.zero()

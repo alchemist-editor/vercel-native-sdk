@@ -92,6 +92,7 @@ const buttonBorderFill = widget_render_style.buttonBorderFill;
 const buttonControlVisualTokens = widget_render_style.buttonControlVisualTokens;
 const selectControlVisualTokens = widget_render_style.selectControlVisualTokensForWidget;
 const buttonStateBackground = widget_render_style.buttonStateBackgroundForWidget;
+const controlStateBackground = widget_render_style.controlStateBackground;
 const textInputControlVisualTokens = widget_render_style.textInputControlVisualTokens;
 const textInputFill = widget_render_style.textInputFill;
 const textInputBorderFill = widget_render_style.textInputBorderFill;
@@ -260,6 +261,12 @@ fn buttonGroupSegmentRadius(widget: Widget, visual: ControlVisualTokens, tokens:
     const radius = buttonControlRadius(widget, visual, tokens);
     if (tokens.control_geometry_policy != null) return control_geometry.segment(widget, tokens, radius, widget_render_style.buttonInDetachedGroup(widget, tokens));
     if (widget_render_style.buttonInDetachedGroup(widget, tokens)) return radius;
+    if (widget.group_vertical) return switch (widget.group_segment) {
+        .none => radius,
+        .first => .{ .top_left = radius.top_left, .top_right = radius.top_right },
+        .middle => .{},
+        .last => .{ .bottom_left = radius.bottom_left, .bottom_right = radius.bottom_right },
+    };
     return switch (widget.group_segment) {
         .none => radius,
         .first => .{ .top_left = radius.top_left, .bottom_left = radius.bottom_left },
@@ -291,26 +298,41 @@ fn emitButtonBorder(builder: *Builder, widget: Widget, tokens: DesignTokens, rad
         },
     });
     // Seams exist only in the segmented register — a detached chip has
-    // no shared boundary to collapse.
-    const drop_left_border = !widget_render_style.buttonInDetachedGroup(widget, tokens) and
+    // no shared boundary to collapse. A vertical group's shared boundary
+    // is the TOP edge (the upper neighbor's bottom band paints it), so
+    // the same rule drops a band on the other axis.
+    const drop_seam_border = !widget_render_style.buttonInDetachedGroup(widget, tokens) and
         (widget.group_segment == .middle or widget.group_segment == .last);
-    if (drop_left_border) {
-        // The clip's left edge sits on the border band's INNER edge —
+    if (drop_seam_border) {
+        // The clip's leading edge sits on the border band's INNER edge —
         // computed from the (possibly snapped) emitted stroke, so the
-        // whole left band drops whether or not snapping moved it.
-        const band_inner_x = border.rect.x + border.stroke.width * 0.5;
-        try builder.pushClip(.{
-            .id = widgetPartId(widget.id, 0),
-            .rect = geometry.RectF.init(
-                band_inner_x,
-                widget.frame.y - stroke_width,
-                @max(0, widget.frame.maxX() + stroke_width - band_inner_x),
-                widget.frame.height + stroke_width * 2,
-            ),
-        });
+        // whole band drops whether or not snapping moved it.
+        if (widget.group_vertical) {
+            const band_inner_y = border.rect.y + border.stroke.width * 0.5;
+            try builder.pushClip(.{
+                .id = widgetPartId(widget.id, 0),
+                .rect = geometry.RectF.init(
+                    widget.frame.x - stroke_width,
+                    band_inner_y,
+                    widget.frame.width + stroke_width * 2,
+                    @max(0, widget.frame.maxY() + stroke_width - band_inner_y),
+                ),
+            });
+        } else {
+            const band_inner_x = border.rect.x + border.stroke.width * 0.5;
+            try builder.pushClip(.{
+                .id = widgetPartId(widget.id, 0),
+                .rect = geometry.RectF.init(
+                    band_inner_x,
+                    widget.frame.y - stroke_width,
+                    @max(0, widget.frame.maxX() + stroke_width - band_inner_x),
+                    widget.frame.height + stroke_width * 2,
+                ),
+            });
+        }
     }
     try builder.strokeRect(border);
-    if (drop_left_border) try builder.popClip();
+    if (drop_seam_border) try builder.popClip();
 }
 
 /// Draw a parsed vector icon fitted (contain, centered) into `rect`: a
@@ -1314,7 +1336,10 @@ pub fn emitSliderWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
     const value = if (plan) |v| v.scalar else std.math.clamp(widget.value, 0, 1);
     const visual = selectionControlVisualTokens(widget, tokens);
     const track = if (plan) |v| v.rects[0] else sliderWidgetTrackRect(widget, tokens);
-    const active = if (plan) |v| v.rects[2] else pixelSnapGeometryRect(tokens, geometry.RectF.init(track.x, track.y, track.width * value, track.height));
+    const active = if (plan) |v| v.rects[2] else if (widget.sliderOrientation() == .vertical)
+        pixelSnapGeometryRect(tokens, geometry.RectF.init(track.x, track.y + track.height * (1 - value), track.width, track.height * value))
+    else
+        pixelSnapGeometryRect(tokens, geometry.RectF.init(track.x, track.y, track.width * value, track.height));
     const knob = if (plan) |v| v.rects[1] else sliderWidgetKnobRect(widget, tokens);
     // The rail is a pill in every register; the RADIUS channel (widget
     // style or the themed slider table) shapes only the thumb, because
@@ -1340,7 +1365,7 @@ pub fn emitSliderWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
         .id = widgetPartId(widget.id, 1),
         .rect = track,
         .radius = track_radius,
-        .fill = colorFill(disabledWash(widgetBackgroundColor(widget, visual.background orelse tokens.colors.surface_subtle), washed, tokens.states.disabled_alpha)),
+        .fill = colorFill(disabledWash(controlStateBackground(visual, widget.state.pressed, widget.state.selected, widget.state.hovered, visual.background orelse tokens.colors.surface_subtle), washed, tokens.states.disabled_alpha)),
     });
     const active_rest = widgetAccentColor(widget, visual.active_background orelse tokens.colors.accent);
     // Zero range paints NOTHING — same guard the progress bar wears. A
@@ -1355,7 +1380,7 @@ pub fn emitSliderWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
             .fill = colorFill(if (widget.state.disabled)
                 visual.disabled_background orelse disabledWash(active_rest, true, tokens.states.disabled_alpha)
             else
-                active_rest),
+                controlStateBackground(visual, widget.state.pressed, true, widget.state.hovered, active_rest)),
         });
     }
     // Paper-white in BOTH schemes: the thumb must read against the
@@ -1431,6 +1456,15 @@ fn sliderWidgetTrackRect(widget: Widget, tokens: DesignTokens) geometry.RectF {
     // The rail thickness comes off the metric ladder (house register:
     // a quiet 4px line — the thumb, not the rail, gives the control its
     // weight); packs with a heavier rail restate the token.
+    if (widget.sliderOrientation() == .vertical) {
+        const track_width: f32 = @min(widget.frame.width, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_track_height));
+        return pixelSnapGeometryRect(tokens, geometry.RectF.init(
+            widget.frame.x + (widget.frame.width - track_width) * 0.5,
+            widget.frame.y,
+            track_width,
+            widget.frame.height,
+        ));
+    }
     const track_height: f32 = @min(widget.frame.height, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_track_height));
     return pixelSnapGeometryRect(tokens, geometry.RectF.init(
         widget.frame.x,
@@ -1450,6 +1484,19 @@ pub fn sliderWidgetKnobRect(widget: Widget, tokens: DesignTokens) geometry.RectF
     // clamped only so a shallow row never overflows.
     const knob_width = @min(widget.frame.width, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_thumb_width));
     const knob_height = @min(widget.frame.height, widgetSizedDensityValue(widget, tokens, tokens.metrics.slider_thumb_height));
+    if (widget.sliderOrientation() == .vertical) {
+        const knob_y = std.math.clamp(
+            widget.frame.y + widget.frame.height * (1 - value) - knob_height * 0.5,
+            widget.frame.y,
+            widget.frame.y + @max(0, widget.frame.height - knob_height),
+        );
+        return pixelSnapGeometryRect(tokens, geometry.RectF.init(
+            widget.frame.x + (widget.frame.width - knob_width) * 0.5,
+            knob_y,
+            knob_width,
+            knob_height,
+        ));
+    }
     const knob_x = std.math.clamp(
         widget.frame.x + widget.frame.width * value - knob_width * 0.5,
         widget.frame.x,
