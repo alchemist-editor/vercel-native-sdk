@@ -78,6 +78,29 @@ pub const TextMeasureProvider = struct {
     }
 };
 
+/// The measure registered faces (ids at or above `min_registered_font_id`)
+/// fall back to when a draw carries none. Custom canvas drawing usually
+/// passes no provider, and the estimator only knows the built-in faces'
+/// advances, so without this a registered face is laid out with the sans
+/// estimate and inked with its own glyphs. Built-in ids never consult it.
+/// A host that registers faces sets it once, process-wide.
+var registered_face_measure: ?*const TextMeasureProvider = null;
+
+pub fn setRegisteredFaceMeasure(provider: ?*const TextMeasureProvider) void {
+    registered_face_measure = provider;
+}
+
+/// The measure a draw naming `font_id` should carry when it names none.
+pub fn registeredFaceMeasure(font_id: FontId) ?*const TextMeasureProvider {
+    return effectiveMeasure(null, font_id);
+}
+
+fn effectiveMeasure(provider: ?*const TextMeasureProvider, font_id: FontId) ?*const TextMeasureProvider {
+    if (provider != null) return provider;
+    if (font_id >= canvas.min_registered_font_id) return registered_face_measure;
+    return null;
+}
+
 /// Width of a text run: the provider when installed, the deterministic
 /// estimator otherwise. This is the single measurement seam every layout
 /// consumer (intrinsic widget sizing, line breaking, caret and selection
@@ -86,7 +109,7 @@ pub const TextMeasureProvider = struct {
 /// outlive layout state that carries it (runtimes own one for their whole
 /// lifetime).
 pub fn measureTextWidthForFont(provider: ?*const TextMeasureProvider, font_id: FontId, text: []const u8, size: f32) f32 {
-    if (provider) |value| return value.measureWidth(font_id, size, text);
+    if (effectiveMeasure(provider, font_id)) |value| return value.measureWidth(font_id, size, text);
     return estimateTextWidthForFont(font_id, text, size);
 }
 
@@ -104,7 +127,7 @@ pub fn measureTextAdvance(
     cluster_start: usize,
     cluster_end: usize,
 ) f32 {
-    if (provider) |value| {
+    if (effectiveMeasure(provider, font_id)) |value| {
         const with_cluster = value.measureWidth(font_id, size, text[line_start..cluster_end]);
         const without_cluster = value.measureWidth(font_id, size, text[line_start..cluster_start]);
         return @max(0, with_cluster - without_cluster);

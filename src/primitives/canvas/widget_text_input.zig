@@ -513,7 +513,7 @@ pub fn widgetTextInputInset(widget: Widget, tokens: DesignTokens) f32 {
 }
 
 fn widgetTextInputFontId(widget: Widget, tokens: DesignTokens) FontId {
-    return if (widget.runtime_flags.code_editor) tokens.typography.mono_font_id else tokens.typography.font_id;
+    return if (widget.runtime_flags.code_editor or widget.runtime_flags.monospace) tokens.typography.mono_font_id else tokens.typography.font_id;
 }
 
 fn codeContentWidthCacheCurrent(widget: Widget, font_id: FontId, text_size: f32, policy: ?document_policy.Policy) bool {

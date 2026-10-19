@@ -199,6 +199,7 @@ pub const textAdvanceHitCount = @import("text_measure_cache.zig").textAdvanceHit
 pub const textSpanWrapCacheHitCount = text_spans.textSpanWrapCacheHitCount;
 pub const textSpanWrapCacheMissCount = text_spans.textSpanWrapCacheMissCount;
 pub const measureTextWidthForFont = text_model.measureTextWidthForFont;
+pub const setRegisteredFaceMeasure = @import("text_metrics.zig").setRegisteredFaceMeasure;
 pub const estimateTextWidthForFont = text_model.estimateTextWidthForFont;
 pub const estimateTextWidthForFace = text_model.estimateTextWidthForFace;
 pub const estimateTextAdvanceForBytes = text_model.estimateTextAdvanceForBytes;

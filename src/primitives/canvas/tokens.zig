@@ -399,6 +399,12 @@ pub const TypographyTokens = struct {
     /// has no known medium companion to reach for); set this explicitly
     /// to pick a registered weight.
     button_font_id: ?FontId = null,
+    /// A registered theme face's weight companions, for styled
+    /// spans (`.medium` / `.bold`). Null keeps the regular face.
+    medium_font_id: ?FontId = null,
+    bold_font_id: ?FontId = null,
+    mono_medium_font_id: ?FontId = null,
+    mono_bold_font_id: ?FontId = null,
     /// Section-heading rung above `title_size`: 28 continues the house
     /// step ratio (body 14 → title 20 ≈ x1.4; title 20 → heading 28 =
     /// x1.4) and doubles `body_size`, so a heading's 1.25 line height

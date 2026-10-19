@@ -1142,6 +1142,30 @@ test "control sheen lights a button's plate and hairline and glows under it" {
     try std.testing.expect(disabled_builder.displayList().commands[0] != .shadow);
 }
 
+test "a monospace text field sets its value in the theme's mono face" {
+    const tokens = DesignTokens{};
+    var field = Widget{
+        .id = 73,
+        .kind = WidgetKind.text_field,
+        .frame = geometry.RectF.init(0, 0, 120, 28),
+        .text = "12.50",
+    };
+    for ([_]bool{ false, true }) |monospace| {
+        field.runtime_flags.monospace = monospace;
+        var commands: [16]CanvasCommand = undefined;
+        var builder = Builder.init(&commands);
+        try emitWidgetTree(&builder, field, tokens);
+        var value_font: ?FontId = null;
+        for (builder.displayList().commands) |command| switch (command) {
+            .draw_text => |text| if (std.mem.eql(u8, text.text, "12.50")) {
+                value_font = text.font_id;
+            },
+            else => {},
+        };
+        try std.testing.expectEqual(if (monospace) tokens.typography.mono_font_id else tokens.typography.font_id, value_font.?);
+    }
+}
+
 test "geist disabled buttons use the reference swap and tertiary registers" {
     const buttonFillColor = @import("widget_render_style.zig").buttonFillColor;
     const buttonTextColorForWidget = @import("widget_render_style.zig").buttonTextColorForWidget;

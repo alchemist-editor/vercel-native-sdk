@@ -137,6 +137,50 @@ test "layout measures per-run through an injected provider" {
     try testing.expectEqual(@as(usize, 1), result.runs[1].line_index);
 }
 
+test "a registered theme face resolves span weights through its companions" {
+    const sans: canvas.FontId = canvas.min_registered_font_id;
+    var typography = canvas.TypographyTokens{ .font_id = sans, .mono_font_id = sans + 3 };
+    // No companions: every weight degrades to the base face, as before.
+    try testing.expectEqual(sans, text_spans.textSpanFontId(.{ .text = "a", .weight = .bold }, typography));
+    try testing.expectEqual(sans + 3, text_spans.textSpanFontId(.{ .text = "a", .weight = .medium, .monospace = true }, typography));
+
+    typography.medium_font_id = sans + 1;
+    typography.bold_font_id = sans + 2;
+    typography.mono_medium_font_id = sans + 4;
+    typography.mono_bold_font_id = sans + 5;
+    try testing.expectEqual(sans, text_spans.textSpanFontId(.{ .text = "a" }, typography));
+    try testing.expectEqual(sans + 1, text_spans.textSpanFontId(.{ .text = "a", .weight = .medium }, typography));
+    try testing.expectEqual(sans + 2, text_spans.textSpanFontId(.{ .text = "a", .weight = .bold }, typography));
+    try testing.expectEqual(sans + 3, text_spans.textSpanFontId(.{ .text = "a", .monospace = true }, typography));
+    try testing.expectEqual(sans + 4, text_spans.textSpanFontId(.{ .text = "a", .weight = .medium, .monospace = true }, typography));
+    try testing.expectEqual(sans + 5, text_spans.textSpanFontId(.{ .text = "a", .weight = .bold, .monospace = true }, typography));
+}
+
+test "registered faces fall back to the registered-face measure; built-in faces never do" {
+    var fake = FakeMeasure{};
+    const provider = text_metrics.TextMeasureProvider{ .context = &fake, .measure_fn = FakeMeasure.measure };
+    text_metrics.setRegisteredFaceMeasure(&provider);
+    defer text_metrics.setRegisteredFaceMeasure(null);
+
+    const registered = canvas.min_registered_font_id;
+    try testing.expectEqual(@as(f32, 40), text_metrics.measureTextWidthForFont(null, registered, "0123", 12));
+    try testing.expectEqual(@as(usize, 1), fake.calls);
+    // Built-in ids keep the deterministic estimator: byte-identical layout.
+    const estimate = text_metrics.measureTextWidthForFont(null, canvas.default_mono_font_id, "0123", 12);
+    try testing.expectEqual(@as(usize, 1), fake.calls);
+    try testing.expectApproxEqAbs(@as(f32, 4 * 12 * 0.6), estimate, 0.01);
+
+    // A raw draw of a registered face carries the measure it inks with, so
+    // its bounds follow the face; a built-in face's draw stays measure-less.
+    var commands: [2]canvas.CanvasCommand = undefined;
+    var builder = canvas.Builder.init(&commands);
+    try builder.drawText(.{ .font_id = registered, .size = 12, .origin = geometry.PointF.init(0, 0), .color = canvas.Color.rgb8(255, 255, 255), .text = "0123" });
+    try builder.drawText(.{ .font_id = canvas.default_sans_font_id, .size = 12, .origin = geometry.PointF.init(0, 0), .color = canvas.Color.rgb8(255, 255, 255), .text = "0123" });
+    const list = builder.displayList().commands;
+    try testing.expect(list[0].draw_text.measure == &provider);
+    try testing.expect(list[1].draw_text.measure == null);
+}
+
 fn expectSameSpanLayout(a: text_spans.TextSpanLayout, b: text_spans.TextSpanLayout) !void {
     try testing.expectEqual(a.line_count, b.line_count);
     try testing.expectEqual(a.line_height, b.line_height);

@@ -4,6 +4,7 @@ const canvas = @import("root.zig");
 const chart_model = @import("chart.zig");
 const drawing_model = @import("drawing.zig");
 const text_model = @import("text.zig");
+const text_metrics = @import("text_metrics.zig");
 const render_model = @import("render.zig");
 const frame_model = @import("frame.zig");
 const equality_model = @import("equality.zig");
@@ -567,6 +568,9 @@ pub const Builder = struct {
     pub fn drawText(self: *Builder, value: DrawText) error{DisplayListFull}!void {
         var text = value;
         if (text.text_run_policy == null) text.text_run_policy = self.text_run_policy;
+        // A registered face's draw carries the measure it inks with, so its
+        // bounds (what the GPU path culls and clips to) match its glyphs.
+        if (text.measure == null) text.measure = text_metrics.registeredFaceMeasure(text.font_id);
         try self.append(.{ .draw_text = text });
     }
 

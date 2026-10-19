@@ -147,11 +147,22 @@ pub const TextSpanLayout = struct {
 
 /// Resolve the font id a span draws (and therefore measures) with. Weight
 /// and slant map onto the reserved sans variant ids only when the app uses
-/// the default sans font; custom fonts keep their id and degrade weight to
-/// the base face. Mono ignores weight/slant (a single mono face ships).
+/// the default sans font; a custom font resolves `.medium`/`.bold` through
+/// the theme's registered companions (`medium_font_id`, `bold_font_id`)
+/// and degrades to its base face without them. Mono does the same through
+/// `mono_medium_font_id`/`mono_bold_font_id`; slant applies to the default
+/// sans only.
 pub fn textSpanFontId(span: TextSpan, typography: token_model.TypographyTokens) FontId {
-    if (span.monospace) return typography.mono_font_id;
-    if (typography.font_id != canvas.default_sans_font_id) return typography.font_id;
+    if (span.monospace) return switch (span.weight) {
+        .regular => typography.mono_font_id,
+        .medium => typography.mono_medium_font_id orelse typography.mono_font_id,
+        .bold => typography.mono_bold_font_id orelse typography.mono_font_id,
+    };
+    if (typography.font_id != canvas.default_sans_font_id) return switch (span.weight) {
+        .regular => typography.font_id,
+        .medium => typography.medium_font_id orelse typography.font_id,
+        .bold => typography.bold_font_id orelse typography.font_id,
+    };
     return switch (span.weight) {
         .regular => if (span.italic) canvas.default_sans_italic_font_id else canvas.default_sans_font_id,
         .medium => if (span.italic) canvas.default_sans_bold_italic_font_id else canvas.default_sans_medium_font_id,
