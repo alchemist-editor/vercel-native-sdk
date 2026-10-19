@@ -1142,6 +1142,59 @@ test "control sheen lights a button's plate and hairline and glows under it" {
     try std.testing.expect(disabled_builder.displayList().commands[0] != .shadow);
 }
 
+test "a switch's unselected mark dims only the off thumb, and sheen sinks its track" {
+    const on_mark = Color.rgb8(0xff, 0xff, 0xff);
+    const off_mark = Color.rgb8(0x84, 0x88, 0x91);
+    var tokens = DesignTokens{};
+    tokens.controls.switch_control = .{ .foreground = on_mark, .unselected_mark = off_mark, .sheen = -0.03 };
+    var toggle = Widget{
+        .id = 74,
+        .kind = .switch_control,
+        .frame = geometry.RectF.init(0, 0, 36, 20),
+    };
+    for ([_]bool{ false, true }) |on| {
+        toggle.state.selected = on;
+        var commands: [8]CanvasCommand = undefined;
+        var builder = Builder.init(&commands);
+        try emitWidgetTree(&builder, toggle, tokens);
+        const list = builder.displayList();
+        try expectFillColor(if (on) on_mark else off_mark, list.findCommandById(widgetPartId(74, 3)).?.command.fill_rounded_rect.fill);
+        const track = list.findCommandById(widgetPartId(74, 1)).?.command.fill_rounded_rect.fill.linear_gradient;
+        try std.testing.expect(track.stops[0].color.r < track.stops[1].color.r);
+    }
+}
+
+test "a selected list item draws its selected rule on the leading edge, over a glow" {
+    const rule = Color.rgb8(0xa9, 0x9b, 0xff);
+    var tokens = DesignTokens{};
+    tokens.controls.list_item = .{ .selected_rule = rule };
+    var row = Widget{
+        .id = 75,
+        .kind = WidgetKind.list_item,
+        .frame = geometry.RectF.init(10, 20, 176, 32),
+        .text = "Playback",
+    };
+
+    var rest_commands: [8]CanvasCommand = undefined;
+    var rest_builder = Builder.init(&rest_commands);
+    try emitWidgetTree(&rest_builder, row, tokens);
+    try std.testing.expect(rest_builder.displayList().findCommandById(widgetPartId(75, 15)) == null);
+
+    row.state.selected = true;
+    var commands: [8]CanvasCommand = undefined;
+    var builder = Builder.init(&commands);
+    try emitWidgetTree(&builder, row, tokens);
+    const list = builder.displayList();
+    const bar = list.findCommandById(widgetPartId(75, 15)).?.command.fill_rounded_rect;
+    try expectFillColor(rule, bar.fill);
+    try std.testing.expectEqual(geometry.RectF.init(10, 29, 2, 14), bar.rect);
+    var glows: usize = 0;
+    for (list.commands) |command| if (command == .shadow) {
+        glows += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 1), glows);
+}
+
 test "a monospace text field sets its value in the theme's mono face" {
     const tokens = DesignTokens{};
     var field = Widget{

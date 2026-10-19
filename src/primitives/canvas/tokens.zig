@@ -1174,6 +1174,14 @@ pub const ControlVisualTokens = struct {
     glow: ?Color = null,
     glow_blur: f32 = 8,
     glow_offset: f32 = 2,
+    /// A selection control's mark while unselected (a switch's thumb at
+    /// rest), for themes whose off thumb recedes toward the track. Null
+    /// keeps one mark color in both states.
+    unselected_mark: ?Color = null,
+    /// A selected list item's leading rule (a sidebar's current section):
+    /// a short vertical bar on the row's leading edge that glows in its
+    /// own color. Null draws no rule.
+    selected_rule: ?Color = null,
 };
 
 pub const ControlTokens = struct {

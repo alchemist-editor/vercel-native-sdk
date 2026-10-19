@@ -551,6 +551,8 @@ pub fn controlVisualTokensWithFallback(primary: ControlVisualTokens, fallback: C
         .glow = primary.glow orelse fallback.glow,
         .glow_blur = if (primary.glow != null) primary.glow_blur else fallback.glow_blur,
         .glow_offset = if (primary.glow != null) primary.glow_offset else fallback.glow_offset,
+        .unselected_mark = primary.unselected_mark orelse fallback.unselected_mark,
+        .selected_rule = primary.selected_rule orelse fallback.selected_rule,
     };
 }
 

@@ -898,6 +898,29 @@ fn menuItemWashColor(widget: Widget, tokens: DesignTokens, visual: ControlVisual
     return widget_render_style.transparentColor();
 }
 
+/// `ControlVisualTokens.selected_rule`: a 2pt bar, at most 14pt tall and
+/// centered on the row's leading edge, over a soft glow of its own color.
+fn emitListItemSelectedRule(builder: *Builder, widget: Widget, visual: ControlVisualTokens) Error!void {
+    const color = visual.selected_rule orelse return;
+    if (color.a <= 0) return;
+    const frame = widget.frame.normalized();
+    const height = @min(14, frame.height * 0.5);
+    if (height <= 0) return;
+    const rule = geometry.RectF.init(frame.x, frame.y + (frame.height - height) * 0.5, 2, height);
+    try builder.shadow(.{
+        .rect = rule,
+        .radius = Radius.all(1),
+        .blur = 6,
+        .color = Color.rgba(color.r, color.g, color.b, color.a * 0.7),
+    });
+    try builder.fillRoundedRect(.{
+        .id = widgetPartId(widget.id, 15),
+        .rect = rule,
+        .radius = Radius.all(1),
+        .fill = colorFill(color),
+    });
+}
+
 pub fn emitListItemWidget(builder: *Builder, widget: Widget, tokens: DesignTokens) Error!void {
     if (tokens.control_command_policy != null) return emitCompiledListItem(builder, widget, tokens);
     const visual = listItemControlVisualTokens(widget, tokens);
@@ -908,9 +931,10 @@ pub fn emitListItemWidget(builder: *Builder, widget: Widget, tokens: DesignToken
             .id = widgetPartId(widget.id, 1),
             .rect = widget.frame,
             .radius = radius,
-            .fill = colorFill(fill),
+            .fill = controlSheenFill(builder, widget.frame, colorFill(fill), visual.sheen),
         });
     }
+    if (widget.state.selected) try emitListItemSelectedRule(builder, widget, visual);
     if (widget.state.focused) try emitWidgetFocusRing(builder, widget, tokens, 2);
     const text_size = widgetBodyTextSize(widget, tokens);
     const text_inset = widgetControlInset(widget, tokens, tokens.spacing.md);
@@ -1330,7 +1354,8 @@ pub fn emitToggleWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
         .id = widgetPartId(widget.id, 1),
         .rect = track,
         .radius = track_radius,
-        .fill = colorFill(selectionDisabledBackground(widget, visual, track_rest, tokens)),
+        // A negative `sheen` sinks the track into an inset well.
+        .fill = controlSheenFill(builder, track, colorFill(selectionDisabledBackground(widget, visual, track_rest, tokens)), visual.sheen),
     });
     // Borderless by default: the switch is a filled pill (primary when
     // on, the input wash when off) whose near-white thumb provides the
@@ -1356,12 +1381,16 @@ pub fn emitToggleWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
         .radius = selectionShapeRadius(widget, visual, knob.height * 0.5),
         // The thumb is near-white in both states and schemes (the
         // primary-foreground tint), so it stays legible on the primary
-        // track and on the dark input wash alike. Disabled washes it with
+        // track and on the dark input wash alike, unless the theme states
+        // an `unselected_mark` for the off thumb. Disabled washes it with
         // the track unless the theme supplies a foreground swap.
         .fill = colorFill(selectionDisabledForeground(
             widget,
             visual,
-            widget.style.accent_foreground orelse visual.foreground orelse tokens.colors.accent_text,
+            widget.style.accent_foreground orelse
+                (if (selected) null else visual.unselected_mark) orelse
+                visual.foreground orelse
+                tokens.colors.accent_text,
             tokens,
         )),
     });
