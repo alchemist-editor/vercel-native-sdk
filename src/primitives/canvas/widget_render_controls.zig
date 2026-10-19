@@ -544,7 +544,8 @@ pub fn emitTextFieldWidget(builder: *Builder, widget: Widget, tokens: DesignToke
     // emitted commands survive the rest of the walk AND any later emit
     // while this display list is held. No-op for the ordinary raw value.
     draw_text.text = widget_text_input.persistWidgetTextInputPresentedText(builder, widget.text, draw_text.text);
-    const selection_range = widgetTextSelectionRange(widget);
+    // An unfocused field paints no selection (its caret neither).
+    const selection_range = if (widget.state.focused) widgetTextSelectionRange(widget) else null;
     const composition_range = widgetTextCompositionRange(widget);
     const has_text_affordances = selection_range != null or composition_range != null;
     // Textareas always clip (their overflow scrolls vertically); a
@@ -647,7 +648,8 @@ pub fn emitSearchFieldWidget(builder: *Builder, widget: Widget, tokens: DesignTo
     const layout_options = widgetTextInputLayoutOptions(widget, tokens, text_size, text_inset);
     const clip_rect = widgetTextInputClipRect(widget, tokens, text_size, text_inset, layout_options);
     const origin = widgetTextInputOrigin(widget, tokens, text_size, text_inset, layout_options);
-    const selection_range = widgetTextSelectionRange(widget);
+    // An unfocused search field paints no selection.
+    const selection_range = if (widget.state.focused) widgetTextSelectionRange(widget) else null;
     const composition_range = widgetTextCompositionRange(widget);
     const text_color = widgetForegroundColor(widget, tokens, visual.foreground orelse tokens.colors.text);
     var draw_text = widgetTextInputDrawText(widget, tokens, text_size, origin, text_color, layout_options);

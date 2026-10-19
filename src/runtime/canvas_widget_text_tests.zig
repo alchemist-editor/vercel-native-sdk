@@ -2829,6 +2829,12 @@ test "runtime applies ime composition edits to canvas text fields" {
     var nodes: [2]canvas.WidgetLayoutNode = undefined;
     const layout = try canvas.layoutWidgetTree(.{ .kind = .stack, .children = &.{text_field} }, geometry.RectF.init(0, 0, 240, 120), &nodes);
     _ = try harness.runtime.setCanvasWidgetLayout(1, "canvas", layout);
+    // IME composes into the focused field, and a field paints its selection
+    // only under painted focus, exactly like its caret (an editable keeps
+    // its focus-visible state however it was focused).
+    harness.runtime.views[0].focused = true;
+    harness.runtime.views[0].canvas_widget_focused_id = 2;
+    harness.runtime.views[0].canvas_widget_focus_visible_id = 2;
     _ = try harness.runtime.emitCanvasWidgetDisplayList(1, "canvas", .{});
 
     _ = try harness.runtime.editCanvasWidgetText(1, "canvas", 2, .{ .set_selection = .{ .anchor = 3, .focus = 4 } });

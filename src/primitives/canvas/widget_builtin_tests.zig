@@ -5297,6 +5297,32 @@ test "the caret keep-visible offset scrolls to the caret and returns home" {
     try std.testing.expectEqual(@as(f32, 0), support.textInputCaretVisibleScrollOffsetForWidget(short, .{}, 25));
 }
 
+test "an unfocused text input keeps its selection but does not paint it" {
+    // A form that seeds every draft select-all must not rest with each value
+    // highlighted: like the caret, the selection paints only under focus.
+    for ([_]WidgetKind{ .text_field, .search_field }) |kind| {
+        var field = Widget{
+            .id = 8,
+            .kind = kind,
+            .frame = geometry.RectF.init(0, 0, 160, 28),
+            .text = "12.50",
+            .text_selection = .{ .anchor = 0, .focus = 5 },
+            .semantics = .{ .label = "Value" },
+        };
+        for ([_]bool{ false, true }) |focused| {
+            field.state.focused = focused;
+            var commands: [16]CanvasCommand = undefined;
+            var builder = Builder.init(&commands);
+            try emitWidgetTree(&builder, field, .{});
+            var selection_rects: usize = 0;
+            for (builder.displayList().commands) |command| {
+                if (command == .fill_rect) selection_rects += 1;
+            }
+            try std.testing.expectEqual(@as(usize, if (focused) 1 else 0), selection_rects);
+        }
+    }
+}
+
 test "scrolled single-line selection rects shift with the text origin" {
     const long_text = "a value far too long for a narrow single-line field to show at once";
     const scrolled = Widget{
