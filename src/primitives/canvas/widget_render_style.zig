@@ -546,6 +546,11 @@ pub fn controlVisualTokensWithFallback(primary: ControlVisualTokens, fallback: C
         .border = primary.border orelse fallback.border,
         .radius = primary.radius orelse fallback.radius,
         .stroke_width = primary.stroke_width orelse fallback.stroke_width,
+        .sheen = primary.sheen orelse fallback.sheen,
+        .border_sheen = primary.border_sheen orelse fallback.border_sheen,
+        .glow = primary.glow orelse fallback.glow,
+        .glow_blur = if (primary.glow != null) primary.glow_blur else fallback.glow_blur,
+        .glow_offset = if (primary.glow != null) primary.glow_offset else fallback.glow_offset,
     };
 }
 

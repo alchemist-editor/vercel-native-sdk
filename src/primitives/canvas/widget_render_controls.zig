@@ -154,11 +154,12 @@ pub fn emitButtonWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
     const radius = buttonGroupSegmentRadius(widget, visual, tokens);
     const text_size = widgetButtonTextSize(widget, tokens);
     const text_inset = widgetButtonInset(widget, tokens);
+    try emitControlGlow(builder, widget, visual, radius);
     try builder.fillRoundedRect(.{
         .id = widgetPartId(widget.id, 1),
         .rect = widget.frame,
         .radius = radius,
-        .fill = buttonFill(widget, tokens),
+        .fill = controlSheenFill(builder, widget.frame, buttonFill(widget, tokens), visual.sheen),
     });
     try emitButtonBorder(builder, widget, tokens, radius);
     if (widget.state.focused) try emitWidgetFocusRingForRect(builder, widget, tokens, 3, widget.frame, radius);
@@ -206,11 +207,12 @@ pub fn emitIconButtonWidget(builder: *Builder, widget: Widget, tokens: DesignTok
     if (tokens.control_command_policy != null) return emitCompiledIconButton(builder, widget, tokens);
     const visual = buttonControlVisualTokens(widget, tokens);
     const radius = buttonGroupSegmentRadius(widget, visual, tokens);
+    try emitControlGlow(builder, widget, visual, radius);
     try builder.fillRoundedRect(.{
         .id = widgetPartId(widget.id, 1),
         .rect = widget.frame,
         .radius = radius,
-        .fill = buttonFill(widget, tokens),
+        .fill = controlSheenFill(builder, widget.frame, buttonFill(widget, tokens), visual.sheen),
     });
     try emitButtonBorder(builder, widget, tokens, radius);
     if (widget.state.focused) try emitWidgetFocusRingForRect(builder, widget, tokens, 15, widget.frame, radius);
@@ -293,7 +295,7 @@ fn emitButtonBorder(builder: *Builder, widget: Widget, tokens: DesignTokens, rad
         .rect = widget.frame,
         .radius = radius,
         .stroke = .{
-            .fill = buttonBorderFill(widget, tokens),
+            .fill = controlBorderSheenFill(builder, widget.frame, buttonBorderFill(widget, tokens), buttonControlVisualTokens(widget, tokens).border_sheen),
             .width = stroke_width,
         },
     });
@@ -333,6 +335,71 @@ fn emitButtonBorder(builder: *Builder, widget: Widget, tokens: DesignTokens, rad
     }
     try builder.strokeRect(border);
     if (drop_seam_border) try builder.popClip();
+}
+
+// Lit control plates: `ControlVisualTokens.sheen`, `.border_sheen` and
+// `.glow`. Null (the default) leaves every emission exactly as it was.
+fn sheenShift(color: Color, amount: f32) Color {
+    return .{
+        .r = std.math.clamp(color.r + amount, 0, 1),
+        .g = std.math.clamp(color.g + amount, 0, 1),
+        .b = std.math.clamp(color.b + amount, 0, 1),
+        .a = color.a,
+    };
+}
+
+fn sheenAlpha(color: Color, factor: f32) Color {
+    return .{ .r = color.r, .g = color.g, .b = color.b, .a = std.math.clamp(color.a * factor, 0, 1) };
+}
+
+fn sheenGradient(builder: *Builder, rect: geometry.RectF, fill: drawing_model.Fill, top: Color, bottom: Color) drawing_model.Fill {
+    const frame = rect.normalized();
+    if (frame.isEmpty()) return fill;
+    const stops = builder.allocGradientStops(&.{
+        .{ .offset = 0, .color = top },
+        .{ .offset = 1, .color = bottom },
+    }) catch return fill;
+    return .{ .linear_gradient = .{
+        .start = geometry.PointF.init(frame.x, frame.y),
+        .end = geometry.PointF.init(frame.x, frame.maxY()),
+        .stops = stops,
+    } };
+}
+
+pub fn controlSheenFill(builder: *Builder, rect: geometry.RectF, fill: drawing_model.Fill, sheen: ?f32) drawing_model.Fill {
+    const amount = sheen orelse return fill;
+    if (amount == 0) return fill;
+    const color = switch (fill) {
+        .color => |value| value,
+        else => return fill,
+    };
+    if (color.a <= 0) return fill;
+    return sheenGradient(builder, rect, fill, sheenShift(color, amount), sheenShift(color, -amount));
+}
+
+pub fn controlBorderSheenFill(builder: *Builder, rect: geometry.RectF, fill: drawing_model.Fill, border_sheen: ?f32) drawing_model.Fill {
+    const factor = border_sheen orelse return fill;
+    if (factor == 0) return fill;
+    const color = switch (fill) {
+        .color => |value| value,
+        else => return fill,
+    };
+    if (color.a <= 0) return fill;
+    return sheenGradient(builder, rect, fill, sheenAlpha(color, 1 + factor), sheenAlpha(color, 1 - factor));
+}
+
+fn emitControlGlow(builder: *Builder, widget: Widget, visual: ControlVisualTokens, radius: Radius) Error!void {
+    const glow = visual.glow orelse return;
+    if (glow.a <= 0 or widget.state.disabled) return;
+    const frame = widget.frame.normalized();
+    if (frame.isEmpty()) return;
+    try builder.shadow(.{
+        .rect = frame,
+        .radius = radius,
+        .offset = .{ .dy = visual.glow_offset },
+        .blur = visual.glow_blur,
+        .color = glow,
+    });
 }
 
 /// Draw a parsed vector icon fitted (contain, centered) into `rect`: a
@@ -417,14 +484,14 @@ pub fn emitSelectWidget(builder: *Builder, widget: Widget, tokens: DesignTokens)
         .id = widgetPartId(widget.id, 1),
         .rect = widget.frame,
         .radius = radius,
-        .fill = colorFill(widgetBackgroundColor(widget, buttonStateBackground(widget, tokens, visual, widget.state.pressed, washHovered(widget), tokens.colors.surface))),
+        .fill = controlSheenFill(builder, widget.frame, colorFill(widgetBackgroundColor(widget, buttonStateBackground(widget, tokens, visual, widget.state.pressed, washHovered(widget), tokens.colors.surface))), visual.sheen),
     });
     try builder.strokeRect(snapHairlineStrokeRect(tokens, .{
         .id = widgetPartId(widget.id, 2),
         .rect = widget.frame,
         .radius = radius,
         .stroke = .{
-            .fill = widgetBorderFill(widget, visual.border orelse tokens.colors.border),
+            .fill = controlBorderSheenFill(builder, widget.frame, widgetBorderFill(widget, visual.border orelse tokens.colors.border), visual.border_sheen),
             .width = controlStrokeWidth(widget, visual, tokens.stroke.regular),
         },
     }));
@@ -491,14 +558,14 @@ pub fn emitTextFieldWidget(builder: *Builder, widget: Widget, tokens: DesignToke
         .id = widgetPartId(widget.id, 1),
         .rect = widget.frame,
         .radius = radius,
-        .fill = textInputFill(widget, tokens, visual),
+        .fill = controlSheenFill(builder, widget.frame, textInputFill(widget, tokens, visual), visual.sheen),
     });
     try builder.strokeRect(snapHairlineStrokeRect(tokens, .{
         .id = widgetPartId(widget.id, 2),
         .rect = widget.frame,
         .radius = radius,
         .stroke = .{
-            .fill = textInputBorderFill(widget, visual, tokens.colors.border),
+            .fill = controlBorderSheenFill(builder, widget.frame, textInputBorderFill(widget, visual, tokens.colors.border), visual.border_sheen),
             .width = controlStrokeWidth(widget, visual, tokens.stroke.regular),
         },
     }));
@@ -556,14 +623,14 @@ pub fn emitInputGroupWidget(builder: *Builder, widget: Widget, tokens: DesignTok
         .id = widgetPartId(widget.id, 1),
         .rect = widget.frame,
         .radius = radius,
-        .fill = textInputFill(widget, tokens, visual),
+        .fill = controlSheenFill(builder, widget.frame, textInputFill(widget, tokens, visual), visual.sheen),
     });
     try builder.strokeRect(snapHairlineStrokeRect(tokens, .{
         .id = widgetPartId(widget.id, 2),
         .rect = widget.frame,
         .radius = radius,
         .stroke = .{
-            .fill = textInputBorderFill(widget, visual, tokens.colors.border),
+            .fill = controlBorderSheenFill(builder, widget.frame, textInputBorderFill(widget, visual, tokens.colors.border), visual.border_sheen),
             .width = controlStrokeWidth(widget, visual, tokens.stroke.regular),
         },
     }));
@@ -601,14 +668,14 @@ pub fn emitSearchFieldWidget(builder: *Builder, widget: Widget, tokens: DesignTo
         .id = widgetPartId(widget.id, 1),
         .rect = widget.frame,
         .radius = radius,
-        .fill = textInputFill(widget, tokens, visual),
+        .fill = controlSheenFill(builder, widget.frame, textInputFill(widget, tokens, visual), visual.sheen),
     });
     try builder.strokeRect(snapHairlineStrokeRect(tokens, .{
         .id = widgetPartId(widget.id, 2),
         .rect = widget.frame,
         .radius = radius,
         .stroke = .{
-            .fill = textInputBorderFill(widget, visual, tokens.colors.border),
+            .fill = controlBorderSheenFill(builder, widget.frame, textInputBorderFill(widget, visual, tokens.colors.border), visual.border_sheen),
             .width = controlStrokeWidth(widget, visual, tokens.stroke.regular),
         },
     }));

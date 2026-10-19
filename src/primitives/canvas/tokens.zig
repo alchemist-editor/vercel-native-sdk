@@ -1158,6 +1158,16 @@ pub const ControlVisualTokens = struct {
     border: ?Color = null,
     radius: ?f32 = null,
     stroke_width: ?f32 = null,
+    /// The plate's vertical lighting, an additive per-channel
+    /// offset (top `+sheen`, bottom `-sheen`; negative = an inset well).
+    sheen: ?f32 = null,
+    /// The hairline's vertical lighting, a relative alpha factor
+    /// (top `alpha * (1 + border_sheen)`, bottom `alpha * (1 - border_sheen)`).
+    border_sheen: ?f32 = null,
+    /// An outer glow painted under the plate.
+    glow: ?Color = null,
+    glow_blur: f32 = 8,
+    glow_offset: f32 = 2,
 };
 
 pub const ControlTokens = struct {

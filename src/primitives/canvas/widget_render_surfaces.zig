@@ -153,18 +153,21 @@ pub fn emitCardWidgetChrome(builder: *Builder, widget: Widget, tokens: DesignTok
     if (tokens.control_geometry_policy != null) return recipe.emit(.card, builder, widget, tokens, surfaceControlVisualTokens(widget, tokens), tokens.radius.lg);
     const visual = surfaceControlVisualTokens(widget, tokens);
     const radius = controlRadius(widget, visual, tokens.radius.lg);
+    if (visual.glow) |glow| if (widget.state.selected and glow.a > 0 and !widget.frame.normalized().isEmpty()) {
+        try builder.shadow(.{ .rect = widget.frame.normalized(), .radius = radius, .offset = .{ .dy = visual.glow_offset }, .blur = visual.glow_blur, .color = glow });
+    };
     try builder.fillRoundedRect(.{
         .id = widgetPartId(widget.id, 1),
         .rect = widget.frame,
         .radius = radius,
-        .fill = colorFill(surfaceStateBackground(widget, visual, tokens)),
+        .fill = widget_render_controls.controlSheenFill(builder, widget.frame, colorFill(surfaceStateBackground(widget, visual, tokens)), visual.sheen),
     });
     try builder.strokeRect(snapHairlineStrokeRect(tokens, .{
         .id = widgetPartId(widget.id, 2),
         .rect = widget.frame,
         .radius = radius,
         .stroke = .{
-            .fill = widgetBorderFill(widget, visual.border orelse tokens.colors.border),
+            .fill = widget_render_controls.controlBorderSheenFill(builder, widget.frame, widgetBorderFill(widget, visual.border orelse tokens.colors.border), visual.border_sheen),
             .width = controlStrokeWidth(widget, visual, tokens.stroke.hairline),
         },
     }));

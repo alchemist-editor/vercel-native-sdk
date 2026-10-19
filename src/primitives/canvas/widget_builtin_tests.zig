@@ -1102,6 +1102,46 @@ test "disabled filled buttons match their reference edge treatment" {
     try std.testing.expect(chip_builder.displayList().findCommandById(widgetPartId(71, 2)) == null);
 }
 
+test "control sheen lights a button's plate and hairline and glows under it" {
+    const button = Widget{
+        .id = 72,
+        .kind = WidgetKind.button,
+        .frame = geometry.RectF.init(0, 0, 120, 34),
+        .text = "Render",
+        .variant = .primary,
+    };
+
+    // Null channels: the plate stays one flat color and nothing glows.
+    var flat_commands: [8]CanvasCommand = undefined;
+    var flat_builder = Builder.init(&flat_commands);
+    try emitWidgetTree(&flat_builder, button, DesignTokens{});
+    const flat = flat_builder.displayList();
+    try std.testing.expect(flat.commands[0] != .shadow);
+    try std.testing.expect(flat.findCommandById(widgetPartId(72, 1)).?.command.fill_rounded_rect.fill == .color);
+
+    var tokens = DesignTokens{};
+    tokens.controls.button_primary = .{ .sheen = 0.04, .border_sheen = 0.6, .glow = Color.rgba8(0x7c, 0x6b, 0xf5, 0x5c) };
+    var commands: [12]CanvasCommand = undefined;
+    var builder = Builder.init(&commands);
+    try emitWidgetTree(&builder, button, tokens);
+    const list = builder.displayList();
+    // The glow is an anonymous shadow ahead of the plate, clear of every part slot.
+    try std.testing.expect(list.commands[0] == .shadow);
+    try std.testing.expectEqual(@as(ObjectId, 0), list.commands[0].shadow.id);
+    const plate = list.findCommandById(widgetPartId(72, 1)).?.command.fill_rounded_rect.fill.linear_gradient;
+    try std.testing.expect(plate.stops[0].color.r > plate.stops[1].color.r);
+    const edge = list.findCommandById(widgetPartId(72, 2)).?.command.stroke_rect.stroke.fill.linear_gradient;
+    try std.testing.expect(edge.stops[0].color.a > edge.stops[1].color.a);
+
+    // A disabled control keeps its sheen but loses the glow.
+    var disabled = button;
+    disabled.state.disabled = true;
+    var disabled_commands: [12]CanvasCommand = undefined;
+    var disabled_builder = Builder.init(&disabled_commands);
+    try emitWidgetTree(&disabled_builder, disabled, tokens);
+    try std.testing.expect(disabled_builder.displayList().commands[0] != .shadow);
+}
+
 test "geist disabled buttons use the reference swap and tertiary registers" {
     const buttonFillColor = @import("widget_render_style.zig").buttonFillColor;
     const buttonTextColorForWidget = @import("widget_render_style.zig").buttonTextColorForWidget;
