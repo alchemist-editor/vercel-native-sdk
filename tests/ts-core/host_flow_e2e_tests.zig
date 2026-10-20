@@ -51,6 +51,18 @@ fn PumpProbe(comptime T: type) type {
                 4 => for (0..4096) |_| {
                     try self.pump.dispatch(self, receive, .wake);
                 },
+                // A system dialog's modal loop: two queues' worth of
+                // repeating sources coalesce to their newest entries.
+                5 => {
+                    self.pump.system_dialog = true;
+                    defer self.pump.system_dialog = false;
+                    for (0..2 * 4096) |index| {
+                        try self.pump.dispatch(self, receive, .{ .gpu_surface_frame = .{ .label = "timeline", .size = .init(1, 1), .frame_index = index } });
+                        try self.pump.dispatch(self, receive, .{ .timer = .{ .id = 7 } });
+                        try self.pump.dispatch(self, receive, .wake);
+                        try self.pump.dispatch(self, receive, .frame_requested);
+                    }
+                },
                 else => unreachable,
             } else switch (self.mode) {
                 0 => switch (event) {
@@ -67,7 +79,7 @@ fn PumpProbe(comptime T: type) type {
 test "compiled host flow preserves pump reentrancy all GPU telemetry borrowed ownership and failure recovery" {
     _ = core.initialModel();
     defer core.rt.frameReset();
-    for (0..5) |mode| {
+    for (0..6) |mode| {
         var left: PumpProbe(ReferencePump) = .{ .pump = .{ .allocator = std.testing.allocator }, .mode = @intCast(mode) };
         defer left.pump.deinit();
         var right: PumpProbe(Pump) = .{ .pump = .{ .allocator = std.testing.allocator, .policy = observed }, .mode = @intCast(mode) };

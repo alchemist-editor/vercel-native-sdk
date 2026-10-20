@@ -527,6 +527,13 @@ pub const NullPlatform = struct {
     save_dialog_count: usize = 0,
     message_dialog_count: usize = 0,
     message_dialog_result: MessageDialogResult = .primary,
+    /// Events each dialog's modal loop emits through the running loop's
+    /// handler before it returns, `dialog_event_rounds` times over: a real
+    /// panel's run loop keeps firing timers and display frames meanwhile.
+    dialog_events: []const Event = &.{},
+    dialog_event_rounds: usize = 0,
+    run_handler: ?EventHandler = null,
+    run_handler_context: ?*anyopaque = null,
     notification_title: [max_notification_title_bytes]u8 = undefined,
     notification_title_len: usize = 0,
     notification_subtitle: [max_notification_subtitle_bytes]u8 = undefined,
@@ -1057,6 +1064,12 @@ pub const NullPlatform = struct {
 
     fn run(context: *anyopaque, handler: EventHandler, handler_context: *anyopaque) anyerror!void {
         const self: *NullPlatform = @ptrCast(@alignCast(context));
+        self.run_handler = handler;
+        self.run_handler_context = handler_context;
+        defer {
+            self.run_handler = null;
+            self.run_handler_context = null;
+        }
         try handler(handler_context, .app_start);
         try handler(handler_context, .{ .appearance_changed = .{} });
         try handler(handler_context, .{ .surface_resized = self.surface_value });
@@ -1600,6 +1613,7 @@ pub const NullPlatform = struct {
         const path = "/tmp/native-sdk-open.txt";
         const copied = try copyInto(buffer, path);
         self.open_dialog_count += 1;
+        try self.runDialogLoop();
         return .{ .count = 1, .paths = copied };
     }
 
@@ -1608,13 +1622,22 @@ pub const NullPlatform = struct {
         const path = if (options.default_name.len > 0) options.default_name else "/tmp/native-sdk-save.txt";
         const copied = try copyInto(buffer, path);
         self.save_dialog_count += 1;
+        try self.runDialogLoop();
         return copied;
+    }
+
+    fn runDialogLoop(self: *NullPlatform) anyerror!void {
+        const handler = self.run_handler orelse return;
+        for (0..self.dialog_event_rounds) |_| {
+            for (self.dialog_events) |event| try handler(self.run_handler_context.?, event);
+        }
     }
 
     fn showMessageDialog(context: ?*anyopaque, options: MessageDialogOptions) anyerror!MessageDialogResult {
         const self: *NullPlatform = @ptrCast(@alignCast(context.?));
         _ = options;
         self.message_dialog_count += 1;
+        try self.runDialogLoop();
         return self.message_dialog_result;
     }
 

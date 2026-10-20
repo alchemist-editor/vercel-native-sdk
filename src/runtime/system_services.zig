@@ -72,16 +72,22 @@ pub fn RuntimeSystemServices(comptime Runtime: type) type {
 
         pub fn showOpenDialog(self: *Runtime, options: platform.OpenDialogOptions, buffer: []u8) anyerror!platform.OpenDialogResult {
             try admission.open(self.system_admission_policy, options, buffer);
+            self.system_dialog_depth += 1;
+            defer self.system_dialog_depth -= 1;
             return self.options.platform.services.showOpenDialog(options, buffer);
         }
 
         pub fn showSaveDialog(self: *Runtime, options: platform.SaveDialogOptions, buffer: []u8) anyerror!?[]const u8 {
             try admission.save(self.system_admission_policy, options, buffer);
+            self.system_dialog_depth += 1;
+            defer self.system_dialog_depth -= 1;
             return self.options.platform.services.showSaveDialog(options, buffer);
         }
 
         pub fn showMessageDialog(self: *Runtime, options: platform.MessageDialogOptions) anyerror!platform.MessageDialogResult {
             try admission.message(self.system_admission_policy, options);
+            self.system_dialog_depth += 1;
+            defer self.system_dialog_depth -= 1;
             return self.options.platform.services.showMessageDialog(options);
         }
 

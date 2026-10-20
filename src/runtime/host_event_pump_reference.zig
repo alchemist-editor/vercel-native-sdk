@@ -10,6 +10,9 @@ pub const HostEventPump = struct {
     const max_bytes = 4 * 1024 * 1024;
     allocator: std.mem.Allocator,
     active: bool = false,
+    /// A system dialog is running inside the active dispatch (the runtime
+    /// sets this per callback from its dialog depth); see `supersede`.
+    system_dialog: bool = false,
     pending: std.ArrayList(Pending) = .empty,
     head: usize = 0,
     count: usize = 0,
@@ -41,7 +44,41 @@ pub const HostEventPump = struct {
         return value;
     }
 
+    // A system dialog's modal loop keeps firing the host's repeating
+    // sources for as long as the dialog stays open: display-rate frames on
+    // every surface, repeating app timers, cross-thread wakes. Only the
+    // newest of each is worth delivering once it closes, so a repeat drops
+    // its queued predecessor and takes the tail itself, which bounds the
+    // queue however long the dialog runs. Everything else keeps its order.
+    fn supersede(self: *HostEventPump, event: platform.Event) void {
+        for (self.pending.items[self.head..], self.head..) |pending, index| {
+            if (!repeats(pending.event, event)) continue;
+            var superseded = self.pending.orderedRemove(index);
+            self.count -= 1;
+            self.bytes -= superseded.bytes;
+            superseded.arena.deinit();
+            if (self.count == 0) {
+                self.pending.clearRetainingCapacity();
+                self.head = 0;
+            }
+            return;
+        }
+    }
+
+    fn repeats(queued: platform.Event, event: platform.Event) bool {
+        return switch (event) {
+            .frame_requested => queued == .frame_requested,
+            .wake => queued == .wake,
+            .timer => |timer| queued == .timer and queued.timer.id == timer.id,
+            .gpu_surface_frame => |frame| queued == .gpu_surface_frame and
+                queued.gpu_surface_frame.window_id == frame.window_id and
+                std.mem.eql(u8, queued.gpu_surface_frame.label, frame.label),
+            else => false,
+        };
+    }
+
     fn enqueue(self: *HostEventPump, event: platform.Event) !void {
+        if (self.system_dialog) self.supersede(event);
         // A modal host service can keep requesting the same scheduling turn
         // while its caller is suspended. Adjacent requests carry no observed
         // payload and one turn satisfies them; keep every intervening event
@@ -117,6 +154,59 @@ pub const HostEventPump = struct {
         }
     }
 };
+
+test "a system dialog keeps only the newest repeat of each host source" {
+    const Probe = struct {
+        pump: HostEventPump = .{ .allocator = std.testing.allocator },
+        order: [8]std.meta.Tag(platform.Event) = undefined,
+        count: usize = 0,
+        timeline_frame: u64 = 0,
+        monitor_frame: u64 = 0,
+        timer_ticks: [2]usize = .{ 0, 0 },
+        fn receive(context: *anyopaque, event: platform.Event) !void {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            self.order[self.count] = event;
+            self.count += 1;
+            switch (event) {
+                // The dispatch that opened the dialog: its modal loop fires
+                // four queues' worth of display frames on two surfaces, two
+                // repeating timers, wakes and frame requests before closing.
+                .app_start => {
+                    self.pump.system_dialog = true;
+                    const last = HostEventPump.capacity * 4;
+                    for (0..last) |index| {
+                        if (index == 100) try self.pump.dispatch(self, receive, .{ .menu_command = .{ .name = "file.import" } });
+                        try self.pump.dispatch(self, receive, .{ .gpu_surface_frame = .{ .label = "timeline", .size = .init(10, 10), .frame_index = index } });
+                        try self.pump.dispatch(self, receive, .{ .gpu_surface_frame = .{ .label = "monitor", .size = .init(10, 10), .frame_index = index } });
+                        try self.pump.dispatch(self, receive, .{ .timer = .{ .id = 7 } });
+                        try self.pump.dispatch(self, receive, .{ .timer = .{ .id = 9 } });
+                        try self.pump.dispatch(self, receive, .wake);
+                        try self.pump.dispatch(self, receive, .frame_requested);
+                    }
+                    try std.testing.expectEqual(@as(usize, 7), self.pump.count);
+                    self.pump.system_dialog = false;
+                    try std.testing.expectEqual(@as(usize, 1), self.count);
+                },
+                .gpu_surface_frame => |frame| if (std.mem.eql(u8, frame.label, "timeline")) {
+                    self.timeline_frame = frame.frame_index;
+                } else {
+                    self.monitor_frame = frame.frame_index;
+                },
+                .timer => |timer| self.timer_ticks[if (timer.id == 7) 0 else 1] += 1,
+                else => {},
+            }
+        }
+    };
+    var probe: Probe = .{};
+    defer probe.pump.deinit();
+    try probe.pump.dispatch(&probe, Probe.receive, .app_start);
+    try std.testing.expectEqual(@as(usize, 8), probe.count);
+    try std.testing.expectEqualSlices(std.meta.Tag(platform.Event), &.{ .app_start, .menu_command, .gpu_surface_frame, .gpu_surface_frame, .timer, .timer, .wake, .frame_requested }, &probe.order);
+    try std.testing.expectEqual(@as(u64, HostEventPump.capacity * 4 - 1), probe.timeline_frame);
+    try std.testing.expectEqual(@as(u64, HostEventPump.capacity * 4 - 1), probe.monitor_frame);
+    try std.testing.expectEqual([2]usize{ 1, 1 }, probe.timer_ticks);
+    try std.testing.expectEqual(@as(usize, 0), probe.pump.bytes);
+}
 
 test "native callbacks coalesce adjacent scheduling requests during modal work" {
     const Probe = struct {

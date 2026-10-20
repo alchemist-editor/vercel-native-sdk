@@ -1243,3 +1243,50 @@ test "the dispatch-error ring owns its event name" {
     try std.testing.expectEqualStrings(name, errors[errors.len - 1].event());
     try std.testing.expectEqualStrings("OutOfMemory", errors[errors.len - 1].error_name);
 }
+
+test "a system dialog left open coalesces its modal loop instead of overflowing the host queue" {
+    // The dispatch that opens a dialog stays on the stack while the
+    // dialog's modal loop keeps firing the host's repeating sources. Four
+    // queues' worth of them per dialog must not fail the run with
+    // HostEventQueueFull; the newest of each arrives once the dispatch
+    // returns.
+    const TestApp = struct {
+        dialogs: usize = 0,
+        timers: usize = 0,
+        wakes: usize = 0,
+
+        fn app(self: *@This()) App {
+            return .{ .context = self, .name = "dialogs", .source = platform.WebViewSource.html("<h1>Dialogs</h1>"), .event_fn = event };
+        }
+
+        fn event(context: *anyopaque, runtime: *Runtime, event_value: Event) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            switch (event_value) {
+                .lifecycle => |lifecycle| if (lifecycle == .start) {
+                    var buffer: [256]u8 = undefined;
+                    _ = try runtime.showOpenDialog(.{ .title = "Import" }, &buffer);
+                    _ = try runtime.showSaveDialog(.{ .title = "Export" }, &buffer);
+                    _ = try runtime.showMessageDialog(.{ .title = "Done", .message = "Done" });
+                    self.dialogs += 3;
+                    try std.testing.expectEqual(@as(usize, 0), self.timers);
+                },
+                .timer => self.timers += 1,
+                .effects_wake => self.wakes += 1,
+                else => {},
+            }
+        }
+    };
+
+    const modal_loop = [_]platform.Event{ .{ .timer = .{ .id = 7 } }, .wake, .frame_requested };
+    const harness = try TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    harness.null_platform.dialog_events = &modal_loop;
+    harness.null_platform.dialog_event_rounds = 4 * 4096;
+    var app_state: TestApp = .{};
+    try harness.runtime.run(app_state.app());
+
+    try std.testing.expectEqual(@as(usize, 3), app_state.dialogs);
+    try std.testing.expectEqual(@as(usize, 1), app_state.timers);
+    try std.testing.expectEqual(@as(usize, 1), app_state.wakes);
+    try std.testing.expectEqual(@as(u32, 0), harness.runtime.system_dialog_depth);
+}

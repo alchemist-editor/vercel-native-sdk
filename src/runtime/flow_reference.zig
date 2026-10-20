@@ -681,6 +681,7 @@ pub fn RuntimeFlow(comptime Runtime: type) type {
 
         fn handlePlatformEvent(context: *anyopaque, event_value: platform.Event) anyerror!void {
             const run_context: *RunContext = @ptrCast(@alignCast(context));
+            run_context.host_events.system_dialog = run_context.runtime.system_dialog_depth != 0;
             try run_context.host_events.dispatch(context, dispatchHostEvent, event_value);
         }
 

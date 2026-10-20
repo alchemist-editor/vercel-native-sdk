@@ -323,6 +323,11 @@ pub const Runtime = struct {
     /// there) because their own deinit typically runs from a `defer` in
     /// main AFTER the runner has already destroyed platform and runtime.
     app_stop_delivered: bool = false,
+    /// System dialogs (open/save panels, message boxes) currently running.
+    /// A dialog runs modally inside the event dispatch that opened it, and
+    /// its modal loop keeps firing the host's repeating sources; the host
+    /// event pump coalesces those while this is nonzero.
+    system_dialog_depth: u32 = 0,
     started_timestamp_ns: u64 = 0,
     timestamp_ns: i128 = 0,
     frame_index: u64 = 0,
