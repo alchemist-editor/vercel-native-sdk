@@ -213,6 +213,21 @@ static uint64_t NativeSdkRetainedFrameIntervalNanoseconds(NSScreen *screen) {
     return NativeSdkNanosecondsPerSecond / (uint64_t)framesPerSecond;
 }
 
+/* Depth of system dialogs (open/save panels, alerts) the host is running
+ * modally. Each one runs inside the event dispatch that asked for it, so
+ * the runtime holds every event emitted beneath it until the dialog
+ * returns; the run loop keeps firing common-mode timers meanwhile, and a
+ * dialog left open would queue display-rate frames and repeating app
+ * timers past the runtime's bound. While it is nonzero, surfaces stop
+ * presenting and emitting frames, and app timers and wakes are held and
+ * delivered once each when the last dialog closes (endSystemModal).
+ * Main thread only. */
+static NSUInteger NativeSdkSystemModalDepth = 0;
+
+static BOOL NativeSdkSystemModalActive(void) {
+    return NativeSdkSystemModalDepth > 0;
+}
+
 /* Pacing interval for logical frame completions while the window is
  * OCCLUDED: a ~1 Hz heartbeat instead of the display grid. An occluded
  * window never presents (renderFrame's short-circuit), so display-grid
@@ -994,6 +1009,11 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
  * block starts still gets its own turn. */
 @property(atomic, assign) BOOL crossThreadFramePending;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSTimer *> *appTimers;
+/* App timers that fired, and whether a wake arrived, while a system
+ * dialog ran (see NativeSdkSystemModalDepth): delivered once each, in
+ * first-fire order, when the last dialog closes. */
+@property(nonatomic, strong) NSMutableOrderedSet<NSNumber *> *appTimersHeldForSystemModal;
+@property(nonatomic, assign) BOOL wakeHeldForSystemModal;
 /* Notification userInfo persists with the delivered notification, so it
  * carries only a per-process token. Commands remain in this live host;
  * stale notifications from an earlier execution cannot dispatch into a
@@ -1344,6 +1364,8 @@ static int NativeSdkCredentialStatus(OSStatus status, int missingCode) {
 - (void)videoFrameTimerFired:(NSTimer *)timer;
 - (void)videoPumpFrame;
 - (void)wakeFromAnyThread;
+- (void)beginSystemModal;
+- (void)endSystemModal;
 - (void)scheduleBridgeFrames;
 - (void)emitFrame;
 - (void)emitShutdown;
@@ -7681,7 +7703,10 @@ static int NativeSdkRasterCacheAgeCompare(const void *a, const void *b) {
         if (strongSelf.frameEventEmissionGeneration != generation) return;
         if (tracing) strongSelf.frameEventTraceBlockStartNs = NativeSdkTimestampNanoseconds();
         strongSelf.frameEventEmissionScheduled = NO;
-        [strongSelf emitScheduledFrameEvent];
+        // Scheduled before a system dialog opened: park it. The display
+        // timer's first present after the dialog closes schedules a fresh
+        // emission (renderFrame).
+        if (!NativeSdkSystemModalActive()) [strongSelf emitScheduledFrameEvent];
         // The emission's engine dispatch re-arms the channel when more
         // frames are wanted; if it did not, the animation is over —
         // release the activity so the idle app naps again.
@@ -7731,6 +7756,11 @@ static int NativeSdkRasterCacheAgeCompare(const void *a, const void *b) {
 
 - (void)renderFrame {
     if (![self isAvailable] || self.hidden || self.bounds.size.width <= 0 || self.bounds.size.height <= 0) return;
+    // A system dialog is running inside an event dispatch: the glass keeps
+    // its last present, and each completion would only queue a frame event
+    // behind the dialog. The display timer keeps ticking, so the first tick
+    // after the dialog closes presents and re-arms the frame channel.
+    if (NativeSdkSystemModalActive()) return;
     [self updateDrawableSize];
 
     /* Occluded (or minimized, or hidden-app) windows never touch the
@@ -12606,6 +12636,10 @@ static NSString *NativeSdkSigningTeamIdentifier(NSString *bundlePath) {
     dispatch_async(dispatch_get_main_queue(), ^{
         NativeSdkAppKitHost *strongSelf = weakSelf;
         if (!strongSelf || strongSelf.didShutdown) return;
+        if (NativeSdkSystemModalActive()) {
+            strongSelf.wakeHeldForSystemModal = YES;
+            return;
+        }
         [strongSelf emitEvent:(native_sdk_appkit_event_t){
             .kind = NATIVE_SDK_APPKIT_EVENT_WAKE,
             .timestamp_ns = NativeSdkTimestampNanoseconds(),
@@ -12644,11 +12678,45 @@ static NSString *NativeSdkSigningTeamIdentifier(NSString *bundlePath) {
     if (![info[@"repeats"] boolValue] && self.appTimers[key] == timer) {
         [self.appTimers removeObjectForKey:key];
     }
+    if (NativeSdkSystemModalActive()) {
+        if (!self.appTimersHeldForSystemModal) self.appTimersHeldForSystemModal = [NSMutableOrderedSet orderedSet];
+        [self.appTimersHeldForSystemModal addObject:key];
+        return;
+    }
     [self emitEvent:(native_sdk_appkit_event_t){
         .kind = NATIVE_SDK_APPKIT_EVENT_TIMER,
         .timer_id = key.unsignedLongLongValue,
         .timestamp_ns = NativeSdkTimestampNanoseconds(),
     }];
+}
+
+- (void)beginSystemModal {
+    NativeSdkSystemModalDepth += 1;
+}
+
+/* The last dialog closed: deliver what it held, once each. The dialog's
+ * dispatch is still on the stack, so the runtime queues these behind it
+ * and drains them as soon as it returns; surfaces resume on their own. */
+- (void)endSystemModal {
+    if (NativeSdkSystemModalDepth == 0) return;
+    NativeSdkSystemModalDepth -= 1;
+    if (NativeSdkSystemModalDepth > 0 || self.didShutdown) return;
+    NSOrderedSet<NSNumber *> *timers = self.appTimersHeldForSystemModal;
+    self.appTimersHeldForSystemModal = nil;
+    for (NSNumber *key in timers) {
+        [self emitEvent:(native_sdk_appkit_event_t){
+            .kind = NATIVE_SDK_APPKIT_EVENT_TIMER,
+            .timer_id = key.unsignedLongLongValue,
+            .timestamp_ns = NativeSdkTimestampNanoseconds(),
+        }];
+    }
+    if (self.wakeHeldForSystemModal) {
+        self.wakeHeldForSystemModal = NO;
+        [self emitEvent:(native_sdk_appkit_event_t){
+            .kind = NATIVE_SDK_APPKIT_EVENT_WAKE,
+            .timestamp_ns = NativeSdkTimestampNanoseconds(),
+        }];
+    }
 }
 
 - (void)invalidateAppTimers {
@@ -15760,7 +15828,7 @@ static void NativeSdkConfigurePanelExtensions(NSSavePanel *panel, NSArray<NSStri
 }
 
 native_sdk_appkit_open_dialog_result_t native_sdk_appkit_show_open_dialog(native_sdk_appkit_host_t *host, const native_sdk_appkit_open_dialog_opts_t *opts, char *buffer, size_t buffer_len) {
-    (void)host;
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
     native_sdk_appkit_open_dialog_result_t result = { .count = 0, .bytes_written = 0 };
     @autoreleasepool {
         NSOpenPanel *panel = [NSOpenPanel openPanel];
@@ -15776,7 +15844,10 @@ native_sdk_appkit_open_dialog_result_t native_sdk_appkit_show_open_dialog(native
         panel.allowsMultipleSelection = opts->allow_multiple != 0;
         NativeSdkConfigurePanelExtensions(panel, NativeSdkParseExtensions(opts->extensions, opts->extensions_len));
 
-        if ([panel runModal] != NSModalResponseOK) return result;
+        [object beginSystemModal];
+        const NSModalResponse response = [panel runModal];
+        [object endSystemModal];
+        if (response != NSModalResponseOK) return result;
 
         size_t offset = 0;
         BOOL overflow = NO;
@@ -15800,7 +15871,7 @@ native_sdk_appkit_open_dialog_result_t native_sdk_appkit_show_open_dialog(native
 }
 
 size_t native_sdk_appkit_show_save_dialog(native_sdk_appkit_host_t *host, const native_sdk_appkit_save_dialog_opts_t *opts, char *buffer, size_t buffer_len) {
-    (void)host;
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
     @autoreleasepool {
         NSSavePanel *panel = [NSSavePanel savePanel];
         if (opts->title && opts->title_len > 0) {
@@ -15815,7 +15886,10 @@ size_t native_sdk_appkit_show_save_dialog(native_sdk_appkit_host_t *host, const 
         }
         NativeSdkConfigurePanelExtensions(panel, NativeSdkParseExtensions(opts->extensions, opts->extensions_len));
 
-        if ([panel runModal] != NSModalResponseOK) return 0;
+        [object beginSystemModal];
+        const NSModalResponse response = [panel runModal];
+        [object endSystemModal];
+        if (response != NSModalResponseOK) return 0;
 
         NSString *path = panel.URL.path;
         NSData *data = [path dataUsingEncoding:NSUTF8StringEncoding];
@@ -15828,7 +15902,7 @@ size_t native_sdk_appkit_show_save_dialog(native_sdk_appkit_host_t *host, const 
 }
 
 int native_sdk_appkit_show_message_dialog(native_sdk_appkit_host_t *host, const native_sdk_appkit_message_dialog_opts_t *opts) {
-    (void)host;
+    NativeSdkAppKitHost *object = (__bridge NativeSdkAppKitHost *)host;
     @autoreleasepool {
         NSAlert *alert = [[NSAlert alloc] init];
         switch (opts->style) {
@@ -15862,7 +15936,9 @@ int native_sdk_appkit_show_message_dialog(native_sdk_appkit_host_t *host, const 
             [alert addButtonWithTitle:[[NSString alloc] initWithBytes:opts->tertiary_button length:opts->tertiary_button_len encoding:NSUTF8StringEncoding]];
         }
 
+        [object beginSystemModal];
         NSModalResponse response = [alert runModal];
+        [object endSystemModal];
         if (response == NSAlertFirstButtonReturn) return 0;
         if (response == NSAlertSecondButtonReturn) return 1;
         return 2;
